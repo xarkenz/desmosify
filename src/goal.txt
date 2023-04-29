@@ -1,0 +1,64 @@
+// This block contains the stuff not hidden in folders
+public {
+    "Welcome to the maze generator!",
+    "Press reset to clear the screen:",
+    reset(),
+    "Press generate to generate a new maze:",
+    generate(10, 10),
+}
+
+ticker {
+    step(),
+}
+
+// Constants exist only at compile-time
+// TODO: enums would be cool
+const STATE_IDLE = 0;
+const STATE_GENERATING = 1;
+const MAZE_WALL = 0;
+const MAZE_AIR = 1;
+
+var state: int = 0;
+var maze_w: int = 0;
+var maze_h: int = 0;
+var grid: [ipoint] = [];
+var maze: [int] = [];
+var gen_stack: [ipoint] = [];
+
+let gen_pos = gen_stack.last;
+let gen_options = []; // TODO
+let gen_dir = (0, 0); // TODO
+
+let grid_list(width: int, height: int) = [
+    (x, y)
+    for x in 0..width
+    for y in 0..height
+];
+
+action reset() {
+    state := STATE_IDLE,
+    maze_w := 0,
+    maze_h := 0,
+    grid := [],
+    maze := [],
+}
+
+action generate(w: int, h: int) {
+    state := STATE_GENERATING,
+    maze_w := 2 * w + 1,
+    maze_h := 2 * h + 1,
+    grid := grid_list(2 * w + 1, 2 * h + 1),
+    maze := [((x, y) == (1, 2*h - 1) || (x, y) == (2*w, 1) ? MAZE_AIR : MAZE_WALL) for x in 0..=2*w for y in 0..=2*h],
+    gen_stack := [(-1, 2*h - 1), (1, 2*h - 1)],
+}
+
+action step() {
+    if state == STATE_GENERATING && gen_stack.length > 1: {
+        if gen_options.length > 0: {
+            maze := grid == gen_pos + gen_dir || grid == gen_pos + 2*gen_dir ? MAZE_AIR : maze,
+            gen_stack.push(gen_pos + 2 * gen_dir),
+        } else: {
+            gen_stack.pop(),
+        },
+    },
+}
