@@ -1,8 +1,16 @@
 [package]
-name = "my-project"
+name = "desmosify-test"
 version = "0.1.0"
-authors = ["runner"]
+authors = ["xarkenz"]
 edition = "2021"
+
+[lib]
+name = "desmosify"
+path = "src/desmosify/lib.rs"
+
+[[bin]]
+name = "desmosify-test"
+path = "src/desmosify-test/main.rs"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 

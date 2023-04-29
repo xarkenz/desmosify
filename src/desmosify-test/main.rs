@@ -1,6 +1,6 @@
 #![allow(dead_code)]
 
-pub mod desmosify;
+use desmosify;
 
 fn main() {
     let code = include_str!("goal.txt");
@@ -17,5 +17,5 @@ fn main() {
             return;
         }
     };
-    println!("{definitions:#?}");
+    println!("{definitions:?}");
 }
