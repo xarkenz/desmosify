@@ -1,3 +1,4 @@
+// FIXME: the syntax has changed
 // This block contains the stuff not hidden in folders
 public {
     "Welcome to the maze generator!",

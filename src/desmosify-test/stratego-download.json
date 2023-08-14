@@ -1,0 +1,1470 @@
+{
+  "version": 10,
+  "randomSeed": "931b5c36b85eeb7a6436178d5292af77",
+  "graph": {
+    "viewport": {
+      "xmin": -10,
+      "ymin": -10.881474103585658,
+      "xmax": 10,
+      "ymax": 10.881474103585658
+    },
+    "showGrid": false,
+    "showXAxis": false,
+    "showYAxis": false,
+    "userLockedViewport": true,
+    "product": "geometry-calculator"
+  },
+  "expressions": {
+    "list": [
+      {
+        "type": "folder",
+        "id": "**dcg_geo_folder**",
+        "title": "geometry",
+        "secret": true
+      },
+      {
+        "type": "expression",
+        "id": "110",
+        "color": "#000000",
+        "latex": "A_{reset}"
+      },
+      {
+        "type": "text",
+        "id": "233",
+        "text": "Controls:"
+      },
+      {
+        "type": "expression",
+        "id": "215",
+        "color": "#c74440",
+        "latex": "A_{startTurn}"
+      },
+      {
+        "type": "expression",
+        "id": "111",
+        "color": "#c74440",
+        "latex": "A_{endTurn}"
+      },
+      {
+        "type": "expression",
+        "id": "231",
+        "color": "#2d70b3"
+      },
+      {
+        "type": "folder",
+        "id": "228",
+        "title": "config",
+        "collapsed": true
+      },
+      {
+        "type": "expression",
+        "id": "1",
+        "folderId": "228",
+        "color": "#c74440",
+        "latex": "R_{border}=1",
+        "slider": {
+          "hardMin": true,
+          "hardMax": true,
+          "min": "0",
+          "max": "5",
+          "step": "0.25"
+        }
+      },
+      {
+        "type": "expression",
+        "id": "60",
+        "folderId": "228",
+        "color": "#000000",
+        "latex": "R_{pieceSize}=0.75",
+        "slider": {
+          "hardMin": true,
+          "hardMax": true,
+          "min": "0",
+          "max": "1",
+          "step": "0.05"
+        }
+      },
+      {
+        "type": "folder",
+        "id": "230",
+        "title": "actions",
+        "hidden": true,
+        "collapsed": true
+      },
+      {
+        "type": "expression",
+        "id": "79",
+        "folderId": "230",
+        "color": "#c74440",
+        "latex": "A_{reset}=N_{mode}\\to E_{setupMode},N_{turn}\\to E_{red},T_{turnAnim}\\to1,T_{revealAnim}\\to1,T_{turnInfoAnim}\\to6,N_{turnState}\\to E_{beforeTurn},I_{lastMove0}\\to0,I_{lastMove1}\\to0,N_{lastCaptured}\\to0,L_{pieces}\\to0\\cdot\\left[1...\\operatorname{count}\\left(L_{grid}\\right)\\right],L_{globalReveal}\\to0\\cdot\\left[1...\\operatorname{count}\\left(L_{grid}\\right)\\right]"
+      },
+      {
+        "type": "expression",
+        "id": "216",
+        "folderId": "230",
+        "color": "#2d70b3",
+        "latex": "A_{startTurn}=\\left\\{N_{turnState}=E_{beforeTurn}:\\left(N_{turnState}\\to E_{duringTurn},T_{revealAnim}\\to0\\right)\\right\\}"
+      },
+      {
+        "type": "expression",
+        "id": "56",
+        "folderId": "230",
+        "color": "#c74440",
+        "latex": "A_{endTurn}=\\left\\{B_{turnIsOver}=1:\\left(N_{turn}\\to N_{nextTurn},N_{turnState}\\to E_{beforeTurn},\\left\\{N_{mode}=E_{setupMode}:\\left\\{N_{turn}=E_{blue}:N_{mode}\\to E_{playMode}\\right\\}\\right\\},T_{turnAnim}\\to0,T_{revealAnim}\\to1,T_{turnInfoAnim}\\to\\max\\left(T_{turnInfoAnim},5.5\\right)\\right)\\right\\}"
+      },
+      {
+        "type": "expression",
+        "id": "88",
+        "folderId": "230",
+        "color": "#c74440",
+        "latex": "A_{cyclePiece}\\left(i\\right)=L_{pieces}\\to L_{poke}\\left(L_{pieces},i,\\left\\{\\max\\left(\\operatorname{join}\\left(L_{cyclablePieces},L_{pieces}\\left[i\\right]\\right)\\right)=L_{pieces}\\left[i\\right]:0,\\min\\left(L_{cyclablePieces}\\left[L_{cyclablePieces}>L_{pieces}\\left[i\\right]\\right]\\right)\\right\\}\\right),\\left\\{\\left\\{L_{pieces}\\left[i\\right]=0\\right\\}\\left\\{\\operatorname{total}\\left(L_{pieceCounts}\\left[N_{pieceColor}\\left(\\left[1...24\\right]\\right)=N_{turn}\\right]\\right)=39\\right\\}=1:T_{turnInfoAnim}\\to0\\right\\}"
+      },
+      {
+        "type": "expression",
+        "id": "99",
+        "folderId": "230",
+        "color": "#2d70b3",
+        "latex": "A_{clickPiece}\\left(i\\right)=\\left\\{N_{pieceColor}\\left(L_{pieces}\\left[i\\right]\\right)=N_{turn}:\\left\\{N_{mode}=E_{setupMode}:A_{cyclePiece}\\left(i\\right),N_{mode}=E_{playMode}:\\left\\{N_{turnState}=E_{duringTurn}:I_{selectedPiece}\\to\\left\\{I_{selectedPiece}=i:0,i\\right\\}\\right\\}\\right\\},A_{movePiece}\\left(\\max\\left(\\left\\{L_{possibleMoves}=i:\\left[1...\\operatorname{count}\\left(L_{possibleMoves}\\right)\\right],0\\right\\}\\right)\\right)\\right\\}"
+      },
+      {
+        "type": "expression",
+        "id": "139",
+        "folderId": "230",
+        "color": "#2d70b3",
+        "latex": "A_{movePiece}\\left(m\\right)=\\left\\{m>0:\\left(N_{turnState}\\to E_{afterTurn},T_{turnInfoAnim}\\to0,I_{lastMove0}\\to I_{selectedPiece},I_{lastMove1}\\to L_{possibleMoves}\\left[m\\right],N_{lastCaptured}\\to N_{capturedPieceAfterMove}\\left(I_{selectedPiece},L_{possibleMoves}\\left[m\\right]\\right),L_{pieces}\\to L_{poke}\\left(L_{poke}\\left(L_{pieces},L_{possibleMoves}\\left[m\\right],N_{piece1AfterMove}\\left(I_{selectedPiece},L_{possibleMoves}\\left[m\\right]\\right)\\right),I_{selectedPiece},N_{piece0AfterMove}\\left(I_{selectedPiece},L_{possibleMoves}\\left[m\\right]\\right)\\right),L_{globalReveal}\\to L_{poke}\\left(L_{poke}\\left(L_{globalReveal},L_{possibleMoves}\\left[m\\right],B_{reveal1AfterMove}\\left(I_{selectedPiece},L_{possibleMoves}\\left[m\\right]\\right)\\right),I_{selectedPiece},B_{reveal0AfterMove}\\left(I_{selectedPiece},L_{possibleMoves}\\left[m\\right]\\right)\\right),\\left\\{N_{eraseColor}\\left(L_{pieces}\\left[L_{possibleMoves}\\left[m\\right]\\right]\\right)=1:N_{mode}\\to\\left\\{N_{turn}=E_{red}:E_{redWinMode},N_{turn}=E_{blue}:E_{blueWinMode},N_{mode}\\right\\}\\right\\},I_{selectedPiece}\\to0\\right)\\right\\}"
+      },
+      {
+        "type": "folder",
+        "id": "165",
+        "title": "enums",
+        "hidden": true,
+        "collapsed": true
+      },
+      {
+        "type": "text",
+        "id": "169",
+        "folderId": "165",
+        "text": "Player"
+      },
+      {
+        "type": "expression",
+        "id": "50",
+        "folderId": "165",
+        "color": "#2d70b3",
+        "latex": "E_{red}=0",
+        "slider": {
+          "hardMin": true,
+          "hardMax": true,
+          "min": "0",
+          "max": "0"
+        }
+      },
+      {
+        "type": "expression",
+        "id": "51",
+        "folderId": "165",
+        "color": "#388c46",
+        "latex": "E_{blue}=1",
+        "slider": {
+          "hardMin": true,
+          "hardMax": true,
+          "min": "1",
+          "max": "1"
+        }
+      },
+      {
+        "type": "text",
+        "id": "167",
+        "folderId": "165",
+        "text": "Mode"
+      },
+      {
+        "type": "expression",
+        "id": "142",
+        "folderId": "165",
+        "color": "#388c46",
+        "latex": "E_{setupMode}=0",
+        "slider": {
+          "hardMin": true,
+          "hardMax": true,
+          "min": "0",
+          "max": "0"
+        }
+      },
+      {
+        "type": "expression",
+        "id": "143",
+        "folderId": "165",
+        "color": "#6042a6",
+        "latex": "E_{playMode}=1",
+        "slider": {
+          "hardMin": true,
+          "hardMax": true,
+          "min": "1",
+          "max": "1"
+        }
+      },
+      {
+        "type": "expression",
+        "id": "144",
+        "folderId": "165",
+        "color": "#000000",
+        "latex": "E_{redWinMode}=2",
+        "slider": {
+          "hardMin": true,
+          "hardMax": true,
+          "min": "2",
+          "max": "2"
+        }
+      },
+      {
+        "type": "expression",
+        "id": "145",
+        "folderId": "165",
+        "color": "#c74440",
+        "latex": "E_{blueWinMode}=3",
+        "slider": {
+          "hardMin": true,
+          "hardMax": true,
+          "min": "3",
+          "max": "3"
+        }
+      },
+      {
+        "type": "text",
+        "id": "171",
+        "folderId": "165",
+        "text": "Outcome"
+      },
+      {
+        "type": "expression",
+        "id": "133",
+        "folderId": "165",
+        "color": "#c74440",
+        "latex": "E_{captures}=0",
+        "slider": {
+          "hardMin": true,
+          "hardMax": true,
+          "min": "0",
+          "max": "0"
+        }
+      },
+      {
+        "type": "expression",
+        "id": "134",
+        "folderId": "165",
+        "color": "#2d70b3",
+        "latex": "E_{getsCaptured}=1",
+        "slider": {
+          "hardMin": true,
+          "hardMax": true,
+          "min": "1",
+          "max": "1"
+        }
+      },
+      {
+        "type": "expression",
+        "id": "135",
+        "folderId": "165",
+        "color": "#388c46",
+        "latex": "E_{bothCaptured}=2",
+        "slider": {
+          "hardMin": true,
+          "hardMax": true,
+          "min": "2",
+          "max": "2"
+        }
+      },
+      {
+        "type": "expression",
+        "id": "137",
+        "folderId": "165",
+        "color": "#000000",
+        "latex": "E_{getsExploded}=3",
+        "slider": {
+          "hardMin": true,
+          "hardMax": true,
+          "min": "3",
+          "max": "3"
+        }
+      },
+      {
+        "type": "text",
+        "id": "218",
+        "folderId": "165",
+        "text": "Turn State"
+      },
+      {
+        "type": "expression",
+        "id": "219",
+        "folderId": "165",
+        "color": "#6042a6",
+        "latex": "E_{beforeTurn}=0",
+        "slider": {
+          "hardMin": true,
+          "hardMax": true,
+          "min": "0",
+          "max": "0"
+        }
+      },
+      {
+        "type": "expression",
+        "id": "220",
+        "folderId": "165",
+        "color": "#000000",
+        "latex": "E_{duringTurn}=1",
+        "slider": {
+          "hardMin": true,
+          "hardMax": true,
+          "min": "1",
+          "max": "1"
+        }
+      },
+      {
+        "type": "expression",
+        "id": "221",
+        "folderId": "165",
+        "color": "#c74440",
+        "latex": "E_{afterTurn}=2",
+        "slider": {
+          "hardMin": true,
+          "hardMax": true,
+          "min": "2",
+          "max": "2"
+        }
+      },
+      {
+        "type": "folder",
+        "id": "235",
+        "title": "state",
+        "hidden": true,
+        "collapsed": true
+      },
+      {
+        "type": "expression",
+        "id": "86",
+        "folderId": "235",
+        "color": "#6042a6",
+        "latex": "N_{mode}=1",
+        "slider": {
+          "hardMin": true,
+          "hardMax": true,
+          "min": "E_{setupMode}",
+          "max": "E_{blueWinMode}",
+          "step": "1"
+        }
+      },
+      {
+        "type": "expression",
+        "id": "49",
+        "folderId": "235",
+        "color": "#c74440",
+        "latex": "N_{turn}=0",
+        "slider": {
+          "hardMin": true,
+          "hardMax": true,
+          "min": "E_{red}",
+          "max": "E_{blue}",
+          "step": "1"
+        }
+      },
+      {
+        "type": "expression",
+        "id": "179",
+        "folderId": "235",
+        "color": "#6042a6",
+        "latex": "N_{turnState}=0",
+        "slider": {
+          "hardMin": true,
+          "hardMax": true,
+          "min": "E_{beforeTurn}",
+          "max": "E_{afterTurn}",
+          "step": "1"
+        }
+      },
+      {
+        "type": "expression",
+        "id": "121",
+        "folderId": "235",
+        "color": "#6042a6",
+        "latex": "I_{selectedPiece}=0",
+        "slider": {
+          "hardMin": true,
+          "hardMax": true,
+          "min": "0",
+          "max": "\\operatorname{count}\\left(L_{grid}\\right)",
+          "step": "1"
+        }
+      },
+      {
+        "type": "expression",
+        "id": "74",
+        "folderId": "235",
+        "color": "#c74440",
+        "latex": "I_{lastMove0}=71",
+        "hidden": true,
+        "slider": {
+          "hardMin": true,
+          "hardMax": true,
+          "min": "0",
+          "max": "\\operatorname{count}\\left(L_{grid}\\right)",
+          "step": "1"
+        }
+      },
+      {
+        "type": "expression",
+        "id": "75",
+        "folderId": "235",
+        "color": "#2d70b3",
+        "latex": "I_{lastMove1}=61",
+        "hidden": true,
+        "slider": {
+          "hardMin": true,
+          "hardMax": true,
+          "min": "0",
+          "max": "\\operatorname{count}\\left(L_{grid}\\right)",
+          "step": "1"
+        }
+      },
+      {
+        "type": "expression",
+        "id": "211",
+        "folderId": "235",
+        "color": "#388c46",
+        "latex": "N_{lastCaptured}=0",
+        "slider": {
+          "hardMin": true,
+          "hardMax": true,
+          "min": "0",
+          "max": "\\operatorname{count}\\left(L_{maxPieces}\\right)",
+          "step": "1"
+        }
+      },
+      {
+        "type": "expression",
+        "id": "17",
+        "folderId": "235",
+        "color": "#388c46",
+        "latex": "L_{pieces}=\\left[2,7,6,2,7,7,1,2,7,2,8,4,8,12,5,11,9,4,8,8,10,6,2,4,3,5,4,6,10,2,0,0,0,4,0,0,6,9,0,5,5,0,0,0,0,0,0,0,4,0,0,0,0,0,0,0,0,0,0,0,17,9,17,14,0,14,14,14,14,13,0,17,0,17,19,16,16,16,16,16,20,19,19,19,0,18,18,18,18,17,24,23,22,22,21,21,21,20,20,20\\right]"
+      },
+      {
+        "type": "expression",
+        "id": "116",
+        "folderId": "235",
+        "color": "#000000",
+        "latex": "L_{globalReveal}=\\left[0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1,0,0,0,1,0,0,0,0,0,0,0,0,1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0\\right]"
+      },
+      {
+        "type": "folder",
+        "id": "237",
+        "title": "logic",
+        "hidden": true,
+        "collapsed": true
+      },
+      {
+        "type": "expression",
+        "id": "98",
+        "folderId": "237",
+        "color": "#c74440",
+        "latex": "L_{poke}\\left(l,i,x\\right)=\\left\\{\\left[1...\\operatorname{count}\\left(l\\right)\\right]=i:x,l\\right\\}"
+      },
+      {
+        "type": "expression",
+        "id": "9",
+        "folderId": "237",
+        "color": "#c74440",
+        "latex": "N_{boardSize}=10",
+        "slider": {
+          "hardMin": true,
+          "hardMax": true,
+          "min": "10",
+          "step": "1"
+        }
+      },
+      {
+        "type": "expression",
+        "id": "89",
+        "folderId": "237",
+        "color": "#2d70b3",
+        "latex": "L_{maxPieces}=\\left[1,6,1,8,5,4,4,4,3,2,1,1,1,6,1,8,5,4,4,4,3,2,1,1\\right]"
+      },
+      {
+        "type": "expression",
+        "id": "4",
+        "folderId": "237",
+        "color": "#6042a6",
+        "latex": "L_{grid}=\\left[\\left(x,y\\right)\\operatorname{for}x=\\left[0...N_{boardSize}-1\\right],y=\\left[0...N_{boardSize}-1\\right]\\right]",
+        "hidden": true
+      },
+      {
+        "type": "expression",
+        "id": "97",
+        "folderId": "237",
+        "color": "#000000",
+        "latex": "N_{nextTurn}=\\left\\{N_{turn}=E_{red}:E_{blue},N_{turn}=E_{blue}:E_{red}\\right\\}"
+      },
+      {
+        "type": "expression",
+        "id": "109",
+        "folderId": "237",
+        "color": "#6042a6",
+        "latex": "N_{pieceColor}\\left(n\\right)=\\left\\{0<n\\le12:E_{red},12<n\\le24:E_{blue}\\right\\}",
+        "hidden": true
+      },
+      {
+        "type": "expression",
+        "id": "136",
+        "folderId": "237",
+        "color": "#6042a6",
+        "latex": "N_{eraseColor}\\left(n\\right)=\\left\\{n=0:0,\\operatorname{mod}\\left(n-1,12\\right)+1\\right\\}",
+        "hidden": true
+      },
+      {
+        "type": "expression",
+        "id": "122",
+        "folderId": "237",
+        "color": "#000000",
+        "latex": "B_{pieceIsFixed}\\left(n\\right)=\\left\\{n=1,n=2,n=13,n=14,0\\right\\}",
+        "hidden": true
+      },
+      {
+        "type": "expression",
+        "id": "93",
+        "folderId": "237",
+        "color": "#c74440",
+        "latex": "L_{pieceCounts}=\\left[\\operatorname{count}\\left(L_{pieces}\\left[L_{pieces}=n\\right]\\right)\\operatorname{for}n=\\left[1...24\\right]\\right]"
+      },
+      {
+        "type": "expression",
+        "id": "96",
+        "folderId": "237",
+        "color": "#6042a6",
+        "latex": "L_{cyclablePieces}=\\left[1...24\\right]\\left[\\left\\{L_{pieceCounts}<L_{maxPieces}\\right\\}\\left\\{N_{pieceColor}\\left(\\left[1...24\\right]\\right)=N_{turn}\\right\\}=1\\right]"
+      },
+      {
+        "type": "expression",
+        "id": "113",
+        "folderId": "237",
+        "color": "#388c46",
+        "latex": "B_{turnIsOver}=\\left\\{N_{mode}=E_{setupMode}:\\left\\{\\operatorname{count}\\left(L_{cyclablePieces}\\right)=0,0\\right\\},N_{mode}=E_{playMode}:\\left\\{N_{turnState}=E_{afterTurn},0\\right\\},0\\right\\}"
+      },
+      {
+        "type": "expression",
+        "id": "124",
+        "folderId": "237",
+        "color": "#2d70b3",
+        "latex": "I_{offsetPoint}\\left(i,p\\right)=\\left\\{B_{isOutside}\\left(L_{grid}\\left[i\\right]+p\\right)=0:i+N_{boardSize}p.y+p.x,0\\right\\}"
+      },
+      {
+        "type": "expression",
+        "id": "127",
+        "folderId": "237",
+        "color": "#000000",
+        "latex": "L_{movesToCheck}=\\left\\{B_{pieceIsFixed}\\left(L_{pieces}\\left[I_{selectedPiece}\\right]\\right)=1:\\left[\\ \\right],I_{offsetPoint}\\left(I_{selectedPiece},\\left[\\left(1,0\\right),\\left(0,1\\right),\\left(-1,0\\right),\\left(0,-1\\right)\\right]\\right)\\right\\}"
+      },
+      {
+        "type": "expression",
+        "id": "123",
+        "folderId": "237",
+        "color": "#c74440",
+        "latex": "L_{possibleMoves}=\\left\\{I_{selectedPiece}>0:L_{movesToCheck}\\left[\\left\\{L_{movesToCheck}>0,0\\right\\}\\left\\{L_{movesToCheck}=I_{selectedPiece}:0,1\\right\\}\\left\\{N_{pieceColor}\\left(L_{pieces}\\left[L_{movesToCheck}\\right]\\right)=N_{turn}:0,1\\right\\}=1\\right],\\left[\\ \\right]\\right\\}",
+        "hidden": true
+      },
+      {
+        "type": "expression",
+        "id": "131",
+        "folderId": "237",
+        "color": "#6042a6",
+        "latex": "N_{moveOutcome}\\left(n_{0},n_{1}\\right)=\\left\\{n_{1}=0:E_{captures},n_{1}=2:\\left\\{n_{0}=5:E_{captures},E_{getsExploded}\\right\\},n_{0}=n_{1}:E_{bothCaptured},n_{0}=3:\\left\\{n_{1}=12:E_{captures},E_{getsCaptured}\\right\\},n_{0}>n_{1}:E_{captures},E_{getsCaptured}\\right\\}"
+      },
+      {
+        "type": "expression",
+        "id": "130",
+        "folderId": "237",
+        "color": "#388c46",
+        "latex": "N_{piece0AfterMove}\\left(i_{0},i_{1}\\right)=\\left\\{o=E_{captures}:0,o=E_{getsCaptured}:L_{pieces}\\left[i_{1}\\right],o=E_{bothCaptured}:0,o=E_{getsExploded}:0\\right\\}\\operatorname{with}o=N_{moveOutcome}\\left(N_{eraseColor}\\left(L_{pieces}\\left[i_{0}\\right]\\right),N_{eraseColor}\\left(L_{pieces}\\left[i_{1}\\right]\\right)\\right)"
+      },
+      {
+        "type": "expression",
+        "id": "132",
+        "folderId": "237",
+        "color": "#000000",
+        "latex": "N_{piece1AfterMove}\\left(i_{0},i_{1}\\right)=\\left\\{o=E_{captures}:L_{pieces}\\left[i_{0}\\right],o=E_{getsCaptured}:0,o=E_{bothCaptured}:0,o=E_{getsExploded}:L_{pieces}\\left[i_{1}\\right]\\right\\}\\operatorname{with}o=N_{moveOutcome}\\left(N_{eraseColor}\\left(L_{pieces}\\left[i_{0}\\right]\\right),N_{eraseColor}\\left(L_{pieces}\\left[i_{1}\\right]\\right)\\right)"
+      },
+      {
+        "type": "expression",
+        "id": "208",
+        "folderId": "237",
+        "color": "#000000",
+        "latex": "B_{reveal0AfterMove}\\left(i_{0},i_{1}\\right)=\\left\\{L_{pieces}\\left[i_{1}\\right]=0:0,\\left\\{o=E_{captures}:0,o=E_{getsCaptured}:1,o=E_{bothCaptured}:0,o=E_{getsExploded}:0\\right\\}\\operatorname{with}o=N_{moveOutcome}\\left(N_{eraseColor}\\left(L_{pieces}\\left[i_{0}\\right]\\right),N_{eraseColor}\\left(L_{pieces}\\left[i_{1}\\right]\\right)\\right)\\right\\}"
+      },
+      {
+        "type": "expression",
+        "id": "209",
+        "folderId": "237",
+        "color": "#c74440",
+        "latex": "B_{reveal1AfterMove}\\left(i_{0},i_{1}\\right)=\\left\\{L_{pieces}\\left[i_{1}\\right]=0:L_{globalReveal}\\left[i_{0}\\right],\\left\\{o=E_{captures}:1,o=E_{getsCaptured}:0,o=E_{bothCaptured}:0,o=E_{getsExploded}:1\\right\\}\\operatorname{with}o=N_{moveOutcome}\\left(N_{eraseColor}\\left(L_{pieces}\\left[i_{0}\\right]\\right),N_{eraseColor}\\left(L_{pieces}\\left[i_{1}\\right]\\right)\\right)\\right\\}"
+      },
+      {
+        "type": "expression",
+        "id": "214",
+        "folderId": "237",
+        "color": "#000000",
+        "latex": "N_{capturedPieceAfterMove}\\left(i_{0},i_{1}\\right)=\\left\\{o=E_{captures}:L_{pieces}\\left[i_{1}\\right],o=E_{getsCaptured}:L_{pieces}\\left[i_{0}\\right],o=E_{bothCaptured}:L_{pieces}\\left[i_{1}\\right],o=E_{getsExploded}:L_{pieces}\\left[i_{0}\\right]\\right\\}\\operatorname{with}o=N_{moveOutcome}\\left(N_{eraseColor}\\left(L_{pieces}\\left[i_{0}\\right]\\right),N_{eraseColor}\\left(L_{pieces}\\left[i_{1}\\right]\\right)\\right)"
+      },
+      {
+        "type": "expression",
+        "id": "73",
+        "folderId": "237",
+        "color": "#000000",
+        "latex": "B_{isOutside}\\left(p\\right)=\\left\\{p.x<0,p.x\\ge N_{boardSize},p.y<0,p.y\\ge N_{boardSize},\\left\\{p.x=2,p.x=3,p.x=6,p.x=7,0\\right\\}\\left\\{p.y=4,p.y=5,0\\right\\}=1,0\\right\\}"
+      },
+      {
+        "type": "folder",
+        "id": "119",
+        "title": "animations",
+        "hidden": true,
+        "collapsed": true
+      },
+      {
+        "type": "expression",
+        "id": "47",
+        "folderId": "119",
+        "color": "#2d70b3",
+        "latex": "T_{turnAnim}=45974.235",
+        "slider": {
+          "loopMode": "PLAY_INDEFINITELY",
+          "isPlaying": true,
+          "max": "46.715"
+        }
+      },
+      {
+        "type": "expression",
+        "id": "112",
+        "folderId": "119",
+        "color": "#2d70b3",
+        "latex": "T_{turnInfoAnim}=45979.735",
+        "slider": {
+          "loopMode": "PLAY_INDEFINITELY",
+          "isPlaying": true,
+          "max": "8226.52"
+        }
+      },
+      {
+        "type": "expression",
+        "id": "223",
+        "folderId": "119",
+        "color": "#2d70b3",
+        "latex": "T_{revealAnim}=45975.235",
+        "slider": {
+          "loopMode": "PLAY_INDEFINITELY",
+          "isPlaying": true,
+          "max": "8226.52"
+        }
+      },
+      {
+        "type": "expression",
+        "id": "108",
+        "folderId": "119",
+        "color": "#388c46",
+        "latex": "T_{linear}\\left(t\\right)=\\left\\{t\\le0:0,t\\le1:t,1\\right\\}",
+        "hidden": true
+      },
+      {
+        "type": "expression",
+        "id": "48",
+        "folderId": "119",
+        "color": "#388c46",
+        "latex": "T_{easeOut}\\left(t\\right)=\\left\\{t\\le0:0,t\\le1:1-\\left(t-1\\right)^{6},1\\right\\}",
+        "hidden": true
+      },
+      {
+        "type": "expression",
+        "id": "55",
+        "folderId": "119",
+        "color": "#000000",
+        "latex": "\\theta_{board}=\\pi\\left(N_{turn}+1-T_{easeOut}\\left(T_{turnAnim}\\right)\\right)"
+      },
+      {
+        "type": "expression",
+        "id": "107",
+        "folderId": "119",
+        "color": "#2d70b3",
+        "latex": "\\alpha_{label}\\left(n\\right)=\\operatorname{join}\\left(\\left\\{L_{globalReveal}=1:1,N_{pieceColor}\\left(L_{pieces}\\right)=N_{turn}:\\left\\{N_{turnState}=E_{beforeTurn}:0,T_{linear}\\left(T_{revealAnim}\\right)\\right\\},1-T_{linear}\\left(T_{turnAnim}\\right)\\right\\},0.6\\right)",
+        "hidden": true
+      },
+      {
+        "type": "expression",
+        "id": "100",
+        "folderId": "119",
+        "color": "#388c46",
+        "latex": "\\alpha_{message}\\left(t\\right)=\\left\\{t\\le0:0,t\\le0.5:2t,t\\le5.5:1,t\\le6:12-2t,0\\right\\}",
+        "hidden": true
+      },
+      {
+        "type": "expression",
+        "id": "101",
+        "folderId": "119",
+        "color": "#6042a6",
+        "latex": "\\alpha_{nextTurnMessage}=\\alpha_{message}\\left(T_{turnAnim}-1\\right)"
+      },
+      {
+        "type": "expression",
+        "id": "225",
+        "folderId": "119",
+        "color": "#388c46",
+        "latex": "\\alpha_{beforeTurnMessage}=T_{linear}\\left(2T_{turnAnim}-16\\right)\\left\\{N_{turnState}=E_{beforeTurn}:1,T_{linear}\\left(1-2T_{revealAnim}\\right)\\right\\}"
+      },
+      {
+        "type": "expression",
+        "id": "115",
+        "folderId": "119",
+        "color": "#6042a6",
+        "latex": "\\alpha_{turnInfoMessage}=\\alpha_{message}\\left(T_{turnInfoAnim}\\right)"
+      },
+      {
+        "type": "folder",
+        "id": "199",
+        "title": "colors",
+        "hidden": true,
+        "collapsed": true
+      },
+      {
+        "type": "expression",
+        "id": "226",
+        "folderId": "199",
+        "color": "#6042a6",
+        "latex": "C_{text}=\\operatorname{hsv}\\left(0,0,0.3\\right)"
+      },
+      {
+        "type": "expression",
+        "id": "57",
+        "folderId": "199",
+        "color": "#2d70b3",
+        "latex": "C_{grass}=\\operatorname{hsv}\\left(70,0.6,0.8\\right)"
+      },
+      {
+        "type": "expression",
+        "id": "58",
+        "folderId": "199",
+        "color": "#388c46",
+        "latex": "C_{water}=\\operatorname{hsv}\\left(190,0.3,0.8\\right)"
+      },
+      {
+        "type": "expression",
+        "id": "120",
+        "folderId": "199",
+        "color": "#388c46",
+        "latex": "C_{highlight}=\\operatorname{hsv}\\left(50,0.6,1\\right)"
+      },
+      {
+        "type": "expression",
+        "id": "80",
+        "folderId": "199",
+        "color": "#2d70b3",
+        "latex": "C_{grid}=\\operatorname{hsv}\\left(80,0.6,0.7\\right)"
+      },
+      {
+        "type": "expression",
+        "id": "11",
+        "folderId": "199",
+        "color": "#388c46",
+        "latex": "C_{board}=\\left\\{B_{isOutside}\\left(L_{grid}\\right)=1:C_{water},\\left[1...\\operatorname{count}\\left(L_{grid}\\right)\\right]=I_{selectedPiece}:C_{highlight},C_{grass}\\right\\}\\left[B_{isOutside}\\left(L_{grid}\\right)=0\\right]"
+      },
+      {
+        "type": "expression",
+        "id": "68",
+        "folderId": "199",
+        "color": "#388c46",
+        "latex": "C_{red}=\\operatorname{hsv}\\left(10,0.8,0.8\\right)"
+      },
+      {
+        "type": "text",
+        "id": "204",
+        "folderId": "199",
+        "text": "RGB: (204, 68, 41)"
+      },
+      {
+        "type": "expression",
+        "id": "69",
+        "folderId": "199",
+        "color": "#6042a6",
+        "latex": "C_{blue}=\\operatorname{hsv}\\left(200,0.8,0.6\\right)"
+      },
+      {
+        "type": "text",
+        "id": "206",
+        "folderId": "199",
+        "text": "RGB: (31, 112, 153)"
+      },
+      {
+        "type": "expression",
+        "id": "76",
+        "folderId": "199",
+        "color": "#388c46",
+        "latex": "C_{turn}=\\left\\{N_{turn}=E_{red}:\\left\\{T_{turnAnim}\\ge1:C_{red},\\operatorname{rgb}\\left(31\\left(1-T_{turnAnim}\\right)+204T_{turnAnim},112\\left(1-T_{turnAnim}\\right)+68T_{turnAnim},153\\left(1-T_{turnAnim}\\right)+41T_{turnAnim}\\right)\\right\\},N_{turn}=E_{blue}:\\left\\{T_{turnAnim}\\ge1:C_{blue},\\operatorname{rgb}\\left(204\\left(1-T_{turnAnim}\\right)+31T_{turnAnim},68\\left(1-T_{turnAnim}\\right)+112T_{turnAnim},41\\left(1-T_{turnAnim}\\right)+153T_{turnAnim}\\right)\\right\\}\\right\\}"
+      },
+      {
+        "type": "expression",
+        "id": "77",
+        "folderId": "199",
+        "color": "#6042a6",
+        "latex": "C_{lastMove}=\\left\\{N_{turn}=E_{red}:\\left\\{N_{turnState}=E_{afterTurn}:C_{red},C_{blue}\\right\\},N_{turn}=E_{blue}:\\left\\{N_{turnState}=E_{afterTurn}:C_{blue},C_{red}\\right\\}\\right\\}"
+      },
+      {
+        "type": "expression",
+        "id": "66",
+        "folderId": "199",
+        "color": "#c74440",
+        "latex": "C_{redLabel}=\\operatorname{hsv}\\left(45,0.9,0.85\\right)"
+      },
+      {
+        "type": "expression",
+        "id": "67",
+        "folderId": "199",
+        "color": "#2d70b3",
+        "latex": "C_{blueLabel}=\\operatorname{hsv}\\left(0,0,0.7\\right)"
+      },
+      {
+        "type": "folder",
+        "id": "240",
+        "title": "graphics",
+        "collapsed": true
+      },
+      {
+        "type": "expression",
+        "id": "19",
+        "folderId": "240",
+        "color": "#000000",
+        "latex": "P_{hide}=\\left(\\frac{0}{0},\\frac{0}{0}\\right)",
+        "hidden": true
+      },
+      {
+        "type": "expression",
+        "id": "64",
+        "folderId": "240",
+        "color": "#6042a6",
+        "latex": "R_{screenWidth}=20",
+        "slider": {
+          "hardMin": true,
+          "hardMax": true,
+          "min": "20",
+          "max": "20"
+        }
+      },
+      {
+        "type": "expression",
+        "id": "2",
+        "folderId": "240",
+        "color": "#2d70b3",
+        "latex": "R_{screenHeight}=R_{screenWidth}\\cdot\\frac{\\operatorname{height}}{\\operatorname{width}}"
+      },
+      {
+        "type": "expression",
+        "id": "63",
+        "folderId": "240",
+        "color": "#388c46",
+        "latex": "u_{nit}=\\frac{\\operatorname{width}}{R_{screenWidth}}"
+      },
+      {
+        "type": "expression",
+        "id": "10",
+        "folderId": "240",
+        "color": "#2d70b3",
+        "latex": "R_{viewSize}=\\min\\left(R_{screenHeight},R_{screenWidth}\\right)-2R_{border}"
+      },
+      {
+        "type": "expression",
+        "id": "65",
+        "folderId": "240",
+        "color": "#000000",
+        "latex": "R_{spaceSize}=\\frac{R_{viewSize}}{N_{boardSize}}"
+      },
+      {
+        "type": "expression",
+        "id": "3",
+        "folderId": "240",
+        "color": "#388c46",
+        "latex": "P_{view}\\left(p\\right)=\\operatorname{rotate}\\left(R_{viewSize}\\left(\\frac{p+\\left(\\frac{1}{2},\\frac{1}{2}\\right)}{N_{boardSize}}-\\left(\\frac{1}{2},\\frac{1}{2}\\right)\\right),\\left(0,0\\right),\\theta_{board}\\right)"
+      },
+      {
+        "type": "expression",
+        "id": "87",
+        "folderId": "240",
+        "color": "#000000",
+        "latex": "L_{viewGrid}=P_{view}\\left(L_{grid}\\right)",
+        "hidden": true
+      },
+      {
+        "type": "expression",
+        "id": "146",
+        "folderId": "240",
+        "color": "#2d70b3",
+        "latex": "\\operatorname{polygon}\\left(\\left(-\\frac{1}{2}R_{screenWidth},-\\frac{1}{2}R_{screenHeight}\\right),\\left(\\frac{1}{2}R_{screenWidth},-\\frac{1}{2}R_{screenHeight}\\right),\\left(\\frac{1}{2}R_{screenWidth},\\frac{1}{2}R_{screenHeight}\\right),\\left(-\\frac{1}{2}R_{screenWidth},\\frac{1}{2}R_{screenHeight}\\right)\\right)",
+        "fill": true,
+        "colorLatex": "C_{turn}",
+        "fillOpacity": "0.7",
+        "lineOpacity": "1",
+        "lineWidth": "20"
+      },
+      {
+        "type": "expression",
+        "id": "5",
+        "folderId": "240",
+        "color": "#000000",
+        "latex": "D_{board}=\\operatorname{polygon}\\left(P_{view}\\left(L_{grid}+\\left(-\\frac{1}{2},-\\frac{1}{2}\\right)\\right),P_{view}\\left(L_{grid}+\\left(\\frac{1}{2},-\\frac{1}{2}\\right)\\right),P_{view}\\left(L_{grid}+\\left(\\frac{1}{2},\\frac{1}{2}\\right)\\right),P_{view}\\left(L_{grid}+\\left(-\\frac{1}{2},\\frac{1}{2}\\right)\\right)\\right)\\left[B_{isOutside}\\left(L_{grid}\\right)=0\\right]",
+        "colorLatex": "C_{board}",
+        "fillOpacity": "1",
+        "lineOpacity": "1",
+        "lineWidth": "1"
+      },
+      {
+        "type": "expression",
+        "id": "81",
+        "folderId": "240",
+        "color": "#000000",
+        "latex": "D_{board}",
+        "fill": false,
+        "colorLatex": "C_{grid}",
+        "lineOpacity": "1",
+        "lineWidth": "2.5"
+      },
+      {
+        "type": "expression",
+        "id": "78",
+        "folderId": "240",
+        "color": "#000000",
+        "latex": "\\operatorname{segment}\\left(P_{view}\\left(L_{grid}\\left[I_{lastMove0}\\right]\\right),P_{view}\\left(L_{grid}\\left[I_{lastMove1}\\right]\\right)\\right)",
+        "colorLatex": "C_{lastMove}",
+        "lineOpacity": "0.3",
+        "lineWidth": "R_{pieceSize}R_{spaceSize}u_{nit}"
+      },
+      {
+        "type": "expression",
+        "id": "61",
+        "folderId": "240",
+        "color": "#c74440",
+        "latex": "L_{viewGrid}\\left\\{N_{pieceColor}\\left(L_{pieces}\\right)=E_{red}\\right\\}",
+        "colorLatex": "C_{red}",
+        "pointOpacity": "1",
+        "pointSize": "R_{pieceSize}R_{spaceSize}u_{nit}",
+        "clickableInfo": {
+          "enabled": true,
+          "latex": "A_{clickPiece}\\left(\\operatorname{index}\\right)"
+        }
+      },
+      {
+        "type": "expression",
+        "id": "70",
+        "folderId": "240",
+        "color": "#c74440",
+        "latex": "L_{viewGrid}\\left\\{N_{pieceColor}\\left(L_{pieces}\\right)=E_{blue}\\right\\}",
+        "colorLatex": "C_{blue}",
+        "pointOpacity": "1",
+        "pointSize": "R_{pieceSize}R_{spaceSize}u_{nit}",
+        "clickableInfo": {
+          "enabled": true,
+          "latex": "A_{clickPiece}\\left(\\operatorname{index}\\right)"
+        }
+      },
+      {
+        "type": "expression",
+        "id": "84",
+        "folderId": "240",
+        "color": "#c74440",
+        "latex": "L_{viewGrid}\\left\\{N_{mode}=E_{setupMode}\\right\\}\\left\\{L_{pieces}=0\\right\\}\\left\\{\\left\\{N_{turn}=E_{red}\\right\\}\\left\\{L_{grid}.y<4\\right\\}=1,\\left\\{N_{turn}=E_{blue}\\right\\}\\left\\{L_{grid}.y\\ge N_{boardSize}-4\\right\\}=1\\right\\}",
+        "dragMode": "NONE",
+        "colorLatex": "C_{turn}",
+        "pointOpacity": "0.5",
+        "pointSize": "0.5R_{pieceSize}R_{spaceSize}u_{nit}",
+        "clickableInfo": {
+          "enabled": true,
+          "latex": "A_{cyclePiece}\\left(\\operatorname{index}\\right)"
+        }
+      },
+      {
+        "type": "expression",
+        "id": "129",
+        "folderId": "240",
+        "color": "#2d70b3",
+        "latex": "L_{viewGrid}\\left[L_{possibleMoves}\\right]",
+        "dragMode": "NONE",
+        "colorLatex": "C_{highlight}",
+        "pointOpacity": "1",
+        "pointSize": "0.4R_{pieceSize}R_{spaceSize}u_{nit}",
+        "clickableInfo": {
+          "enabled": true,
+          "latex": "A_{movePiece}\\left(\\operatorname{index}\\right)"
+        }
+      },
+      {
+        "type": "expression",
+        "id": "16",
+        "folderId": "240",
+        "color": "#2d70b3",
+        "latex": "P_{label}\\left(n\\right)=\\operatorname{join}\\left(\\left\\{L_{pieces}=n:L_{viewGrid},P_{hide}\\right\\},\\left\\{N_{lastCaptured}=n:P_{view}\\left(\\frac{1}{2}\\left(L_{grid}\\left[I_{lastMove0}\\right]+L_{grid}\\left[I_{lastMove1}\\right]\\right)\\right),P_{hide}\\right\\}\\right)"
+      },
+      {
+        "type": "folder",
+        "id": "14",
+        "title": "labels",
+        "collapsed": true
+      },
+      {
+        "type": "expression",
+        "id": "15",
+        "folderId": "14",
+        "color": "#c74440",
+        "latex": "P_{label}\\left(1\\right)",
+        "showLabel": true,
+        "label": "🏳️",
+        "hidden": true,
+        "dragMode": "NONE",
+        "labelSize": "2",
+        "colorLatex": "C_{redLabel}",
+        "pointOpacity": "\\alpha_{label}\\left(1\\right)"
+      },
+      {
+        "type": "expression",
+        "id": "20",
+        "folderId": "14",
+        "color": "#c74440",
+        "latex": "P_{label}\\left(2\\right)",
+        "showLabel": true,
+        "label": "💣",
+        "hidden": true,
+        "points": false,
+        "dragMode": "NONE",
+        "labelSize": "2",
+        "colorLatex": "C_{redLabel}",
+        "pointOpacity": "\\alpha_{label}\\left(2\\right)"
+      },
+      {
+        "type": "expression",
+        "id": "21",
+        "folderId": "14",
+        "color": "#c74440",
+        "latex": "P_{label}\\left(3\\right)",
+        "showLabel": true,
+        "label": "`S`",
+        "hidden": true,
+        "dragMode": "NONE",
+        "labelSize": "2",
+        "colorLatex": "C_{redLabel}",
+        "pointOpacity": "\\alpha_{label}\\left(3\\right)"
+      },
+      {
+        "type": "expression",
+        "id": "22",
+        "folderId": "14",
+        "color": "#c74440",
+        "latex": "P_{label}\\left(4\\right)",
+        "showLabel": true,
+        "label": "`9`",
+        "hidden": true,
+        "points": false,
+        "dragMode": "NONE",
+        "labelSize": "2",
+        "colorLatex": "C_{redLabel}",
+        "pointOpacity": "\\alpha_{label}\\left(4\\right)"
+      },
+      {
+        "type": "expression",
+        "id": "23",
+        "folderId": "14",
+        "color": "#c74440",
+        "latex": "P_{label}\\left(5\\right)",
+        "showLabel": true,
+        "label": "`8`",
+        "hidden": true,
+        "points": false,
+        "dragMode": "NONE",
+        "labelSize": "2",
+        "colorLatex": "C_{redLabel}",
+        "pointOpacity": "\\alpha_{label}\\left(5\\right)"
+      },
+      {
+        "type": "expression",
+        "id": "24",
+        "folderId": "14",
+        "color": "#c74440",
+        "latex": "P_{label}\\left(6\\right)",
+        "showLabel": true,
+        "label": "`7`",
+        "hidden": true,
+        "points": false,
+        "dragMode": "NONE",
+        "labelSize": "2",
+        "colorLatex": "C_{redLabel}",
+        "pointOpacity": "\\alpha_{label}\\left(6\\right)"
+      },
+      {
+        "type": "expression",
+        "id": "25",
+        "folderId": "14",
+        "color": "#c74440",
+        "latex": "P_{label}\\left(7\\right)",
+        "showLabel": true,
+        "label": "`6`",
+        "hidden": true,
+        "points": false,
+        "dragMode": "NONE",
+        "labelSize": "2",
+        "colorLatex": "C_{redLabel}",
+        "pointOpacity": "\\alpha_{label}\\left(7\\right)"
+      },
+      {
+        "type": "expression",
+        "id": "26",
+        "folderId": "14",
+        "color": "#c74440",
+        "latex": "P_{label}\\left(8\\right)",
+        "showLabel": true,
+        "label": "`5`",
+        "hidden": true,
+        "points": false,
+        "dragMode": "NONE",
+        "labelSize": "2",
+        "colorLatex": "C_{redLabel}",
+        "pointOpacity": "\\alpha_{label}\\left(8\\right)"
+      },
+      {
+        "type": "expression",
+        "id": "27",
+        "folderId": "14",
+        "color": "#c74440",
+        "latex": "P_{label}\\left(9\\right)",
+        "showLabel": true,
+        "label": "`4`",
+        "hidden": true,
+        "points": false,
+        "dragMode": "NONE",
+        "labelSize": "2",
+        "colorLatex": "C_{redLabel}",
+        "pointOpacity": "\\alpha_{label}\\left(9\\right)"
+      },
+      {
+        "type": "expression",
+        "id": "28",
+        "folderId": "14",
+        "color": "#c74440",
+        "latex": "P_{label}\\left(10\\right)",
+        "showLabel": true,
+        "label": "`3`",
+        "hidden": true,
+        "points": false,
+        "dragMode": "NONE",
+        "labelSize": "2",
+        "colorLatex": "C_{redLabel}",
+        "pointOpacity": "\\alpha_{label}\\left(10\\right)"
+      },
+      {
+        "type": "expression",
+        "id": "29",
+        "folderId": "14",
+        "color": "#c74440",
+        "latex": "P_{label}\\left(11\\right)",
+        "showLabel": true,
+        "label": "`2`",
+        "hidden": true,
+        "points": false,
+        "dragMode": "NONE",
+        "labelSize": "2",
+        "colorLatex": "C_{redLabel}",
+        "pointOpacity": "\\alpha_{label}\\left(11\\right)"
+      },
+      {
+        "type": "expression",
+        "id": "30",
+        "folderId": "14",
+        "color": "#c74440",
+        "latex": "P_{label}\\left(12\\right)",
+        "showLabel": true,
+        "label": "`1`",
+        "hidden": true,
+        "points": false,
+        "dragMode": "NONE",
+        "labelSize": "2",
+        "colorLatex": "C_{redLabel}",
+        "pointOpacity": "\\alpha_{label}\\left(12\\right)"
+      },
+      {
+        "type": "expression",
+        "id": "31",
+        "folderId": "14",
+        "color": "#2d70b3",
+        "latex": "P_{label}\\left(13\\right)",
+        "showLabel": true,
+        "label": "🏳️",
+        "hidden": true,
+        "points": false,
+        "dragMode": "NONE",
+        "labelSize": "2",
+        "colorLatex": "C_{blueLabel}",
+        "pointOpacity": "\\alpha_{label}\\left(13\\right)"
+      },
+      {
+        "type": "expression",
+        "id": "32",
+        "folderId": "14",
+        "color": "#2d70b3",
+        "latex": "P_{label}\\left(14\\right)",
+        "showLabel": true,
+        "label": "💣",
+        "hidden": true,
+        "points": false,
+        "dragMode": "NONE",
+        "labelSize": "2",
+        "colorLatex": "C_{blueLabel}",
+        "pointOpacity": "\\alpha_{label}\\left(14\\right)"
+      },
+      {
+        "type": "expression",
+        "id": "33",
+        "folderId": "14",
+        "color": "#2d70b3",
+        "latex": "P_{label}\\left(15\\right)",
+        "showLabel": true,
+        "label": "`S`",
+        "hidden": true,
+        "points": false,
+        "dragMode": "NONE",
+        "labelSize": "2",
+        "colorLatex": "C_{blueLabel}",
+        "pointOpacity": "\\alpha_{label}\\left(15\\right)"
+      },
+      {
+        "type": "expression",
+        "id": "42",
+        "folderId": "14",
+        "color": "#2d70b3",
+        "latex": "P_{label}\\left(16\\right)",
+        "showLabel": true,
+        "label": "`9`",
+        "hidden": true,
+        "points": false,
+        "dragMode": "NONE",
+        "labelSize": "2",
+        "colorLatex": "C_{blueLabel}",
+        "pointOpacity": "\\alpha_{label}\\left(16\\right)"
+      },
+      {
+        "type": "expression",
+        "id": "41",
+        "folderId": "14",
+        "color": "#2d70b3",
+        "latex": "P_{label}\\left(17\\right)",
+        "showLabel": true,
+        "label": "`8`",
+        "hidden": true,
+        "points": false,
+        "dragMode": "NONE",
+        "labelSize": "2",
+        "colorLatex": "C_{blueLabel}",
+        "pointOpacity": "\\alpha_{label}\\left(17\\right)"
+      },
+      {
+        "type": "expression",
+        "id": "40",
+        "folderId": "14",
+        "color": "#2d70b3",
+        "latex": "P_{label}\\left(18\\right)",
+        "showLabel": true,
+        "label": "`7`",
+        "hidden": true,
+        "points": false,
+        "dragMode": "NONE",
+        "labelSize": "2",
+        "colorLatex": "C_{blueLabel}",
+        "pointOpacity": "\\alpha_{label}\\left(18\\right)"
+      },
+      {
+        "type": "expression",
+        "id": "39",
+        "folderId": "14",
+        "color": "#2d70b3",
+        "latex": "P_{label}\\left(19\\right)",
+        "showLabel": true,
+        "label": "`6`",
+        "hidden": true,
+        "points": false,
+        "dragMode": "NONE",
+        "labelSize": "2",
+        "colorLatex": "C_{blueLabel}",
+        "pointOpacity": "\\alpha_{label}\\left(19\\right)"
+      },
+      {
+        "type": "expression",
+        "id": "38",
+        "folderId": "14",
+        "color": "#2d70b3",
+        "latex": "P_{label}\\left(20\\right)",
+        "showLabel": true,
+        "label": "`5`",
+        "hidden": true,
+        "points": false,
+        "dragMode": "NONE",
+        "labelSize": "2",
+        "colorLatex": "C_{blueLabel}",
+        "pointOpacity": "\\alpha_{label}\\left(20\\right)"
+      },
+      {
+        "type": "expression",
+        "id": "37",
+        "folderId": "14",
+        "color": "#2d70b3",
+        "latex": "P_{label}\\left(21\\right)",
+        "showLabel": true,
+        "label": "`4`",
+        "hidden": true,
+        "points": false,
+        "dragMode": "NONE",
+        "labelSize": "2",
+        "colorLatex": "C_{blueLabel}",
+        "pointOpacity": "\\alpha_{label}\\left(21\\right)"
+      },
+      {
+        "type": "expression",
+        "id": "36",
+        "folderId": "14",
+        "color": "#2d70b3",
+        "latex": "P_{label}\\left(22\\right)",
+        "showLabel": true,
+        "label": "`3`",
+        "hidden": true,
+        "points": false,
+        "dragMode": "NONE",
+        "labelSize": "2",
+        "colorLatex": "C_{blueLabel}",
+        "pointOpacity": "\\alpha_{label}\\left(22\\right)"
+      },
+      {
+        "type": "expression",
+        "id": "35",
+        "folderId": "14",
+        "color": "#2d70b3",
+        "latex": "P_{label}\\left(23\\right)",
+        "showLabel": true,
+        "label": "`2`",
+        "hidden": true,
+        "points": false,
+        "dragMode": "NONE",
+        "labelSize": "2",
+        "colorLatex": "C_{blueLabel}",
+        "pointOpacity": "\\alpha_{label}\\left(23\\right)"
+      },
+      {
+        "type": "expression",
+        "id": "34",
+        "folderId": "14",
+        "color": "#2d70b3",
+        "latex": "P_{label}\\left(24\\right)",
+        "showLabel": true,
+        "label": "`1`",
+        "hidden": true,
+        "points": false,
+        "dragMode": "NONE",
+        "labelSize": "2",
+        "colorLatex": "C_{blueLabel}",
+        "pointOpacity": "\\alpha_{label}\\left(24\\right)"
+      },
+      {
+        "type": "folder",
+        "id": "173",
+        "title": "messages",
+        "collapsed": true
+      },
+      {
+        "type": "expression",
+        "id": "102",
+        "folderId": "173",
+        "color": "#000000",
+        "latex": "\\left(0,0\\right)\\left\\{N_{mode}=E_{setupMode}\\right\\}\\left\\{N_{turn}=E_{red}\\right\\}",
+        "showLabel": true,
+        "label": "Red's Turn - Initial Setup",
+        "hidden": true,
+        "labelSize": "2.5",
+        "colorLatex": "C_{red}",
+        "pointOpacity": "\\alpha_{nextTurnMessage}"
+      },
+      {
+        "type": "expression",
+        "id": "104",
+        "folderId": "173",
+        "color": "#000000",
+        "latex": "\\left(0,0\\right)\\left\\{N_{mode}=E_{setupMode}\\right\\}\\left\\{N_{turn}=E_{blue}\\right\\}",
+        "showLabel": true,
+        "label": "Blue's Turn - Initial Setup",
+        "hidden": true,
+        "labelSize": "2.5",
+        "colorLatex": "C_{blue}",
+        "pointOpacity": "\\alpha_{nextTurnMessage}"
+      },
+      {
+        "type": "expression",
+        "id": "105",
+        "folderId": "173",
+        "color": "#000000",
+        "latex": "\\left(0,0\\right)\\left\\{N_{mode}=E_{playMode}\\right\\}\\left\\{N_{turn}=E_{red}\\right\\}",
+        "showLabel": true,
+        "label": "Red's Turn",
+        "hidden": true,
+        "labelSize": "2.5",
+        "colorLatex": "C_{red}",
+        "pointOpacity": "\\alpha_{nextTurnMessage}"
+      },
+      {
+        "type": "expression",
+        "id": "106",
+        "folderId": "173",
+        "color": "#000000",
+        "latex": "\\left(0,0\\right)\\left\\{N_{mode}=E_{playMode}\\right\\}\\left\\{N_{turn}=E_{blue}\\right\\}",
+        "showLabel": true,
+        "label": "Blue's Turn",
+        "hidden": true,
+        "labelSize": "2.5",
+        "colorLatex": "C_{blue}",
+        "pointOpacity": "\\alpha_{nextTurnMessage}"
+      },
+      {
+        "type": "expression",
+        "id": "175",
+        "folderId": "173",
+        "color": "#000000",
+        "latex": "\\left(0,0\\right)\\left\\{N_{mode}=E_{setupMode}\\right\\}",
+        "showLabel": true,
+        "label": "Run `A_{endTurn}` when finished.",
+        "hidden": true,
+        "labelSize": "2",
+        "colorLatex": "C_{text}",
+        "pointOpacity": "\\alpha_{turnInfoMessage}"
+      },
+      {
+        "type": "expression",
+        "id": "196",
+        "folderId": "173",
+        "color": "#000000",
+        "latex": "\\left(0,0\\right)\\left\\{N_{mode}=E_{playMode}\\right\\}",
+        "showLabel": true,
+        "label": "Run `A_{startTurn}` to start your turn.",
+        "hidden": true,
+        "labelSize": "2",
+        "colorLatex": "C_{text}",
+        "pointOpacity": "\\alpha_{beforeTurnMessage}"
+      },
+      {
+        "type": "expression",
+        "id": "224",
+        "folderId": "173",
+        "color": "#000000",
+        "latex": "\\left(0,0\\right)\\left\\{N_{mode}=E_{playMode}\\right\\}",
+        "showLabel": true,
+        "label": "Run `A_{endTurn}` to end your turn.",
+        "hidden": true,
+        "labelSize": "2",
+        "colorLatex": "C_{text}",
+        "pointOpacity": "\\alpha_{turnInfoMessage}"
+      }
+    ]
+  }
+}

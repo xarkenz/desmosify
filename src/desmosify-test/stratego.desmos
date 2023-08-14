@@ -1,0 +1,506 @@
+public {
+    action reset();
+    "Controls:";
+    action start_turn();
+    action end_turn();
+}
+
+ticker {
+    action step(),
+}
+
+action reset() {
+    mode := Mode.SETUP,
+    player := Player.RED,
+    turn_stage := TurnStage.BEFORE,
+    selected_index := 0,
+    last_move_begin_index := 0,
+    last_move_end_index := 0,
+    last_captured := Piece.NONE,
+    pieces := [Piece.NONE; GRID_SIZE * GRID_SIZE],
+    revealed_spaces := [false; GRID_SIZE * GRID_SIZE],
+    turn_seconds := 1,
+    seconds_since_reveal := 1,
+    seconds_since_message := 6,
+}
+
+action start_turn() {
+    if turn_stage == TurnStage.BEFORE: {
+        turn_stage := TurnStage.DURING,
+        seconds_since_reveal := 0,
+    },
+}
+
+action end_turn() {
+    if turn_is_over: {
+        player := next_player,
+        turn_stage := TurnStage.BEFORE,
+        if mode == Mode.SETUP && player == Player.BLUE: {
+            mode := Mode.PLAY,
+        },
+        turn_seconds := 0,
+        seconds_since_reveal := 1,
+        seconds_since_message := max(seconds_since_message, 5.5),
+    },
+}
+
+action cycle_piece(index: int) {
+    pieces := poke(pieces, index, {
+        @max(@join(cyclable_pieces, pieces[index])) == pieces[index]: Piece.NONE,
+        @min([cyclable_pieces where cyclable_pieces > pieces[index]])
+    }),
+    if pieces[index] == Piece.NONE && @total([piece_counts where player_of(Piece.list) == player]) = 39: {
+        seconds_since_message := 0,
+    },
+}
+
+action click_piece(index: int) {
+    if player_of(pieces[index]) == player: {
+        if mode == Mode.SETUP: {
+            action cycle_piece(index),
+        } elif mode == Mode.PLAY && turn_stage == TurnStage.DURING: {
+            selected_index := {
+                selected_index == index: 0,
+                index
+            },
+        },
+    } else: {
+        action move_piece(max({
+            possible_moves == index: possible_moves.indices,
+            0
+        })),
+    },
+}
+
+action move_piece(move_index: int) {
+    if move_index > 0: {
+        turn_stage := TurnStage.AFTER,
+        seconds_since_message := 0,
+        last_move_begin_index := selected_index,
+        last_move_end_index := possible_moves[move_index],
+        last_captured := get_captured_piece(selected_index, possible_moves[move_index]),
+        selected_index := 0,
+        pieces := poke(
+            poke(
+                pieces,
+                possible_moves[move_index],
+                piece_replacing_defender(selected_index, possible_moves[move_index]),
+            ),
+            selected_index,
+            piece_replacing_attacker(selected_index, possible_moves[move_index]),
+        ),
+        revealed_spaces := poke(
+            poke(
+                revealed_spaces,
+                possible_moves[move_index],
+                reveal_defender_space(selected_index, possible_moves[move_index]),
+            ),
+            selected_index,
+            reveal_attacker_space(selected_index, possible_moves[move_index]),
+        ),
+        if piece_type_of(pieces[possible_moves[move_index]]) == PieceType.FLAG: {
+            mode := {
+                player == Player.RED: Mode.RED_WIN,
+                player == Player.BLUE: Mode.BLUE_WIN,
+                mode
+            },
+        },
+    },
+}
+
+enum Player {
+    RED,
+    BLUE,
+}
+
+enum Mode {
+    SETUP,
+    PLAY,
+    RED_WIN,
+    BLUE_WIN,
+}
+
+enum TurnStage {
+    BEFORE,
+    DURING,
+    AFTER,
+}
+
+enum Outcome {
+    CAPTURES,
+    GETS_CAPTURED,
+    GETS_EXPLODED,
+    BOTH_CAPTURED,
+}
+
+enum PieceType {
+    NONE,
+    FLAG,
+    BOMB,
+    SPY,
+    SCOUT,
+    MINER,
+    SERGEANT,
+    LIEUTENANT,
+    CAPTAIN,
+    MAJOR,
+    COLONEL,
+    GENERAL,
+    MARSHAL,
+}
+
+enum Piece {
+    NONE,
+    RED_FLAG,
+    RED_BOMB,
+    RED_SPY,
+    RED_SCOUT,
+    RED_MINER,
+    RED_SERGEANT,
+    RED_LIEUTENANT,
+    RED_CAPTAIN,
+    RED_MAJOR,
+    RED_COLONEL,
+    RED_GENERAL,
+    RED_MARSHAL,
+    BLUE_FLAG,
+    BLUE_BOMB,
+    BLUE_SPY,
+    BLUE_SCOUT,
+    BLUE_MINER,
+    BLUE_SERGEANT,
+    BLUE_LIEUTENANT,
+    BLUE_CAPTAIN,
+    BLUE_MAJOR,
+    BLUE_COLONEL,
+    BLUE_GENERAL,
+    BLUE_MARSHAL,
+}
+
+const GRID_SIZE: int = 10;
+const MAX_PIECE_COUNTS: [int] = [1, 6, 1, 8, 5, 4, 4, 4, 3, 2, 1, 1, 1, 6, 1, 8, 5, 4, 4, 4, 3, 2, 1, 1];
+
+var mode: Mode = Mode.SETUP;
+var player: Player = Player.RED;
+var turn_stage: TurnStage = TurnStage.BEFORE;
+var selected_index: int = 0;
+var last_move_begin_index: int = 0;
+var last_move_end_index: int = 0;
+var last_captured: Piece = Piece.NONE;
+var pieces: [Piece] = [Piece.NONE; GRID_SIZE * GRID_SIZE];
+var revealed_spaces: [bool] = [false; GRID_SIZE * GRID_SIZE];
+
+let grid: [ipoint] = [
+    (x, y) for x in [0 .. GRID_SIZE] for y in [0 .. GRID_SIZE]
+];
+
+let next_player: Player = {
+    player == Player.RED: Player.BLUE,
+    player == Player.BLUE: Player.RED,
+};
+
+let piece_counts: [int] = [
+    [pieces where pieces == piece].length for piece in Piece.list
+];
+
+let cyclable_pieces: [Piece] = [Piece.list where piece_counts < MAX_PIECE_COUNTS && player_of(Piece.list) == player];
+
+let turn_is_over: bool = {
+    mode == Mode.SETUP: cyclable_pieces.length == 0,
+    mode == Mode.PLAY: turn_stage == TurnStage.AFTER,
+    false
+};
+
+let moves_to_check: [int] = {
+    is_piece_fixed(pieces[selected_index]): [],
+    offset_point_index(selected_index, [(1, 0), (0, 1), (-1, 0), (0, -1)])
+};
+
+let possible_moves: [int] = {
+    selected_index > 0: [moves_to_check where moves_to_check > 0
+        && moves_to_check != selected_index
+        && player_of(pieces[moves_to_check]) != player],
+    []
+};
+
+let poke(l: [?], i: int, x: ?): [?] = {
+    [1 ..= l.length] == i: x,
+    l
+};
+
+let player_of(piece: Piece): Player = {
+    Piece.RED_FLAG <= piece <= Piece.RED_MARSHAL: Player.RED,
+    Piece.BLUE_FLAG <= piece <= Piece.BLUE_MARSHAL: Player.BLUE,
+};
+
+let piece_type_of(piece: Piece): PieceType = {
+    piece == Piece.NONE: PieceType.NONE,
+    (piece - 1) % 12 + 1
+};
+
+let is_piece_fixed(piece: Piece): bool = (
+    piece == Piece.RED_FLAG || piece == Piece.RED_BOMB || piece == Piece.BLUE_FLAG || piece == Piece.BLUE_BOMB
+);
+
+let offset_point_index(from_index: int, offset: ipoint): int = {
+    !is_point_outside(grid[from_index] + offset): from_index + GRID_SIZE * offset.y + offset.x,
+    0
+};
+
+let calculate_outcome(attacker_type: PieceType, defender_type: PieceType): Outcome = {
+    defender_type == PieceType.NONE: Outcome.CAPTURES,
+    defender_type == PieceType.BOMB: {
+        attacker_type == PieceType.MINER: Outcome.CAPTURES,
+        Outcome.GETS_EXPLODED
+    },
+    attacker_type == defender_type: Outcome.BOTH_CAPTURED,
+    attacker_type == PieceType.SPY: {
+        defender_type == PieceType.MARSHAL: Outcome.CAPTURES,
+        Outcome.GETS_CAPTURED
+    },
+    attacker_type > defender_type: Outcome.CAPTURES,
+    Outcome.GETS_CAPTURED
+};
+
+let piece_replacing_attacker(attacker_index: int, defender_index: int): Piece = {
+    outcome == Outcome.CAPTURES: Piece.NONE,
+    outcome == Outcome.GETS_CAPTURED: pieces[defender_index],
+    outcome == Outcome.BOTH_CAPTURED: Piece.NONE,
+    outcome == Outcome.GETS_EXPLODED: Piece.NONE,
+} with outcome = calculate_outcome(piece_type_of(pieces[attacker_index]), piece_type_of(pieces[defender_index]));
+
+let piece_replacing_defender(attacker_index: int, defender_index: int): Piece = {
+    outcome == Outcome.CAPTURES: pieces[attacker_index],
+    outcome == Outcome.GETS_CAPTURED: Piece.NONE,
+    outcome == Outcome.BOTH_CAPTURED: Piece.NONE,
+    outcome == Outcome.GETS_EXPLODED: pieces[defender_index],
+} with outcome = calculate_outcome(piece_type_of(pieces[attacker_index]), piece_type_of(pieces[defender_index]));
+
+let reveal_attacker_space(attacker_index: int, defender_index: int): bool = {
+    pieces[defender_index] == Piece.NONE: false,
+    {
+        outcome == Outcome.CAPTURES: false,
+        outcome == Outcome.GETS_CAPTURED: true,
+        outcome == Outcome.BOTH_CAPTURED: false,
+        outcome == Outcome.GETS_EXPLODED: false,
+    } with outcome = calculate_outcome(piece_type_of(pieces[attacker_index]), piece_type_of(pieces[defender_index]))
+};
+
+let reveal_defender_space(attacker_index: int, defender_index: int): bool = {
+    pieces[defender_index] == Piece.NONE: revealed_spaces[attacker_index],
+    {
+        outcome == Outcome.CAPTURES: true,
+        outcome == Outcome.GETS_CAPTURED: false,
+        outcome == Outcome.BOTH_CAPTURED: false,
+        outcome == Outcome.GETS_EXPLODED: true,
+    } with outcome = calculate_outcome(piece_type_of(pieces[attacker_index]), piece_type_of(pieces[defender_index]))
+};
+
+let get_captured_piece(attacker_index: int, defender_index: int): Piece = {
+    outcome == Outcome.CAPTURES: pieces[defender_index],
+    outcome == Outcome.GETS_CAPTURED: pieces[attacker_index],
+    outcome == Outcome.BOTH_CAPTURED: pieces[defender_index],
+    outcome == Outcome.GETS_EXPLODED: pieces[attacker_index],
+} with outcome = calculate_outcome(piece_type_of(pieces[attacker_index]), piece_type_of(pieces[defender_index]));
+
+let is_point_outside(p: ipoint): bool = (
+    p.x < 0 || p.x >= GRID_SIZE || p.y < 0 || p.y >= GRID_SIZE
+        || ((p.x == 2 || p.x == 3 || p.x == 6 || p.x == 7) && (p.y == 4 || p.y == 5))
+);
+
+const MESSAGE_HOLD_SECONDS: real = 5.0;
+
+var timer turn_seconds: real = 1.0;
+var timer seconds_since_reveal: real = 1.0;
+var timer seconds_since_message: real = 1.0 + MESSAGE_HOLD_SECONDS;
+
+let ease_linear(t: real): real = {
+    t <= 0: 0,
+    t <= 1: t,
+    1
+};
+
+let ease_out(t: real): real = {
+    t <= 0: 0,
+    t <= 1: 1 - (t - 1)^6,
+    1
+};
+
+let board_angle: real = @PI * (player + 1 - ease_out(turn_seconds));
+
+let label_opacity: [real] = @join(
+    {
+        revealed_spaces: 1.0,
+        player_of(pieces) == player: {
+            turn_stage == TurnStage.BEFORE: 0.0,
+            ease_linear(seconds_since_reveal)
+        },
+        1.0 - ease_linear(turn_seconds)
+    },
+    0.6,
+);
+
+let message_opacity(t: real): real = {
+    t <= 0.0: 0,
+    t <= 0.5: 2*t,
+    t <= 0.5 + MESSAGE_HOLD_SECONDS: 1,
+    t <= 1.0 + MESSAGE_HOLD_SECONDS: 12 - 2*t,
+    0
+};
+
+let next_turn_message_opacity: real = message_opacity(turn_seconds - 1.0);
+
+let before_turn_message_opacity: real = ease_linear(2 * (turn_seconds - MESSAGE_HOLD_SECONDS - 3.0)) * {
+    turn_stage == TurnStage.BEFORE: 1,
+    ease_linear(1.0 - 2*turn_seconds)
+};
+
+let turn_info_message_opacity: real = message_opacity(seconds_since_message);
+
+let text_color: color = @hsv(0.0, 0.0, 0.3);
+let grass_color: color = @hsv(70.0, 0.6, 0.8);
+let highlight_color: color = @hsv(50.0, 0.6, 1.0);
+let grid_color: color = @hsv(80.0, 0.6, 0.7);
+
+let board_color: color = [{
+    grid.indices == selected_index: highlight_color,
+    grass_color
+} where !is_point_outside(grid)];
+
+let red_color: color = @hsv(10.0, 0.8, 0.8); // RGB: (204, 68, 41)
+let blue_color: color = @hsv(200.0, 0.8, 0.6); // RGB: (31, 112, 153)
+let red_label_color: color = @hsv(45.0, 0.9, 0.85);
+let blue_label_color: color = @hsv(0.0, 0.0, 0.7);
+
+// TODO: clean up
+let player_color: color = {
+    player == Player.RED: {
+        turn_seconds >= 1: red_color,
+        @rgb(
+            31*(1-turn_seconds) + 204*turn_seconds,
+            112*(1-turn_seconds) + 68*turn_seconds,
+            153*(1-turn_seconds) + 41*turn_seconds,
+        )
+    },
+    player == Player.BLUE: {
+        turn_seconds >= 1: blue_color,
+        @rgb(
+            204*(1-turn_seconds) + 31*turn_seconds,
+            68*(1-turn_seconds) + 112*turn_seconds,
+            41*(1-turn_seconds) + 153*turn_seconds,
+        )
+    },
+};
+
+let last_move_color: color = {
+    player == Player.RED: {
+        turn_stage == TurnStage.AFTER: red_color,
+        blue_color
+    },
+    player == Player.BLUE: {
+        turn_stage == TurnStage.AFTER: blue_color,
+        red_color
+    },
+};
+
+let width_units: real = 20.0;
+let height_units: real = width_units * (@height_pixels / @width_pixels);
+let to_pixels(units: real): real = units * (@width_pixels / width_units);
+
+let border_size: real = 1.0;
+let piece_size: real = 0.75;
+let board_size: real = @min(width_units, height_units) - 2 * border_size;
+let space_size: real = board_size / GRID_SIZE;
+let piece_size_pixels: real = to_pixels(piece_size * space_size);
+
+let transform(p: point): point = @rotate(
+    board_size * ((p + (0.5, 0.5)) / GRID_SIZE - (0.5, 0.5)),
+    (0, 0),
+    board_angle,
+);
+
+let view_grid: [point] = transform(grid);
+
+let view_rectangle: polygon = @polygon(
+    (-0.5 * width_units, -0.5 * height_units),
+    (0.5 * width_units, -0.5 * height_units),
+    (0.5 * width_units, 0.5 * height_units),
+    (-0.5 * width_units, 0.5 * height_units),
+);
+
+let board_squares: [polygon] = [
+    @polygon(transform(p + [
+        (-0.5, -0.5),
+        (0.5, -0.5),
+        (0.5, 0.5),
+        (-0.5, 0.5),
+    ])) for p in grid
+];
+
+let last_move_indicator: segment = @segment(
+    view_grid[last_move_begin_index],
+    view_grid[last_move_end_index],
+);
+
+let red_pieces: [point] = {player_of(pieces) == Player.RED: view_grid};
+let blue_pieces: [point] = {player_of(pieces) == Player.BLUE: view_grid};
+
+let setup_blank_spaces: [point] = {
+    mode == Mode.SETUP && pieces == Piece.NONE && {
+        player == Player.RED: grid.y < 4,
+        player == Player.BLUE: grid.y >= GRID_SIZE - 4,
+    }: view_grid,
+};
+
+let possible_move_spaces: [point] = view_grid[possible_moves];
+
+let piece_labels(piece: Piece): point = @join(
+    {pieces == piece: view_grid},
+    {last_captured == piece: 0.5 * (view_grid[last_move_begin_index] + view_grid[last_move_end_index])},
+);
+
+let label_size: real = 2.0; // TODO: dynamic size
+
+display {
+    view_rectangle: player_color, stroke(20), fill(0.7);
+    board_squares: board_color, stroke(1), fill(1.0);
+    board_squares: grid_color, stroke(2.5);
+    last_move_indicator: last_move_color, stroke(piece_size_pixels, 0.3);
+    red_pieces: red_color, point(piece_size_pixels), click { action click_piece(@index) };
+    blue_pieces: blue_color, point(piece_size_pixels), click { action click_piece(@index) };
+    setup_blank_spaces: player_color, point(0.5 * piece_size_pixels, 0.5), click { action cycle_piece(@index) };
+    possible_move_spaces: highlight_color, point(0.4 * piece_size_pixels), click { action move_piece(@index) };
+    
+    piece_labels(Piece.RED_FLAG): red_label_color, label("`🏳`", label_opacity, label_size);
+    piece_labels(Piece.RED_BOMB): red_label_color, label("`💣`", label_opacity, label_size);
+    piece_labels(Piece.RED_SPY): red_label_color, label("`S`", label_opacity, label_size);
+    piece_labels(Piece.RED_SCOUT): red_label_color, label("`9`", label_opacity, label_size);
+    piece_labels(Piece.RED_MINER): red_label_color, label("`8`", label_opacity, label_size);
+    piece_labels(Piece.RED_SERGEANT): red_label_color, label("`7`", label_opacity, label_size);
+    piece_labels(Piece.RED_LIEUTENANT): red_label_color, label("`6`", label_opacity, label_size);
+    piece_labels(Piece.RED_CAPTAIN): red_label_color, label("`5`", label_opacity, label_size);
+    piece_labels(Piece.RED_MAJOR): red_label_color, label("`4`", label_opacity, label_size);
+    piece_labels(Piece.RED_COLONEL): red_label_color, label("`3`", label_opacity, label_size);
+    piece_labels(Piece.RED_GENERAL): red_label_color, label("`2`", label_opacity, label_size);
+    piece_labels(Piece.RED_MARSHAL): red_label_color, label("`1`", label_opacity, label_size);
+    piece_labels(Piece.BLUE_FLAG): blue_label_color, label("`🏳`", label_opacity, label_size);
+    piece_labels(Piece.BLUE_BOMB): blue_label_color, label("`💣`", label_opacity, label_size);
+    piece_labels(Piece.BLUE_SPY): blue_label_color, label("`S`", label_opacity, label_size);
+    piece_labels(Piece.BLUE_SCOUT): blue_label_color, label("`9`", label_opacity, label_size);
+    piece_labels(Piece.BLUE_MINER): blue_label_color, label("`8`", label_opacity, label_size);
+    piece_labels(Piece.BLUE_SERGEANT): blue_label_color, label("`7`", label_opacity, label_size);
+    piece_labels(Piece.BLUE_LIEUTENANT): blue_label_color, label("`6`", label_opacity, label_size);
+    piece_labels(Piece.BLUE_CAPTAIN): blue_label_color, label("`5`", label_opacity, label_size);
+    piece_labels(Piece.BLUE_MAJOR): blue_label_color, label("`4`", label_opacity, label_size);
+    piece_labels(Piece.BLUE_COLONEL): blue_label_color, label("`3`", label_opacity, label_size);
+    piece_labels(Piece.BLUE_GENERAL): blue_label_color, label("`2`", label_opacity, label_size);
+    piece_labels(Piece.BLUE_MARSHAL): blue_label_color, label("`1`", label_opacity, label_size);
+    
+    {mode == Mode.SETUP && player == Player.RED: (0, 0)}: red_color, label("Red's Turn - Initial Setup", next_turn_message_opacity, 2.5);
+    {mode == Mode.SETUP && player == Player.BLUE: (0, 0)}: blue_color, label("Blue's Turn - Initial Setup", next_turn_message_opacity, 2.5);
+    {mode == Mode.PLAY && player == Player.RED: (0, 0)}: red_color, label("Red's Turn", next_turn_message_opacity, 2.5);
+    {mode == Mode.PLAY && player == Player.BLUE: (0, 0)}: blue_color, label("Blue's Turn", next_turn_message_opacity, 2.5);
+    {mode == Mode.SETUP: (0, 0)}: text_color, label("Run `A_{endTurn}` when finished.", turn_info_message_opacity, 2);
+    {mode == Mode.PLAY: (0, 0)}: text_color, label("Run `A_{startTurn}` to start your turn.", before_turn_message_opacity, 2);
+    {mode == Mode.PLAY: (0, 0)}: text_color, label("Run `A_{endTurn}` to end your turn.", turn_info_message_opacity, 2);
+}

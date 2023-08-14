@@ -1,0 +1,223 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<language id="desmosify" name="Desmosify" version="2.0" _section="Source">
+  <metadata>
+    <property name="mimetypes">text/x-desmosify</property>
+    <property name="globs">*.desmos</property>
+    <property name="line-comment-start">//</property>
+    <property name="block-comment-start">/*</property>
+    <property name="block-comment-end">*/</property>
+  </metadata>
+
+  <styles>
+    <style id="comment"           name="Comment"               map-to="def:comment"/>
+    <style id="name"              name="Name"/>
+    <style id="constant-name"     name="Constant name"/>
+    <style id="action-name"       name="Action name"           map-to="def:identifier"/>
+    <style id="builtin-name"      name="Built-in name"         map-to="def:preprocessor"/>
+    <style id="string"            name="String"                map-to="def:string"/>
+    <style id="keyword"           name="Keyword"               map-to="def:keyword"/>
+    <style id="special-symbol"    name="Special symbol"        map-to="def:keyword"/>
+    <style id="operator"          name="Operator"              map-to="def:operator"/>
+    <style id="builtin-type"      name="Built-in type"         map-to="def:type"/>
+    <style id="wildcard-type"     name="Wildcard type"         map-to="def:type"/>
+    <style id="user-type"         name="User type"/>
+    <style id="escaped-character" name="Escaped character"     map-to="def:special-char"/>
+    <style id="real"              name="Real number"           map-to="def:floating-point"/>
+    <style id="special-number"    name="Special numeric value" map-to="def:floating-point"/>
+    <style id="decimal-int"       name="Decimal integer"       map-to="def:decimal"/>
+    <style id="hexadecimal-int"   name="Hexadecimal integer"   map-to="def:base-n-integer"/>
+    <style id="binary-int"        name="Binary integer"        map-to="def:base-n-integer"/>
+    <style id="boolean"           name="Boolean value"         map-to="def:boolean"/>
+    <style id="error"             name="Error"                 map-to="def:error"/>
+  </styles>
+
+  <definitions>
+
+    <define-regex id="escaped-character" extended="true">
+      \\(                   # leading backslash
+      [\\\"\'] |            # escaped character
+      x[0-9A-Fa-f]{2} |     # 'x' followed by 2 hex digits
+      u[0-9A-Fa-f]{4}       # 'u' followed by 4 hex digits
+      )
+    </define-regex>
+    
+    <define-regex id="name" extended="true">
+      [A-Za-z_][0-9A-Za-z_]*
+    </define-regex>
+  
+    <context id="names" style-ref="name">
+      <match>\%{name}</match>
+    </context>
+    
+    <context id="constant-names" style-ref="constant-name">
+      <match extended="true">
+        \b(_[0-9_]*)?[A-Z][0-9A-Z_]*\b
+      </match>
+    </context>
+    
+    <context id="action-names" style-ref="action-name">
+      <match extended="true">
+        \b(action)\s+
+        \%{name}
+      </match>
+      <include>
+        <context sub-pattern="1" style-ref="keyword"/>
+      </include>
+    </context>
+    
+    <context id="builtin-names" style-ref="builtin-name">
+      <match>@\s*\%{name}</match>
+    </context>
+
+    <context id="strings" style-ref="string" end-at-line-end="true" class="string" class-disabled="no-spell-check">
+      <start>"</start>
+      <end>"</end>
+      <include>
+        <context id="escaped-character" style-ref="escaped-character">
+          <match>\%{escaped-character}</match>
+        </context>
+        <context ref="def:line-continue"/>
+      </include>
+    </context>
+
+    <context id="reals" style-ref="real">
+      <match extended="true">
+        (?&lt;![\w\.])
+        ((\.[0-9]+ | [0-9]+\.[0-9]*) ([Ee][+-]?[0-9]*)? |
+         ([0-9]+[Ee][+-]?[0-9]*))
+        (?![\w\.])
+      </match>
+    </context>
+    
+    <context id="special-numbers" style-ref="special-number">
+      <keyword>infinity</keyword>
+      <keyword>undefined</keyword>
+    </context>
+
+    <context id="hexadecimal-ints" style-ref="hexadecimal-int">
+      <match extended="true">
+        (?&lt;![\w\.])
+        0[xX][a-fA-F0-9]+
+        (?![\w\.])
+      </match>
+    </context>
+
+    <context id="invalid-hexadecimal-ints" style-ref="error">
+      <match extended="true">
+        (?&lt;![\w\.])
+        0[xX][a-fA-F0-9]*[g-zG-Z][a-zA-Z0-9]*
+        (?![\w\.])
+      </match>
+    </context>
+    
+    <context id="binary-ints" style-ref="binary-int">
+      <match extended="true">
+        (?&lt;![\w\.])
+        0[bB][01]+
+        (?![\w\.])
+      </match>
+    </context>
+
+    <context id="invalid-binary-ints" style-ref="error">
+      <match extended="true">
+        (?&lt;![\w\.])
+        0[bB][01]*[a-fA-F2-9][a-zA-Z0-9]*
+        (?![\w\.])
+      </match>
+    </context>
+
+    <context id="decimal-ints" style-ref="decimal-int">
+      <match extended="true">
+        (?&lt;![\w\.])
+        [0-9]+
+        (?![\w\.])
+      </match>
+    </context>
+
+    <context id="keywords" style-ref="keyword">
+      <keyword>public</keyword>
+      <keyword>ticker</keyword>
+      <keyword>display</keyword>
+      <keyword>enum</keyword>
+      <keyword>action</keyword>
+      <keyword>let</keyword>
+      <keyword>const</keyword>
+      <keyword>var</keyword>
+      <keyword>if</keyword>
+      <keyword>elif</keyword>
+      <keyword>else</keyword>
+      <keyword>timer</keyword>
+    </context>
+    
+    <context id="special-symbols" style-ref="special-symbol">
+      <match extended="true">
+        (,|;|:=)
+      </match>
+    </context>
+
+    <context id="operators" style-ref="operator">
+      <keyword>for</keyword>
+      <keyword>in</keyword>
+      <keyword>where</keyword>
+      <keyword>with</keyword>
+    </context>
+
+    <context id="builtin-types" style-ref="builtin-type">
+      <keyword>real</keyword>
+      <keyword>int</keyword>
+      <keyword>bool</keyword>
+      <keyword>point</keyword>
+      <keyword>ipoint</keyword>
+      <keyword>str</keyword>
+      <keyword>color</keyword>
+      <keyword>polygon</keyword>
+      <keyword>segment</keyword>
+    </context>
+    
+    <context id="wildcard-types" style-ref="wildcard-type">
+      <match extended="true">
+        \?
+      </match>
+    </context>
+    
+    <context id="user-types" style-ref="user-type">
+      <match extended="true">
+        \b_*[A-Z][0-9A-Z]*[a-z][0-9A-Za-z]*\b
+      </match>
+    </context>
+
+    <context id="booleans" style-ref="boolean">
+      <keyword>true</keyword>
+      <keyword>false</keyword>
+    </context>
+
+    <context id="desmosify" class="no-spell-check">
+      <include>
+        <context ref="gtk-doc:inline-docs-section"/>
+        <context ref="def:c-like-comment" style-ref="comment"/>
+        <context ref="def:c-like-comment-multiline" style-ref="comment"/>
+        <context ref="def:c-like-close-comment-outside-comment" style-ref="comment"/>
+        <context ref="builtin-names"/>
+        <context ref="constant-names"/>
+        <context ref="action-names"/>
+        <context ref="strings"/>
+        <context ref="reals"/>
+        <context ref="special-numbers"/>
+        <context ref="hexadecimal-ints"/>
+        <context ref="invalid-hexadecimal-ints"/>
+        <context ref="binary-ints"/>
+        <context ref="invalid-binary-ints"/>
+        <context ref="decimal-ints"/>
+        <context ref="keywords"/>
+        <context ref="special-symbols"/>
+        <context ref="operators"/>
+        <context ref="builtin-types"/>
+        <context ref="wildcard-types"/>
+        <context ref="user-types"/>
+        <context ref="booleans"/>
+        <context ref="names"/>
+      </include>
+    </context>
+
+  </definitions>
+</language>
