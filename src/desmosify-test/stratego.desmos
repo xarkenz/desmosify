@@ -5,10 +5,6 @@ public {
     action end_turn();
 }
 
-ticker {
-    action step(),
-}
-
 action reset() {
     mode := Mode.SETUP,
     player := Player.RED,

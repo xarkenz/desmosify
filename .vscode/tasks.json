@@ -1,0 +1,28 @@
+{
+	"version": "2.0.0",
+	"tasks": [
+		{
+			"group": "build",
+			"label": "build desmosify",
+			"type": "shell",
+			"command": "cargo",
+			"args": [
+				"build"
+			]
+		},
+		{
+			"group": {
+				"kind": "build",
+				"isDefault": true
+			},
+			"label": "test desmosify",
+			"type": "shell",
+			"command": "./target/debug/desmosify-test.exe",
+			"args": [],
+			"dependsOn": ["build desmosify"],
+			"options": {
+				"cwd": "${workspaceFolder}"
+			}
+		}
+	]
+}

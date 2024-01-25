@@ -27,7 +27,7 @@ fn message_expected_one_of(symbols: &[Symbol], keywords: &[Keyword]) -> String {
     message
 }
 
-fn message_identifier_conflict(original: Identifier) -> String {
+fn message_identifier_conflict(original: Signature) -> String {
     format!("name conflicts with previous '{} {}'", original.variant_name(), original.name())
 }
 
@@ -199,7 +199,7 @@ impl Operation {
 
 #[derive(Debug)]
 pub enum ExpressionValue {
-    Literal(DataValue),
+    Literal(ConstantValue),
     Operator(Operation, Vec<Expression>),
     Name(String),
 }
@@ -209,7 +209,7 @@ impl ExpressionValue {
         if let TokenValue::Name(name) = value {
             Some(Self::Name(name.clone()))
         } else {
-            DataValue::from_token_value(value).map(|literal| Self::Literal(literal))
+            ConstantValue::from_token_value(value).map(|literal| Self::Literal(literal))
         }
     }
 }
@@ -218,21 +218,24 @@ impl ExpressionValue {
 pub struct Expression {
     pub data_type: DataType,
     pub value: ExpressionValue,
-    pub start_token: Option<usize>,
-    pub op_token: Option<usize>,
-    pub end_token: Option<usize>,
-    pub constant: bool,
+    pub start: Option<SourceLocation>,
+    pub end: Option<SourceLocation>,
 }
 
 impl Expression {
-    pub fn from_constant(value: DataValue) -> Self {
+    pub fn from_constant(value: ConstantValue) -> Self {
         Self {
             data_type: value.data_type(),
             value: ExpressionValue::Literal(value),
-            start_token: None,
-            op_token: None,
-            end_token: None,
-            constant: true,
+            start: None,
+            end: None,
+        }
+    }
+
+    pub fn constant_value(&self) -> Option<&ConstantValue> {
+        match &self.value {
+            ExpressionValue::Literal(value) => Some(value),
+            _ => None
         }
     }
 }
@@ -355,13 +358,13 @@ impl<'a> Parser<'a> {
     }
 
     pub fn get_constant_string(&self, expression: Expression) -> Result<String, DesmosifyError> {
-        if let ExpressionValue::Literal(DataValue::Str(string)) = expression.value {
+        if let ExpressionValue::Literal(ConstantValue::Str(string)) = expression.value {
             Ok(string)
         } else {
             Err(DesmosifyError::new(
                 String::from("expected a string"),
-                expression.start_token.map(|index| self.tokens[index].start),
-                expression.end_token.map(|index| self.tokens[index].end),
+                expression.start,
+                expression.end,
             ))
         }
     }
@@ -394,12 +397,8 @@ impl<'a> Parser<'a> {
                 .collect();
             operands.push(Expression {
                 data_type: DataType::Unknown,
-                start_token: child_operands
-                    .first()
-                    .map_or(None, |first| first.start_token),
-                op_token: None, // TODO
-                end_token: child_operands.last().map_or(None, |last| last.end_token),
-                constant: false,
+                start: child_operands.first().map_or(None, |first| first.start),
+                end: child_operands.last().map_or(None, |last| last.end),
                 value: ExpressionValue::Operator(operation, child_operands),
             });
             Ok(())
@@ -561,13 +560,12 @@ impl<'a> Parser<'a> {
 
                 if operation == Operation::ActionCall {
                     self.next();
+                    let action_name = self.expect_name()?;
                     operands.push(Expression {
-                        data_type: DataType::Action,
-                        start_token: Some(self.token_index - 1),
-                        op_token: None,
-                        end_token: Some(self.token_index),
-                        constant: false,
-                        value: ExpressionValue::Name(self.expect_name()?),
+                        data_type: DataType::Action { name: action_name.clone() },
+                        start: Some(self.tokens[self.token_index - 1].start),
+                        end: Some(self.tokens[self.token_index].end),
+                        value: ExpressionValue::Name(action_name),
                     });
                     self.next();
                 }
@@ -608,10 +606,8 @@ impl<'a> Parser<'a> {
                 }
                 operands.push(Expression {
                     data_type: DataType::Unknown,
-                    start_token: Some(self.token_index),
-                    op_token: None,
-                    end_token: Some(self.token_index),
-                    constant: false,
+                    start: Some(self.tokens[self.token_index].start),
+                    end: Some(self.tokens[self.token_index].end),
                     value: ExpressionValue::from_token_value(&token.value).unwrap(),
                 });
                 expect_operand = false;
@@ -631,10 +627,7 @@ impl<'a> Parser<'a> {
         }
         if operands.len() != 1 {
             Err(DesmosifyError::new(
-                format!(
-                    "expression resolved to {} operands instead of 1 as expected",
-                    operands.len()
-                ),
+                format!("expression resolved to {} operands instead of 1 as expected", operands.len()),
                 Some(token.start),
                 Some(token.start),
             ))
@@ -672,16 +665,19 @@ impl<'a> Parser<'a> {
         if is_list_type {
             self.expect_symbol(Symbol::SquareRight)?;
             self.next();
-            data_type = DataType::List(Box::new(data_type));
+            data_type = DataType::List {
+                item_type: Box::new(data_type),
+            };
         }
         self.expect_one_of(end_symbols, end_keywords)?;
         Ok(data_type)
     }
 
-    pub fn parse_signature(&mut self) -> Result<Vec<Parameter>, DesmosifyError> {
+    pub fn parse_parameters(&mut self, required: bool) -> Result<Option<Vec<Parameter>>, DesmosifyError> {
+        let location = self.token()?.end;
         self.next();
-        let mut parameters = Vec::new();
         if self.is_at_symbol(Symbol::ParenLeft)? {
+            let mut parameters = Vec::new();
             self.next();
             while !self.is_at_symbol(Symbol::ParenRight)? {
                 let parameter_name = self.expect_name()?;
@@ -701,8 +697,16 @@ impl<'a> Parser<'a> {
                 }
             }
             self.next();
+            Ok(Some(parameters))
+        } else if required {
+            Err(DesmosifyError::new(
+                String::from("expected '(' followed by a list of parameters"),
+                Some(location),
+                Some(location),
+            ))
+        } else {
+            Ok(None)
         }
-        Ok(parameters)
     }
 
     pub fn parse_action(&mut self, allow_inline: bool) -> Result<Action, DesmosifyError> {
@@ -730,7 +734,7 @@ impl<'a> Parser<'a> {
             };
         }
         self.next();
-        let mut action = Vec::new();
+        let mut sub_actions = Vec::new();
         while !self.is_at_symbol(Symbol::CurlyRight)? {
             if self.is_at_keyword(Keyword::If)? {
                 let mut branches = Vec::new();
@@ -746,7 +750,7 @@ impl<'a> Parser<'a> {
                     branches.push((condition, self.parse_action(true)?));
                     self.next();
                 }
-                action.push(Action::Conditional(
+                sub_actions.push(Action::Conditional(
                     branches,
                     if self.is_at_keyword(Keyword::Else)? {
                         self.next();
@@ -760,23 +764,25 @@ impl<'a> Parser<'a> {
                     },
                 ))
             } else {
-                action.push(self.parse_action(true)?);
+                sub_actions.push(self.parse_action(true)?);
             }
             if self.is_at_symbol(Symbol::Comma)? {
                 self.next();
             }
         }
-        Ok(if action.len() == 1 {
-            action.pop().unwrap()
+        Ok(if sub_actions.len() == 1 {
+            sub_actions.pop().unwrap()
         } else {
-            Action::Block(action)
+            Action::Block(sub_actions)
         })
     }
 }
 
-pub fn parse_definitions(tokens: &[Token]) -> Result<Definitions, DesmosifyError> {
-    let mut definitions = Definitions::new();
+pub fn parse(tokens: &[Token]) -> Result<(Signatures, Definitions), DesmosifyError> {
     let mut parser = Parser::new(tokens);
+    let mut signatures = Signatures::new();
+    let mut definitions = Definitions::new();
+
     while parser.token_index < parser.tokens.len() {
         let token = &parser.tokens[parser.token_index];
         parser.expect_one_of(&[
@@ -791,6 +797,7 @@ pub fn parse_definitions(tokens: &[Token]) -> Result<Definitions, DesmosifyError
             Keyword::Var,
             Keyword::Enum,
         ])?;
+
         match token.value {
             TokenValue::Symbol(Symbol::Semicolon) => {},
             TokenValue::Keyword(Keyword::Public) => {
@@ -843,22 +850,23 @@ pub fn parse_definitions(tokens: &[Token]) -> Result<Definitions, DesmosifyError
                 parser.next();
                 let (name_start, name_end) = (parser.token()?.start, parser.token()?.end);
                 let name = parser.expect_name()?;
-                let parameters = parser.parse_signature()?;
+                let parameters = parser.parse_parameters(true)?.unwrap();
                 let content = Box::new(parser.parse_action(false)?);
-                let identifier = Identifier::Action { name: name.clone(), parameters, content };
-                if let Some(original) = definitions.identifiers.insert(name, identifier) {
+                let signature = Signature::Action { name: name.clone(), parameters };
+                if let Some(original) = signatures.user_defined.insert(name.clone(), signature) {
                     return Err(DesmosifyError::new(
                         message_identifier_conflict(original),
                         Some(name_start),
                         Some(name_end),
                     ));
                 }
+                definitions.actions.insert(name, content);
             },
             TokenValue::Keyword(Keyword::Const) => {
                 parser.next();
                 let (name_start, name_end) = (parser.token()?.start, parser.token()?.end);
                 let name = parser.expect_name()?;
-                let parameters = parser.parse_signature()?;
+                let parameters = parser.parse_parameters(false)?;
                 let mut value_type = DataType::Unknown;
                 if parser.is_at_symbol(Symbol::Colon)? {
                     parser.next();
@@ -868,20 +876,21 @@ pub fn parse_definitions(tokens: &[Token]) -> Result<Definitions, DesmosifyError
                 }
                 parser.next();
                 let value = Box::new(parser.parse_expression(&[Symbol::Semicolon], &[])?);
-                let identifier = Identifier::Const { name: name.clone(), parameters, value_type, value };
-                if let Some(original) = definitions.identifiers.insert(name, identifier) {
+                let signature = Signature::Const { name: name.clone(), parameters, value_type };
+                if let Some(original) = signatures.user_defined.insert(name.clone(), signature) {
                     return Err(DesmosifyError::new(
                         message_identifier_conflict(original),
                         Some(name_start),
                         Some(name_end),
                     ));
                 }
+                definitions.identifiers.insert(name, value);
             },
             TokenValue::Keyword(Keyword::Let) => {
                 parser.next();
                 let (name_start, name_end) = (parser.token()?.start, parser.token()?.end);
                 let name = parser.expect_name()?;
-                let parameters = parser.parse_signature()?;
+                let parameters = parser.parse_parameters(false)?;
                 let mut value_type = DataType::Unknown;
                 if parser.is_at_symbol(Symbol::Colon)? {
                     parser.next();
@@ -891,14 +900,15 @@ pub fn parse_definitions(tokens: &[Token]) -> Result<Definitions, DesmosifyError
                 }
                 parser.next();
                 let value = Box::new(parser.parse_expression(&[Symbol::Semicolon], &[])?);
-                let identifier = Identifier::Let { name: name.clone(), parameters, value_type, value };
-                if let Some(original) = definitions.identifiers.insert(name, identifier) {
+                let signature = Signature::Let { name: name.clone(), parameters, value_type };
+                if let Some(original) = signatures.user_defined.insert(name.clone(), signature) {
                     return Err(DesmosifyError::new(
                         message_identifier_conflict(original),
                         Some(name_start),
                         Some(name_end),
                     ));
                 }
+                definitions.identifiers.insert(name, value);
             },
             TokenValue::Keyword(Keyword::Var) => {
                 parser.next();
@@ -920,14 +930,15 @@ pub fn parse_definitions(tokens: &[Token]) -> Result<Definitions, DesmosifyError
                 }
                 parser.next();
                 let value = Box::new(parser.parse_expression(&[Symbol::Semicolon], &[])?);
-                let identifier = Identifier::Var { name: name.clone(), qualifier, value_type, value };
-                if let Some(original) = definitions.identifiers.insert(name, identifier) {
+                let signature = Signature::Var { name: name.clone(), qualifier, value_type };
+                if let Some(original) = signatures.user_defined.insert(name.clone(), signature) {
                     return Err(DesmosifyError::new(
                         message_identifier_conflict(original),
                         Some(name_start),
                         Some(name_end),
                     ));
                 }
+                definitions.identifiers.insert(name, value);
             },
             TokenValue::Keyword(Keyword::Enum) => {
                 parser.next();
@@ -946,8 +957,8 @@ pub fn parse_definitions(tokens: &[Token]) -> Result<Definitions, DesmosifyError
                         parser.next();
                     }
                 }
-                let identifier = Identifier::Enum { name: name.clone(), variants };
-                if let Some(original) = definitions.identifiers.insert(name, identifier) {
+                let signature = Signature::Enum { name: name.clone(), variants };
+                if let Some(original) = signatures.user_defined.insert(name, signature) {
                     return Err(DesmosifyError::new(
                         message_identifier_conflict(original),
                         Some(name_start),
@@ -959,5 +970,6 @@ pub fn parse_definitions(tokens: &[Token]) -> Result<Definitions, DesmosifyError
         }
         parser.next();
     }
-    Ok(definitions)
+
+    Ok((signatures, definitions))
 }

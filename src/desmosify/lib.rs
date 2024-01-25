@@ -1,5 +1,6 @@
-use syntax::*;
-use token::*;
+#![allow(dead_code)]
+#![allow(unused_variables)]
+#![allow(unused_imports)]
 
 use std::collections::BTreeMap;
 
@@ -8,6 +9,9 @@ pub mod display;
 pub mod syntax;
 pub mod target;
 pub mod token;
+
+use syntax::*;
+use token::*;
 
 #[derive(Copy, Clone, PartialEq, Debug)]
 pub struct SourceLocation {
@@ -83,6 +87,7 @@ pub struct Parameter {
 #[derive(Clone, PartialEq, Debug)]
 pub enum DataType {
     Unknown,
+    Void,
     Real,
     Int,
     Bool,
@@ -92,10 +97,10 @@ pub enum DataType {
     Polygon,
     Segment,
     Str,
-    List(Box<DataType>),
-    Function,
-    Action,
-    User(String),
+    List { item_type: Box<DataType> },
+    Function { name: String },
+    Action { name: String },
+    User { name: String },
 }
 
 impl DataType {
@@ -110,14 +115,35 @@ impl DataType {
             "polygon" => Self::Polygon,
             "segment" => Self::Segment,
             "str" => Self::Str,
-            "action" => Self::Action, // FIXME: action is a keyword
-            _ => Self::User(String::from(name))
+            _ => Self::User { name: String::from(name) }
+        }
+    }
+}
+
+impl std::fmt::Display for DataType {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Unknown => write!(f, "?"),
+            Self::Void => write!(f, "void"),
+            Self::Real => write!(f, "real"),
+            Self::Int => write!(f, "int"),
+            Self::Bool => write!(f, "bool"),
+            Self::Point => write!(f, "point"),
+            Self::IPoint => write!(f, "ipoint"),
+            Self::Color => write!(f, "color"),
+            Self::Polygon => write!(f, "polygon"),
+            Self::Segment => write!(f, "segment"),
+            Self::Str => write!(f, "str"),
+            Self::List { item_type } => write!(f, "[{item_type}]"),
+            Self::Function { name } => write!(f, "<function {name}>"),
+            Self::Action { name } => write!(f, "<action {name}>"),
+            Self::User { name } => write!(f, "{name}"),
         }
     }
 }
 
 #[derive(Clone, PartialEq, Debug)]
-pub enum DataValue {
+pub enum ConstantValue {
     Real(f64),
     Int(i64),
     Bool(bool),
@@ -127,11 +153,11 @@ pub enum DataValue {
     Polygon(Vec<(f64, f64)>),
     Segment((f64, f64), (f64, f64)),
     Str(String),
-    List(DataType, Vec<DataValue>),
-    Function(String),
+    List(DataType, Vec<ConstantValue>),
+    EnumVariant(String, String),
 }
 
-impl DataValue {
+impl ConstantValue {
     pub fn from_token_value(value: &TokenValue) -> Option<Self> {
         Some(match value {
             &TokenValue::Integer(value) => Self::Int(value),
@@ -153,8 +179,12 @@ impl DataValue {
             Self::Polygon(_) => DataType::Polygon,
             Self::Segment(_, _) => DataType::Segment,
             Self::Str(_) => DataType::Str,
-            Self::List(inner, _) => DataType::List(Box::new(inner.clone())),
-            Self::Function(_) => DataType::Function,
+            Self::List(item_type, _) => DataType::List {
+                item_type: Box::new(item_type.clone()),
+            },
+            Self::EnumVariant(name, _) => DataType::User {
+                name: name.clone(),
+            },
         }
     }
 }
@@ -173,37 +203,33 @@ pub enum VariableQualifier {
 }
 
 #[derive(Debug)]
-pub enum Identifier {
+pub enum Signature {
     Const {
         name: String,
-        parameters: Vec<Parameter>,
+        parameters: Option<Vec<Parameter>>,
         value_type: DataType,
-        value: Box<Expression>,
     },
     Let {
         name: String,
-        parameters: Vec<Parameter>,
+        parameters: Option<Vec<Parameter>>,
         value_type: DataType,
-        value: Box<Expression>,
     },
     Var {
         name: String,
         qualifier: Option<VariableQualifier>,
         value_type: DataType,
-        value: Box<Expression>,
     },
     Action {
         name: String,
         parameters: Vec<Parameter>,
-        content: Box<Action>,
     },
     Enum {
         name: String,
         variants: Vec<String>,
-    }
+    },
 }
 
-impl Identifier {
+impl Signature {
     pub fn variant_name(&self) -> &'static str {
         match self {
             Self::Const { .. } => "const",
@@ -215,7 +241,6 @@ impl Identifier {
     }
 
     pub fn name(&self) -> &str {
-        // TODO: necessary?
         match self {
             Self::Const { name, .. } => name,
             Self::Let { name, .. } => name,
@@ -228,29 +253,40 @@ impl Identifier {
 
 #[derive(Debug)]
 pub struct Ticker {
-    interval_ms: Option<Box<Expression>>,
-    tick_action: Box<Action>,
+    pub interval_ms: Option<Box<Expression>>,
+    pub tick_action: Box<Action>,
 }
 
 #[derive(Debug)]
 pub struct Definitions {
-    public: Option<Vec<Expression>>,
-    ticker: Option<Ticker>,
-    display: Option<Vec<display::Element>>,
-    identifiers: BTreeMap<String, Identifier>,
+    pub identifiers: BTreeMap<String, Box<Expression>>,
+    pub actions: BTreeMap<String, Box<Action>>,
+    pub public: Option<Vec<Expression>>,
+    pub ticker: Option<Ticker>,
+    pub display: Option<Vec<display::Element>>,
 }
 
 impl Definitions {
     pub fn new() -> Self {
         Self {
+            identifiers: BTreeMap::new(),
+            actions: BTreeMap::new(),
             public: None,
             ticker: None,
             display: None,
-            identifiers: BTreeMap::new(),
         }
     }
+}
 
-    pub fn get_identifier(&self, name: &str) -> Option<&Identifier> {
-        self.identifiers.get(name)
+#[derive(Debug)]
+pub struct Signatures {
+    pub user_defined: BTreeMap<String, Signature>,
+}
+
+impl Signatures {
+    pub fn new() -> Self {
+        Self {
+            user_defined: BTreeMap::new(),
+        }
     }
 }

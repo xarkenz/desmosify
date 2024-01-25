@@ -77,7 +77,7 @@ impl Attribute for PointAttribute {
         let opacity = Box::new(if arguments.len() == 2 {
             arguments.pop().unwrap()
         } else {
-            Expression::from_constant(DataValue::Real(1.0))
+            Expression::from_constant(ConstantValue::Real(1.0))
         });
         let size_pixels = Box::new(arguments.pop().unwrap());
         Ok(Self {
@@ -155,7 +155,7 @@ impl Attribute for StrokeAttribute {
         let opacity = Box::new(if arguments.len() == 2 {
             arguments.pop().unwrap()
         } else {
-            Expression::from_constant(DataValue::Real(1.0))
+            Expression::from_constant(ConstantValue::Real(1.0))
         });
         let width_pixels = Box::new(arguments.pop().unwrap());
         Ok(Self {
@@ -188,7 +188,7 @@ impl Attribute for FillAttribute {
         let opacity = Box::new(if arguments.len() == 1 {
             arguments.pop().unwrap()
         } else {
-            Expression::from_constant(DataValue::Real(1.0))
+            Expression::from_constant(ConstantValue::Real(1.0))
         });
         Ok(Self {
             opacity,
@@ -277,17 +277,17 @@ impl Attribute for LabelAttribute {
         let angle_degrees = Box::new(if arguments.len() == 4 {
             arguments.pop().unwrap()
         } else {
-            Expression::from_constant(DataValue::Real(0.0))
+            Expression::from_constant(ConstantValue::Real(0.0))
         });
         let scale_factor = Box::new(if arguments.len() == 3 {
             arguments.pop().unwrap()
         } else {
-            Expression::from_constant(DataValue::Real(1.0))
+            Expression::from_constant(ConstantValue::Real(1.0))
         });
         let opacity = Box::new(if arguments.len() == 2 {
             arguments.pop().unwrap()
         } else {
-            Expression::from_constant(DataValue::Real(1.0))
+            Expression::from_constant(ConstantValue::Real(1.0))
         });
         let text = parser.get_constant_string(arguments.pop().unwrap())?;
         Ok(Self {
