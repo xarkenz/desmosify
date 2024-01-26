@@ -1,8 +1,9 @@
 [package]
-name = "desmosify-test"
+name = "desmosify"
 version = "0.1.0"
 authors = ["xarkenz"]
 edition = "2021"
+default-run = "desmosify-test"
 
 [lib]
 name = "desmosify"
@@ -12,7 +13,6 @@ path = "src/desmosify/lib.rs"
 name = "desmosify-test"
 path = "src/desmosify-test/main.rs"
 
-# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
-
 [dependencies]
+clap = { version = "4.4.6", features = ["derive"] }
 json = "0.12.4"

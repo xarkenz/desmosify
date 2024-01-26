@@ -1,51 +1,14 @@
-use desmosify::{self, target::Target};
+use std::time::Instant;
 
 fn main() {
-    let code = "
-        public {
-            \"fibonacci!\";
-            action next();
-            \"the numbers:\";
-            num_a;
-            num_b;
-        }
+    let start_time = Instant::now();
 
-        var num_a: int = 0;
-        var num_b: int = 1;
-
-        action next() {
-            num_a := num_b,
-            num_b := num_a + num_b,
-        }
-    ";
-
-    let tokens = match desmosify::token::tokenize(code) {
-        Ok(value) => value,
-        Err(error) => {
-            eprintln!("DesmosifyError while tokenizing: {error}");
-            return;
-        }
-    };
-    // for token in &tokens {
-    //     print!("{} ", &code[token.start.index .. token.end.index]);
-    // }
-    // println!();
-    // println!();
-    let (signatures, mut definitions) = match desmosify::syntax::parse(&tokens) {
-        Ok(value) => value,
-        Err(error) => {
-            eprintln!("DesmosifyError while parsing: {error}");
-            return;
-        }
-    };
-    println!("{signatures:?}");
-    if let Err(error) = desmosify::semantics::analyze(&signatures, &mut definitions) {
-        eprintln!("DesmosifyError while analyzing: {error}");
-        return;
+    let args = desmosify::cli::parse_command_line_args();
+    match desmosify::cli::invoke(&args) {
+        Err(error) => println!("\x1b[31mError: {error}\x1b[0m"),
+        Ok(_) => println!("\x1b[32mFinished\x1b[0m"),
     }
-    println!();
-    let target = desmosify::target::desmos::GeometryTarget;
-    let compiled = target.compile(&definitions, &signatures);
-    println!("{compiled}");
-    println!("done");
+
+    let time_taken_ms = start_time.elapsed().as_millis();
+    println!("\x1b[2mTime: {time_taken_ms} ms\x1b[22m");
 }

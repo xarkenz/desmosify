@@ -4,8 +4,9 @@
 
 use std::collections::BTreeMap;
 
-pub mod semantics;
+pub mod cli;
 pub mod display;
+pub mod semantics;
 pub mod syntax;
 pub mod target;
 pub mod token;

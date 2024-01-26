@@ -18,7 +18,11 @@
 			"label": "test desmosify",
 			"type": "shell",
 			"command": "./target/debug/desmosify-test.exe",
-			"args": [],
+			"args": [
+				"--debug",
+				"--src", "./src/desmosify-test/test.desmos",
+				"--out", "./src/desmosify-test/out.json"
+			],
 			"dependsOn": ["build desmosify"],
 			"options": {
 				"cwd": "${workspaceFolder}"

@@ -206,46 +206,212 @@ impl GeometryTarget {
     }
 
     pub fn translate_operator(&self, operation: crate::Operation, operands: &[Expression]) -> Box<SyntaxNode> {
-        let mut operands = Vec::from_iter(operands.iter()
+        let raw_operands = operands;
+        let mut operands = Vec::from_iter(raw_operands.iter()
             .rev()
             .map(|operand| self.translate_expression(operand)));
 
         Box::new(match operation {
-            crate::Operation::PointLiteral => todo!(),
-            crate::Operation::ListLiteral => todo!(),
+            crate::Operation::PointLiteral => SyntaxNode::Paren(
+                Box::new(SyntaxNode::Sequence(
+                    operands.into_iter().map(|component| *component).collect(),
+                )),
+            ),
+            crate::Operation::ListLiteral => SyntaxNode::List(
+                Box::new(SyntaxNode::Sequence(
+                    operands.into_iter().map(|item| *item).collect(),
+                )),
+            ),
             crate::Operation::ListFill => todo!(),
             crate::Operation::ListMap => todo!(),
             crate::Operation::ListFilter => todo!(),
             crate::Operation::MemberAccess => todo!(),
-            crate::Operation::BuiltIn => todo!(),
-            crate::Operation::Call => todo!(),
-            crate::Operation::ActionCall => SyntaxNode::Call(operands.pop().unwrap(), Box::new(SyntaxNode::Sequence(operands.into_iter().map(|arg| *arg).collect()))),
+            crate::Operation::BuiltIn => SyntaxNode::Command(
+                match &raw_operands[0].value {
+                    ExpressionValue::Name(name) => name.clone(),
+                    _ => panic!()
+                },
+            ),
+            crate::Operation::Call => SyntaxNode::Call(
+                operands.pop().unwrap(),
+                Box::new(SyntaxNode::Sequence(
+                    operands.into_iter().map(|argument| *argument).collect(),
+                )),
+            ),
+            crate::Operation::ActionCall => SyntaxNode::Call(
+                operands.pop().unwrap(),
+                Box::new(SyntaxNode::Sequence(
+                    operands.into_iter().map(|argument| *argument).collect(),
+                )),
+            ),
             crate::Operation::Index => todo!(),
-            crate::Operation::Posate => todo!(),
-            crate::Operation::Negate => todo!(),
-            crate::Operation::Not => todo!(),
-            crate::Operation::Exponent => todo!(),
-            crate::Operation::Multiply => SyntaxNode::Mul(operands.pop().unwrap(), operands.pop().unwrap()),
-            crate::Operation::Divide => SyntaxNode::Frac(operands.pop().unwrap(), operands.pop().unwrap()),
+            crate::Operation::Posate => SyntaxNode::Paren(
+                Box::new(SyntaxNode::Pos(
+                    operands.pop().unwrap(),
+                )),
+            ),
+            crate::Operation::Negate => SyntaxNode::Paren(
+                Box::new(SyntaxNode::Neg(
+                    operands.pop().unwrap(),
+                )),
+            ),
+            crate::Operation::Not => SyntaxNode::Piecewise(
+                Box::new(SyntaxNode::Sequence(vec![
+                    SyntaxNode::Equality(
+                        operands.pop().unwrap(),
+                        Box::new(SyntaxNode::Decimal(0.0)),
+                    ),
+                    SyntaxNode::Decimal(0.0),
+                ])),
+            ),
+            crate::Operation::Exponent => SyntaxNode::Superscript(
+                operands.pop().unwrap(),
+                operands.pop().unwrap(),
+            ),
+            crate::Operation::Multiply => SyntaxNode::Paren(
+                Box::new(SyntaxNode::Mul(
+                    operands.pop().unwrap(),
+                    operands.pop().unwrap(),
+                ))
+            ),
+            crate::Operation::Divide => SyntaxNode::Frac(
+                operands.pop().unwrap(),
+                operands.pop().unwrap(),
+            ),
             crate::Operation::Modulus => SyntaxNode::Call(
                 Box::new(SyntaxNode::Command("mod".into())),
-                Box::new(SyntaxNode::Sequence(vec![*operands.pop().unwrap(), *operands.pop().unwrap()])),
+                Box::new(SyntaxNode::Sequence(vec![
+                    *operands.pop().unwrap(),
+                    *operands.pop().unwrap(),
+                ])),
             ),
-            crate::Operation::Add => SyntaxNode::Add(operands.pop().unwrap(), operands.pop().unwrap()),
-            crate::Operation::Subtract => SyntaxNode::Sub(operands.pop().unwrap(), operands.pop().unwrap()),
-            crate::Operation::LessThan => todo!(),
-            crate::Operation::GreaterThan => todo!(),
-            crate::Operation::LessEqual => todo!(),
-            crate::Operation::GreaterEqual => todo!(),
-            crate::Operation::Equal => todo!(),
-            crate::Operation::NotEqual => todo!(),
-            crate::Operation::And => todo!(),
-            crate::Operation::Or => todo!(),
+            crate::Operation::Add => SyntaxNode::Paren(
+                Box::new(SyntaxNode::Add(
+                    operands.pop().unwrap(),
+                    operands.pop().unwrap(),
+                ))
+            ),
+            crate::Operation::Subtract => SyntaxNode::Paren(
+                Box::new(SyntaxNode::Sub(
+                    operands.pop().unwrap(),
+                    operands.pop().unwrap(),
+                ))
+            ),
+            crate::Operation::LessThan => SyntaxNode::Piecewise(
+                Box::new(SyntaxNode::Sequence(vec![
+                    SyntaxNode::InequalityChain(
+                        operands.pop().unwrap(),
+                        InequalityType::Less,
+                        operands.pop().unwrap(),
+                        Vec::new(),
+                    ),
+                    SyntaxNode::Decimal(0.0),
+                ])),
+            ),
+            crate::Operation::GreaterThan => SyntaxNode::Piecewise(
+                Box::new(SyntaxNode::Sequence(vec![
+                    SyntaxNode::InequalityChain(
+                        operands.pop().unwrap(),
+                        InequalityType::Greater,
+                        operands.pop().unwrap(),
+                        Vec::new(),
+                    ),
+                    SyntaxNode::Decimal(0.0),
+                ])),
+            ),
+            crate::Operation::LessEqual => SyntaxNode::Piecewise(
+                Box::new(SyntaxNode::Sequence(vec![
+                    SyntaxNode::InequalityChain(
+                        operands.pop().unwrap(),
+                        InequalityType::LessEqual,
+                        operands.pop().unwrap(),
+                        Vec::new(),
+                    ),
+                    SyntaxNode::Decimal(0.0),
+                ])),
+            ),
+            crate::Operation::GreaterEqual => SyntaxNode::Piecewise(
+                Box::new(SyntaxNode::Sequence(vec![
+                    SyntaxNode::InequalityChain(
+                        operands.pop().unwrap(),
+                        InequalityType::GreaterEqual,
+                        operands.pop().unwrap(),
+                        Vec::new(),
+                    ),
+                    SyntaxNode::Decimal(0.0),
+                ])),
+            ),
+            crate::Operation::Equal => SyntaxNode::Piecewise(
+                Box::new(SyntaxNode::Sequence(vec![
+                    SyntaxNode::Equality(
+                        operands.pop().unwrap(),
+                        operands.pop().unwrap(),
+                    ),
+                    SyntaxNode::Decimal(0.0),
+                ])),
+            ),
+            // Desmos doesn't have != built-in, so we have to negate ==
+            crate::Operation::NotEqual => SyntaxNode::Piecewise(
+                Box::new(SyntaxNode::Sequence(vec![
+                    SyntaxNode::Colon(
+                        Box::new(SyntaxNode::Equality(
+                            operands.pop().unwrap(),
+                            operands.pop().unwrap(),
+                        )),
+                        Box::new(SyntaxNode::Decimal(0.0))
+                    ),
+                    SyntaxNode::Decimal(1.0),
+                ])),
+            ),
+            crate::Operation::And => SyntaxNode::Piecewise(
+                Box::new(SyntaxNode::Sequence(vec![
+                    SyntaxNode::Colon(
+                        Box::new(SyntaxNode::Equality(
+                            operands.pop().unwrap(),
+                            Box::new(SyntaxNode::Decimal(0.0)),
+                        )),
+                        Box::new(SyntaxNode::Decimal(0.0)),
+                    ),
+                    *operands.pop().unwrap(),
+                ])),
+            ),
+            crate::Operation::Or => SyntaxNode::Piecewise(
+                Box::new(SyntaxNode::Sequence(vec![
+                    SyntaxNode::Colon(
+                        Box::new(SyntaxNode::Equality(
+                            operands.pop().unwrap(),
+                            Box::new(SyntaxNode::Decimal(1.0)),
+                        )),
+                        Box::new(SyntaxNode::Decimal(1.0)),
+                    ),
+                    *operands.pop().unwrap(),
+                ])),
+            ),
             crate::Operation::ExclusiveRange => todo!(),
             crate::Operation::InclusiveRange => todo!(),
-            crate::Operation::Conditional => todo!(),
+            crate::Operation::Conditional => {
+                let mut branches = Vec::new();
+                while operands.len() > 1 {
+                    branches.push(SyntaxNode::Colon(
+                        Box::new(SyntaxNode::Equality(
+                            operands.pop().unwrap(),
+                            Box::new(SyntaxNode::Decimal(1.0)),
+                        )),
+                        operands.pop().unwrap(),
+                    ));
+                }
+                if let Some(operand) = operands.pop() {
+                    branches.push(*operand);
+                }
+                SyntaxNode::Piecewise(
+                    Box::new(SyntaxNode::Sequence(branches)),
+                )
+            },
             crate::Operation::Assignment => todo!(),
-            crate::Operation::Update => SyntaxNode::RightArrow(operands.pop().unwrap(), operands.pop().unwrap()),
+            crate::Operation::Update => SyntaxNode::RightArrow(
+                operands.pop().unwrap(),
+                operands.pop().unwrap(),
+            ),
             crate::Operation::With => todo!(),
         })
     }
@@ -322,7 +488,8 @@ impl crate::target::Target for GeometryTarget {
                         Box::new(ExpressionEntry {
                             id: get_next_id(),
                             folder_id: None,
-                            content: Some(Box::new(content))
+                            content: Some(Box::new(content)),
+                            hidden: false,
                         })
                     },
                 };
@@ -340,35 +507,42 @@ impl crate::target::Target for GeometryTarget {
 
         for (name, action) in &definitions.actions {
             let signature = signatures.user_defined.get(name).unwrap();
-            let parameters = signature.parameters().unwrap();
+
             state.expressions.list.push(Box::new(ExpressionEntry {
                 id: get_next_id(),
                 folder_id: Some("desmosify:actions".into()),
                 content: Some(Box::new(SyntaxNode::Equality(
-                    Box::new(SyntaxNode::Call(
+                    signature.parameters().map_or_else(|| self.translate_name(name), |parameters| Box::new(SyntaxNode::Call(
                         self.translate_name(name),
                         Box::new(SyntaxNode::Sequence(parameters.iter().map(|parameter| *self.translate_name(&parameter.name)).collect())),
-                    )),
+                    ))),
                     self.translate_action(action),
                 ))),
+                hidden: false,
             }));
         }
 
         state.expressions.list.push(Box::new(FolderEntry {
-            id: "desmosify:variables".into(),
-            title: "Variables".into(),
+            id: "desmosify:defs".into(),
+            title: "Definitions".into(),
             collapsed: true,
             secret: false,
         }));
 
         for (name, expression) in &definitions.identifiers {
+            let signature = signatures.user_defined.get(name).unwrap();
+
             state.expressions.list.push(Box::new(ExpressionEntry {
                 id: get_next_id(),
-                folder_id: Some("desmosify:variables".into()),
+                folder_id: Some("desmosify:defs".into()),
                 content: Some(Box::new(SyntaxNode::Equality(
-                    self.translate_name(name),
+                    signature.parameters().map_or_else(|| self.translate_name(name), |parameters| Box::new(SyntaxNode::Call(
+                        self.translate_name(name),
+                        Box::new(SyntaxNode::Sequence(parameters.iter().map(|parameter| *self.translate_name(&parameter.name)).collect())),
+                    ))),
                     self.translate_expression(expression),
                 ))),
+                hidden: true,
             }));
         }
 

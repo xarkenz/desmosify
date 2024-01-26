@@ -1,0 +1,33 @@
+public {
+    "fibonacci!";
+    action next();
+    "the numbers:";
+    num_a;
+    num_b;
+
+    "easings";
+    time;
+    ease_linear(time);
+    ease_out(time);
+}
+
+var num_a: int = 0;
+var num_b: int = 1;
+var time: real = 0;
+
+let ease_linear(t: real): real = {
+    t <= 0: 0,
+    t <= 1: t,
+    1
+};
+
+let ease_out(t: real): real = {
+    t <= 0: 0,
+    t <= 1: 1 - (t - 1)^6,
+    1
+};
+
+action next() {
+    num_a := num_b,
+    num_b := num_a + num_b,
+}

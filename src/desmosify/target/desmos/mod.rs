@@ -57,13 +57,16 @@ pub struct FolderEntry {
 
 impl ToJson for FolderEntry {
     fn to_json(&self) -> JsonValue {
-        json::object!{
+        let mut object = json::object!{
             "type": self.type_name(),
             "id": self.id(),
             "title": self.title.as_str(),
             "collapsed": self.collapsed,
-            "secret": self.secret,
+        };
+        if self.secret {
+            object["secret"] = true.into();
         }
+        object
     }
 }
 
@@ -82,6 +85,7 @@ pub struct ExpressionEntry {
     pub id: String,
     pub folder_id: Option<String>,
     pub content: Option<Box<SyntaxNode>>,
+    pub hidden: bool,
 }
 
 impl ToJson for ExpressionEntry {
@@ -94,6 +98,9 @@ impl ToJson for ExpressionEntry {
             object["folderId"] = folder_id.as_str().into();
         }
         object["latex"] = self.content.as_ref().map_or_else(String::new, |content| content.to_latex().to_string()).into();
+        if self.hidden {
+            object["hidden"] = true.into();
+        }
         object
     }
 }
@@ -268,38 +275,62 @@ pub enum BracketType {
 }
 
 impl BracketType {
-    pub fn left(&self) -> char {
+    pub fn left(&self) -> &str {
         match self {
-            Self::Paren => '(',
-            Self::Square => '[',
-            Self::Curly => '{',
-            Self::Pipe => '|',
+            Self::Paren => "(",
+            Self::Square => "[",
+            Self::Curly => "\\{",
+            Self::Pipe => "|",
         }
     }
 
-    pub fn right(&self) -> char {
+    pub fn right(&self) -> &str {
         match self {
-            Self::Paren => ')',
-            Self::Square => ']',
-            Self::Curly => '}',
-            Self::Pipe => '|',
+            Self::Paren => ")",
+            Self::Square => "]",
+            Self::Curly => "\\}",
+            Self::Pipe => "|",
         }
     }
 }
 
 #[derive(Debug)]
 pub enum LatexNode {
-    Group { content: Latex },
-    Sqrt { index: Option<Latex>, radicand: Latex },
-    Frac { numerator: Latex, denominator: Latex },
-    Subscript { content: Latex },
-    Superscript { content: Latex },
-    Left { bracket_type: BracketType },
-    Right { bracket_type: BracketType },
-    OperatorName { content: String },
-    Escape { value: String },
-    Symbol { value: char },
-    Symbols { value: String },
+    Group {
+        content: Latex,
+    },
+    Sqrt {
+        index: Option<Latex>,
+        radicand: Latex,
+    },
+    Frac {
+        numerator: Latex,
+        denominator: Latex,
+    },
+    Subscript {
+        content: Latex,
+    },
+    Superscript {
+        content: Latex,
+    },
+    Left {
+        bracket_type: BracketType,
+    },
+    Right {
+        bracket_type: BracketType,
+    },
+    OperatorName {
+        content: String,
+    },
+    Escape {
+        value: String,
+    },
+    Symbol {
+        value: char,
+    },
+    Symbols {
+        value: String,
+    },
 }
 
 impl LatexNode {
@@ -388,8 +419,8 @@ impl Latex {
         self
     }
 
-    pub fn add_escape(mut self, name: String) -> Self {
-        self.nodes.push(LatexNode::Escape { value: name });
+    pub fn add_escape(mut self, value: String) -> Self {
+        self.nodes.push(LatexNode::Escape { value });
         self
     }
 
@@ -407,6 +438,7 @@ impl Latex {
 impl std::fmt::Display for Latex {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let mut end_is_alphabetic = false;
+
         for node in &self.nodes {
             match node {
                 LatexNode::Group { content } => {
@@ -451,8 +483,10 @@ impl std::fmt::Display for Latex {
                     write!(f, "{value}")?;
                 },
             }
+
             end_is_alphabetic = node.last_char_is_alphabetic();
         }
+
         Ok(())
     }
 }
