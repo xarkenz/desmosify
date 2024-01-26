@@ -1,6 +1,6 @@
 use super::*;
 
-use crate::{Definitions, ConstantValue};
+use crate::{Action, ConstantValue, Definitions, Signatures};
 use crate::syntax::{Expression, ExpressionValue};
 
 use json::JsonValue;
@@ -225,11 +225,14 @@ impl GeometryTarget {
             crate::Operation::Negate => todo!(),
             crate::Operation::Not => todo!(),
             crate::Operation::Exponent => todo!(),
-            crate::Operation::Multiply => todo!(),
-            crate::Operation::Divide => todo!(),
-            crate::Operation::Modulus => todo!(),
-            crate::Operation::Add => todo!(),
-            crate::Operation::Subtract => todo!(),
+            crate::Operation::Multiply => SyntaxNode::Mul(operands.pop().unwrap(), operands.pop().unwrap()),
+            crate::Operation::Divide => SyntaxNode::Frac(operands.pop().unwrap(), operands.pop().unwrap()),
+            crate::Operation::Modulus => SyntaxNode::Call(
+                Box::new(SyntaxNode::Command("mod".into())),
+                Box::new(SyntaxNode::Sequence(vec![*operands.pop().unwrap(), *operands.pop().unwrap()])),
+            ),
+            crate::Operation::Add => SyntaxNode::Add(operands.pop().unwrap(), operands.pop().unwrap()),
+            crate::Operation::Subtract => SyntaxNode::Sub(operands.pop().unwrap(), operands.pop().unwrap()),
             crate::Operation::LessThan => todo!(),
             crate::Operation::GreaterThan => todo!(),
             crate::Operation::LessEqual => todo!(),
@@ -254,6 +257,23 @@ impl GeometryTarget {
             ExpressionValue::Operator(operation, operands) => self.translate_operator(*operation, operands),
         }
     }
+
+    pub fn translate_action(&self, action: &Action) -> Box<SyntaxNode> {
+        match action {
+            Action::Block(subactions) => Box::new(SyntaxNode::Paren(
+                Box::new(SyntaxNode::Sequence(subactions.iter().map(|subaction| *self.translate_action(subaction)).collect())),
+            )),
+            Action::Update(target, value) => Box::new(SyntaxNode::RightArrow(
+               self.translate_expression(target),
+               self.translate_expression(value),
+            )),
+            Action::Call(name, arguments) => Box::new(SyntaxNode::Call(
+                self.translate_expression(name),
+                Box::new(SyntaxNode::Sequence(arguments.iter().map(|argument| *self.translate_expression(argument)).collect())),
+            )),
+            Action::Conditional(branches, default_branch) => todo!(),
+        }
+    }
 }
 
 impl crate::target::Target for GeometryTarget {
@@ -263,7 +283,7 @@ impl crate::target::Target for GeometryTarget {
         "desmos-geometry"
     }
 
-    fn compile(&self, definitions: &Definitions) -> Self::Output {
+    fn compile(&self, definitions: &Definitions, signatures: &Signatures) -> Self::Output {
         let mut state = GraphState {
             version: 11,
             graph: GraphSettings {
@@ -312,18 +332,30 @@ impl crate::target::Target for GeometryTarget {
         }
 
         state.expressions.list.push(Box::new(FolderEntry {
-            id: "desmosify_actions".into(),
+            id: "desmosify:actions".into(),
             title: "Actions".into(),
             collapsed: true,
             secret: false,
         }));
 
-        for (_name, _action) in &definitions.actions {
-            //
+        for (name, action) in &definitions.actions {
+            let signature = signatures.user_defined.get(name).unwrap();
+            let parameters = signature.parameters().unwrap();
+            state.expressions.list.push(Box::new(ExpressionEntry {
+                id: get_next_id(),
+                folder_id: Some("desmosify:actions".into()),
+                content: Some(Box::new(SyntaxNode::Equality(
+                    Box::new(SyntaxNode::Call(
+                        self.translate_name(name),
+                        Box::new(SyntaxNode::Sequence(parameters.iter().map(|parameter| *self.translate_name(&parameter.name)).collect())),
+                    )),
+                    self.translate_action(action),
+                ))),
+            }));
         }
 
         state.expressions.list.push(Box::new(FolderEntry {
-            id: "desmosify_variables".into(),
+            id: "desmosify:variables".into(),
             title: "Variables".into(),
             collapsed: true,
             secret: false,
@@ -332,12 +364,12 @@ impl crate::target::Target for GeometryTarget {
         for (name, expression) in &definitions.identifiers {
             state.expressions.list.push(Box::new(ExpressionEntry {
                 id: get_next_id(),
-                folder_id: Some("desmosify_variables".into()),
+                folder_id: Some("desmosify:variables".into()),
                 content: Some(Box::new(SyntaxNode::Equality(
                     self.translate_name(name),
                     self.translate_expression(expression),
                 ))),
-            }))
+            }));
         }
 
         state.to_json()

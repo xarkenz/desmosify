@@ -3,12 +3,20 @@ use desmosify::{self, target::Target};
 fn main() {
     let code = "
         public {
-            \"click this to reset lol\";
-            action reset();
-            hehe;
+            \"fibonacci!\";
+            action next();
+            \"the numbers:\";
+            num_a;
+            num_b;
         }
 
-        var hehe: int = 1;
+        var num_a: int = 0;
+        var num_b: int = 1;
+
+        action next() {
+            num_a := num_b,
+            num_b := num_a + num_b,
+        }
     ";
 
     let tokens = match desmosify::token::tokenize(code) {
@@ -37,7 +45,7 @@ fn main() {
     }
     println!();
     let target = desmosify::target::desmos::GeometryTarget;
-    let compiled = target.compile(&definitions);
+    let compiled = target.compile(&definitions, &signatures);
     println!("{compiled}");
     println!("done");
 }

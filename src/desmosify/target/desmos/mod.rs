@@ -445,7 +445,7 @@ impl std::fmt::Display for Latex {
                     c if end_is_alphabetic && c.is_alphabetic() => write!(f, " {value}")?,
                     _ => write!(f, "{value}")?,
                 },
-                LatexNode::Symbols { value } => if value.starts_with(|c: char| c.is_alphabetic()) {
+                LatexNode::Symbols { value } => if end_is_alphabetic && value.starts_with(|c: char| c.is_alphabetic()) {
                     write!(f, " {value}")?;
                 } else {
                     write!(f, "{value}")?;

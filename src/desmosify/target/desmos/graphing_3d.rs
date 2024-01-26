@@ -1,6 +1,6 @@
 use super::*;
 
-use crate::{Definitions, ConstantValue};
+use crate::{Definitions, Signatures, ConstantValue};
 use crate::syntax::{Expression, ExpressionValue};
 
 use json::JsonValue;
@@ -14,7 +14,7 @@ impl crate::target::Target for Graphing3DTarget {
         "desmos-graphing-3d"
     }
 
-    fn compile(&self, definitions: &Definitions) -> Self::Output {
+    fn compile(&self, definitions: &Definitions, signatures: &Signatures) -> Self::Output {
         todo!()
     }
 }

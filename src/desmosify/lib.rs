@@ -249,6 +249,15 @@ impl Signature {
             Self::Enum { name, .. } => name,
         }
     }
+
+    pub fn parameters(&self) -> Option<&[Parameter]> {
+        match self {
+            Self::Const { parameters, .. } => parameters.as_deref(),
+            Self::Let { parameters, .. } => parameters.as_deref(),
+            Self::Action { parameters, .. } => Some(parameters),
+            _ => None
+        }
+    }
 }
 
 #[derive(Debug)]
