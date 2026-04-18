@@ -5,7 +5,7 @@ fn main() {
 
     let args = desmosify::cli::parse_command_line_args();
     match desmosify::cli::invoke(&args) {
-        Err(error) => println!("\x1b[31mError: {error}\x1b[0m"),
+        Err(error) => println!("\x1b[31m{}\x1b[0m", error.to_string_with_context(args.source_paths())),
         Ok(_) => println!("\x1b[32mFinished\x1b[0m"),
     }
 

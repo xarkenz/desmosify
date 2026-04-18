@@ -5,12 +5,16 @@ impl Signatures {
         scope.parameters.get(name).map(|data_type| data_type.clone()).or_else(
             || self.user_defined.get(name).and_then(|signature| match signature {
                 Signature::Const { parameters, value_type, .. } => if parameters.is_some() {
-                    Some(DataType::Function { name: String::from(name) })
+                    Some(DataType::Function {
+                        name: name.into(),
+                    })
                 } else {
                     Some(value_type.clone())
                 },
                 Signature::Let { parameters, value_type, .. } => if parameters.is_some() {
-                    Some(DataType::Function { name: String::from(name) })
+                    Some(DataType::Function {
+                        name: name.into(),
+                    })
                 } else {
                     Some(value_type.clone())
                 },
@@ -34,7 +38,7 @@ impl DataType {
                 _ => false
             },
             Int => match target {
-                Unknown | Real | Int | User { .. } => true,
+                Unknown | Real | Int | UserDefined { .. } => true,
                 _ => false
             },
             Bool => match target {
@@ -65,9 +69,9 @@ impl DataType {
                 List { item_type: target_item_type } => item_type.can_coerce_to(target_item_type),
                 _ => item_type.can_coerce_to(target)
             },
-            User { name } => match target {
+            UserDefined { name } => match target {
                 Unknown | Real | Int => true,
-                User { name: target_name } => target_name == name,
+                UserDefined { name: target_name } => target_name == name,
                 _ => false
             },
             _ => false
@@ -128,7 +132,7 @@ pub fn message_cannot_coerce(from_type: &DataType, to_type: &DataType) -> String
 pub struct Scope {
     pub can_use_dt: bool,
     pub can_use_index: bool,
-    pub parameters: BTreeMap<String, DataType>,
+    pub parameters: BTreeMap<Box<str>, DataType>,
 }
 
 impl Default for Scope {
@@ -189,12 +193,12 @@ pub fn analyze_expression(signatures: &Signatures, scope: &Scope, expression: &m
                     analyze_expression(signatures, scope, component)?;
                 }
                 expression.data_type = operands[0].data_type.merge_numeric(&operands[1].data_type)
-                        .ok_or_else(|| DesmosifyError::new(
-                            format!("cannot create a point of types ({}, {})", operands[0].data_type, operands[1].data_type),
-                            expression.start,
-                            expression.end,
-                        ))?
-                        .point_type(operands.len()).unwrap();
+                    .ok_or_else(|| DesmosifyError::new(
+                        format!("cannot create a point of types ({}, {})", operands[0].data_type, operands[1].data_type),
+                        expression.start,
+                        expression.end,
+                    ))?
+                    .point_type(operands.len()).unwrap();
                 if let (Some(x_value), Some(y_value)) = (operands[0].constant_value(), operands[1].constant_value()) {
                     let value = match (x_value, y_value) {
                         (&ConstantValue::Real(x_value), &ConstantValue::Real(y_value)) => {
@@ -216,31 +220,45 @@ pub fn analyze_expression(signatures: &Signatures, scope: &Scope, expression: &m
                         ))
                     };
 
+                    expression.data_type = value.data_type();
                     expression.value = ExpressionValue::Literal(value);
                 }
                 Ok(())
             },
-
             Operation::ListLiteral => {
                 let mut item_type = DataType::Unknown;
+                let mut constant_items = Some(Vec::new());
                 for item in operands.iter_mut() {
                     analyze_expression(signatures, scope, item)?;
+                    if let Some(inner_constant_items) = &mut constant_items {
+                        if let Some(constant_item) = item.constant_value() {
+                            inner_constant_items.push(constant_item.clone());
+                        }
+                        else {
+                            constant_items = None;
+                        }
+                    }
                     item_type = item_type.merge(&item.data_type)
-                            .ok_or_else(|| DesmosifyError::new(
-                                format!("unexpected item type '{}'", item.data_type),
-                                item.start,
-                                item.end,
-                            ))?;
+                        .ok_or_else(|| DesmosifyError::new(
+                            format!("unexpected item type '{}'", item.data_type),
+                            item.start,
+                            item.end,
+                        ))?;
+                }
+                if let Some(items) = constant_items {
+                    expression.value = ExpressionValue::Literal(ConstantValue::List {
+                        item_type: item_type.clone(),
+                        items,
+                    });
                 }
                 expression.data_type = item_type.list_type()
-                        .ok_or_else(|| DesmosifyError::new(
-                            format!("cannot create a list of type '{item_type}'"),
-                            expression.start,
-                            expression.end,
-                        ))?;
+                    .ok_or_else(|| DesmosifyError::new(
+                        format!("cannot create a list of type '{item_type}'"),
+                        expression.start,
+                        expression.end,
+                    ))?;
                 Ok(())
             },
-
             Operation::ListFill => {
                 for operand in operands.iter_mut() {
                     analyze_expression(signatures, scope, operand)?;
@@ -253,15 +271,14 @@ pub fn analyze_expression(signatures: &Signatures, scope: &Scope, expression: &m
                     ))
                 } else {
                     expression.data_type = operands[0].data_type.list_type()
-                            .ok_or_else(|| DesmosifyError::new(
-                                format!("cannot create a list of type '{}'", operands[0].data_type),
-                                operands[0].start,
-                                operands[0].end,
-                            ))?;
+                        .ok_or_else(|| DesmosifyError::new(
+                            format!("cannot create a list of type '{}'", operands[0].data_type),
+                            operands[0].start,
+                            operands[0].end,
+                        ))?;
                     Ok(())
                 }
             },
-
             Operation::ListMap => Ok(()),
             Operation::ListFilter => Ok(()),
             Operation::MemberAccess => Ok(()),
@@ -269,23 +286,85 @@ pub fn analyze_expression(signatures: &Signatures, scope: &Scope, expression: &m
             Operation::Call => Ok(()),
             Operation::ActionCall => Ok(()),
             Operation::Index => Ok(()),
-            Operation::Posate => Ok(()),
-            Operation::Negate => Ok(()),
-            Operation::Not => Ok(()),
+            Operation::Posate => {
+                analyze_expression(signatures, scope, &mut operands[0])?;
+                expression.data_type = operands[0].data_type.clone();
+                Ok(())
+            },
+            Operation::Negate => {
+                analyze_expression(signatures, scope, &mut operands[0])?;
+                expression.data_type = operands[0].data_type.clone();
+                Ok(())
+            },
+            Operation::Not => {
+                analyze_expression(signatures, scope, &mut operands[0])?;
+                expression.data_type = DataType::Bool;
+                Ok(())
+            },
             Operation::Exponent => Ok(()),
             Operation::Multiply => Ok(()),
             Operation::Divide => Ok(()),
             Operation::Modulus => Ok(()),
-            Operation::Add => Ok(()),
+            Operation::Add => {
+                analyze_expression(signatures, scope, &mut operands[0])?;
+                analyze_expression(signatures, scope, &mut operands[1])?;
+                expression.data_type = operands[0].data_type.merge(&operands[1].data_type)
+                    .ok_or_else(|| DesmosifyError::new(
+                        format!("cannot combine types '{}' and '{}'", operands[0].data_type, operands[1].data_type),
+                        expression.start,
+                        expression.end,
+                    ))?;
+                Ok(())
+            },
             Operation::Subtract => Ok(()),
-            Operation::LessThan => Ok(()),
-            Operation::GreaterThan => Ok(()),
-            Operation::LessEqual => Ok(()),
-            Operation::GreaterEqual => Ok(()),
-            Operation::Equal => Ok(()),
-            Operation::NotEqual => Ok(()),
-            Operation::And => Ok(()),
-            Operation::Or => Ok(()),
+            Operation::LessThan => {
+                analyze_expression(signatures, scope, &mut operands[0])?;
+                analyze_expression(signatures, scope, &mut operands[1])?;
+                expression.data_type = DataType::Bool;
+                Ok(())
+            },
+            Operation::GreaterThan => {
+                analyze_expression(signatures, scope, &mut operands[0])?;
+                analyze_expression(signatures, scope, &mut operands[1])?;
+                expression.data_type = DataType::Bool;
+                Ok(())
+            },
+            Operation::LessEqual => {
+                analyze_expression(signatures, scope, &mut operands[0])?;
+                analyze_expression(signatures, scope, &mut operands[1])?;
+                expression.data_type = DataType::Bool;
+                Ok(())
+            },
+            Operation::GreaterEqual => {
+                analyze_expression(signatures, scope, &mut operands[0])?;
+                analyze_expression(signatures, scope, &mut operands[1])?;
+                expression.data_type = DataType::Bool;
+                Ok(())
+            },
+            Operation::Equal => {
+                analyze_expression(signatures, scope, &mut operands[0])?;
+                analyze_expression(signatures, scope, &mut operands[1])?;
+                expression.data_type = DataType::Bool;
+                Ok(())
+            },
+            Operation::NotEqual => {
+                analyze_expression(signatures, scope, &mut operands[0])?;
+                analyze_expression(signatures, scope, &mut operands[1])?;
+                expression.data_type = DataType::Bool;
+                Ok(())
+            },
+            Operation::And => {
+                analyze_expression(signatures, scope, &mut operands[0])?;
+                analyze_expression(signatures, scope, &mut operands[1])?;
+                expression.data_type = DataType::Bool;
+                Ok(())
+            },
+            Operation::Or => {
+                analyze_expression(signatures, scope, &mut operands[0])?;
+                analyze_expression(signatures, scope, &mut operands[1])?;
+                expression.data_type = DataType::Bool;
+                Ok(())
+            },
             Operation::ExclusiveRange => Ok(()),
             Operation::InclusiveRange => Ok(()),
             Operation::Conditional => Ok(()),
@@ -312,21 +391,24 @@ pub fn analyze_action(signatures: &Signatures, scope: &Scope, action: &mut Actio
                     analyze_expression(signatures, scope, value.as_mut())?;
                     if value.data_type.can_coerce_to(value_type) {
                         Ok(())
-                    } else {
+                    }
+                    else {
                         Err(DesmosifyError::new(
                             message_cannot_coerce(&value.data_type, value_type),
                             target.start,
                             target.end,
                         ))
                     }
-                } else {
+                }
+                else {
                     Err(DesmosifyError::new(
                         format!("cannot update the value of '{name}' as it is not declared with 'var'"),
                         target.start,
                         target.end,
                     ))
                 }
-            } else {
+            }
+            else {
                 Err(DesmosifyError::new(
                     String::from("expected a variable name"),
                     target.start,
@@ -342,27 +424,30 @@ pub fn analyze_action(signatures: &Signatures, scope: &Scope, action: &mut Actio
                 if let Some(Signature::Action { parameters, .. }) = signatures.user_defined.get(name) {
                     if arguments.len() == parameters.len() {
                         arguments.iter().zip(parameters.iter())
-                                .find(|&(argument, parameter)| !argument.data_type.can_coerce_to(&parameter.data_type))
-                                .map_or(Ok(()), |(argument, parameter)| Err(DesmosifyError::new(
-                                    message_cannot_coerce(&argument.data_type, &parameter.data_type),
-                                    argument.start,
-                                    argument.end,
-                                )))
-                    } else {
+                            .find(|&(argument, parameter)| !argument.data_type.can_coerce_to(&parameter.data_type))
+                            .map_or(Ok(()), |(argument, parameter)| Err(DesmosifyError::new(
+                                message_cannot_coerce(&argument.data_type, &parameter.data_type),
+                                argument.start,
+                                argument.end,
+                            )))
+                    }
+                    else {
                         Err(DesmosifyError::new(
-                            format!("action {name} expects {} argument(s), but was provided {}", parameters.len(), arguments.len()),
+                            format!("'action {name}' expects {} argument(s), but was provided {}", parameters.len(), arguments.len()),
                             callee.start,
                             callee.end,
                         ))
                     }
-                } else {
+                }
+                else {
                     Err(DesmosifyError::new(
                         format!("could not find an action named '{name}'"),
                         callee.start,
                         callee.end,
                     ))
                 }
-            } else {
+            }
+            else {
                 Err(DesmosifyError::new(
                     String::from("expected an action name"),
                     callee.start,
@@ -377,7 +462,8 @@ pub fn analyze_action(signatures: &Signatures, scope: &Scope, action: &mut Actio
             }
             if let Some(default_branch) = default_branch {
                 analyze_action(signatures, scope, default_branch.as_mut())
-            } else {
+            }
+            else {
                 Ok(())
             }
         },
@@ -393,22 +479,25 @@ pub fn analyze_identifier(signatures: &Signatures, scope: &Scope, signature: &Si
                     call_scope.parameters.insert(name.clone(), data_type.clone());
                 }
                 analyze_expression(signatures, &call_scope, value)?;
-            } else {
+            }
+            else {
                 analyze_expression(signatures, scope, value)?;
             }
             if value.constant_value().is_none() {
                 Err(DesmosifyError::new(
-                    format!("the definition of const {name} could not be evaluated at compile-time"),
+                    format!("the definition of const '{name}' could not be evaluated at compile-time"),
                     value.start,
                     value.end,
                 ))
-            } else if !value.data_type.can_coerce_to(value_type) {
+            }
+            else if !value.data_type.can_coerce_to(value_type) {
                 Err(DesmosifyError::new(
                     message_cannot_coerce(&value.data_type, &value_type),
                     value.start,
                     value.end,
                 ))
-            } else {
+            }
+            else {
                 Ok(())
             }
         },
@@ -419,7 +508,8 @@ pub fn analyze_identifier(signatures: &Signatures, scope: &Scope, signature: &Si
                     call_scope.parameters.insert(name.clone(), data_type.clone());
                 }
                 analyze_expression(signatures, &call_scope, value)?;
-            } else {
+            }
+            else {
                 analyze_expression(signatures, scope, value)?;
             }
             if !value.data_type.can_coerce_to(value_type) {
@@ -428,7 +518,8 @@ pub fn analyze_identifier(signatures: &Signatures, scope: &Scope, signature: &Si
                     value.start,
                     value.end,
                 ))
-            } else {
+            }
+            else {
                 Ok(())
             }
         },
@@ -436,17 +527,19 @@ pub fn analyze_identifier(signatures: &Signatures, scope: &Scope, signature: &Si
             analyze_expression(signatures, scope, value)?;
             if value.constant_value().is_none() {
                 Err(DesmosifyError::new(
-                    format!("var {name} must be initialized with a constant value"),
+                    format!("var '{name}' must be initialized with a constant value"),
                     value.start,
                     value.end,
                 ))
-            } else if !value.data_type.can_coerce_to(value_type) {
+            }
+            else if !value.data_type.can_coerce_to(value_type) {
                 Err(DesmosifyError::new(
                     message_cannot_coerce(&value.data_type, &value_type),
                     value.start,
                     value.end,
                 ))
-            } else {
+            }
+            else {
                 Ok(())
             }
         },
@@ -454,7 +547,7 @@ pub fn analyze_identifier(signatures: &Signatures, scope: &Scope, signature: &Si
             Ok(())
         },
         _ => Err(DesmosifyError::new(
-            format!("got unexpected signature '{}' for {}", signature.variant_name(), signature.name()),
+            format!("got unexpected signature '{}' for '{}'", signature.variant_name(), signature.name()),
             None,
             None,
         ))
@@ -468,7 +561,8 @@ pub fn analyze_named_action(signatures: &Signatures, scope: &Scope, signature: &
             call_scope.parameters.insert(name.clone(), data_type.clone());
         }
         analyze_action(signatures, &call_scope, content)
-    } else {
+    }
+    else {
         Err(DesmosifyError::new(
             format!("got unexpected signature '{}' for action '{}'", signature.variant_name(), signature.name()),
             None,

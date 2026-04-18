@@ -4,7 +4,7 @@ public {
     "the numbers:";
     num_a;
     num_b;
-
+    "";
     "easings";
     time;
     ease_linear(time);
@@ -23,7 +23,7 @@ let ease_linear(t: real): real = {
 
 let ease_out(t: real): real = {
     t <= 0: 0,
-    t <= 1: 1 - (t - 1)^6,
+    t <= 1: 1 - (t - 1)**6,
     1
 };
 

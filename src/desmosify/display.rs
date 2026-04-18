@@ -5,7 +5,9 @@ use std::str::FromStr;
 pub trait Attribute {
     const NAME: &'static str;
 
-    fn parse(parser: &mut Parser) -> Result<Self, DesmosifyError> where Self: Sized;
+    fn parse(parser: &mut Parser) -> Result<Self, DesmosifyError>
+    where
+        Self: Sized;
 }
 
 // TODO: images
@@ -248,7 +250,7 @@ impl FromStr for LabelOrientation {
 
 #[derive(Debug)]
 pub struct LabelAttribute {
-    pub text: String,
+    pub text: Box<str>,
     pub opacity: Box<Expression>,
     pub scale_factor: Box<Expression>,
     pub angle_degrees: Box<Expression>,
@@ -387,7 +389,7 @@ impl Attribute for ClickAttribute {
 
 #[derive(Debug)]
 pub struct DescriptionAttribute {
-    pub text: String,
+    pub text: Box<str>,
 }
 
 impl Attribute for DescriptionAttribute {
@@ -449,7 +451,7 @@ impl Element {
             parser.next();
         }
         while !parser.is_at_symbol(Symbol::Semicolon)? {
-            match parser.expect_name()?.as_str() {
+            match &*parser.expect_name()? {
                 PointAttribute::NAME => if element.point.is_none() {
                     element.point = Some(PointAttribute::parse(parser)?);
                 } else {

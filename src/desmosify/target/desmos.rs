@@ -556,8 +556,8 @@ pub enum SyntaxNode {
     ImplicitMul(Box<SyntaxNode>, Box<SyntaxNode>),
     Letter(char),
     Decimal(f64),
-    Command(String),
-    Alphanumeric(String),
+    Command(Box<str>),
+    Alphanumeric(Box<str>),
 }
 
 impl SyntaxNode {
@@ -635,8 +635,8 @@ impl SyntaxNode {
             } else {
                 Latex::new().add_symbols(number.to_string())
             },
-            Self::Command(name) => Latex::new().add_operator_name(name.clone()),
-            Self::Alphanumeric(value) => Latex::new().add_symbols(value.clone()),
+            Self::Command(name) => Latex::new().add_operator_name(name.to_string()),
+            Self::Alphanumeric(value) => Latex::new().add_symbols(value.to_string()),
         }
     }
 }

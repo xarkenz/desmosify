@@ -1,7 +1,7 @@
 use super::*;
 
 use crate::{Action, ConstantValue, Definitions, Signatures};
-use crate::syntax::{Expression, ExpressionValue};
+use crate::ast::{Expression, ExpressionValue};
 
 use json::JsonValue;
 
@@ -189,12 +189,13 @@ impl GeometryTarget {
                 ])),
             ),
             ConstantValue::Str(content) => SyntaxNode::Alphanumeric(content.clone()),
-            ConstantValue::List(_, values) => SyntaxNode::List(
-                Box::new(SyntaxNode::Sequence(Vec::from_iter(values.iter().map(|value| {
-                    *self.translate_constant_value(value)
-                }))))
+            ConstantValue::List { items, .. } => SyntaxNode::List(
+                Box::new(SyntaxNode::Sequence(items
+                    .iter()
+                    .map(|value| *self.translate_constant_value(value))
+                    .collect()))
             ),
-            ConstantValue::EnumVariant(_, _) => todo!(),
+            ConstantValue::EnumVariant { .. } => todo!(),
         })
     }
     
@@ -222,8 +223,35 @@ impl GeometryTarget {
                     operands.into_iter().map(|item| *item).collect(),
                 )),
             ),
-            crate::Operation::ListFill => todo!(),
-            crate::Operation::ListMap => todo!(),
+            crate::Operation::ListFill => SyntaxNode::List(
+                Box::new(SyntaxNode::For(
+                    operands.pop().unwrap(),
+                    Box::new(SyntaxNode::Equality(
+                        Box::new(SyntaxNode::Letter('x')),
+                        Box::new(SyntaxNode::List(
+                            Box::new(SyntaxNode::Ellipsis(
+                                Box::new(SyntaxNode::Decimal(1.0)),
+                                Some(operands.pop().unwrap()),
+                            )),
+                        )),
+                    )),
+                )),
+            ),
+            crate::Operation::ListMap => SyntaxNode::List(
+                Box::new(SyntaxNode::For(
+                    match *operands.pop().unwrap() {
+                        SyntaxNode::List(content) => match content.as_ref() {
+                            SyntaxNode::For(_, _) => content,
+                            _ => Box::new(SyntaxNode::List(content))
+                        },
+                        operand => Box::new(operand)
+                    },
+                    Box::new(SyntaxNode::Equality(
+                        operands.pop().unwrap(),
+                        operands.pop().unwrap(),
+                    )),
+                )),
+            ),
             crate::Operation::ListFilter => todo!(),
             crate::Operation::MemberAccess => todo!(),
             crate::Operation::BuiltIn => SyntaxNode::Command(
@@ -244,7 +272,12 @@ impl GeometryTarget {
                     operands.into_iter().map(|argument| *argument).collect(),
                 )),
             ),
-            crate::Operation::Index => todo!(),
+            crate::Operation::Index => SyntaxNode::Paren(
+                Box::new(SyntaxNode::Index(
+                    operands.pop().unwrap(),
+                    operands.pop().unwrap(),
+                ))
+            ),
             crate::Operation::Posate => SyntaxNode::Paren(
                 Box::new(SyntaxNode::Pos(
                     operands.pop().unwrap(),
@@ -387,8 +420,23 @@ impl GeometryTarget {
                     *operands.pop().unwrap(),
                 ])),
             ),
-            crate::Operation::ExclusiveRange => todo!(),
-            crate::Operation::InclusiveRange => todo!(),
+            crate::Operation::ExclusiveRange => SyntaxNode::List(
+                Box::new(SyntaxNode::Ellipsis(
+                    operands.pop().unwrap(),
+                    operands.pop().map(|operand| Box::new(SyntaxNode::Paren(
+                        Box::new(SyntaxNode::Sub(
+                            operand,
+                            Box::new(SyntaxNode::Decimal(1.0)),
+                        )),
+                    ))),
+                )),
+            ),
+            crate::Operation::InclusiveRange => SyntaxNode::List(
+                Box::new(SyntaxNode::Ellipsis(
+                    operands.pop().unwrap(),
+                    operands.pop(),
+                )),
+            ),
             crate::Operation::Conditional => {
                 let mut branches = Vec::new();
                 while operands.len() > 1 {
@@ -437,7 +485,30 @@ impl GeometryTarget {
                 self.translate_expression(name),
                 Box::new(SyntaxNode::Sequence(arguments.iter().map(|argument| *self.translate_expression(argument)).collect())),
             )),
-            Action::Conditional(branches, default_branch) => todo!(),
+            Action::Conditional(branches, default_branch) => {
+                let mut piecewise_branches = Vec::from_iter(branches.iter().map(|(condition, consequent)| {
+                    SyntaxNode::Colon(
+                        Box::new(SyntaxNode::Equality(
+                            self.translate_expression(condition),
+                            Box::new(SyntaxNode::Decimal(1.0)),
+                        )),
+                        self.translate_action(consequent),
+                    )
+                }));
+                if let Some(default_branch) = default_branch {
+                    piecewise_branches.push(*self.translate_action(default_branch));
+                }
+                else {
+                    piecewise_branches.push(SyntaxNode::Subscript(
+                        Box::new(SyntaxNode::Command("delta".into())),
+                        Box::new(SyntaxNode::Alphanumeric("noaction".into())),
+                    ));
+                }
+
+                Box::new(SyntaxNode::Piecewise(
+                    Box::new(SyntaxNode::Sequence(piecewise_branches)),
+                ))
+            },
         }
     }
 }
@@ -481,7 +552,7 @@ impl crate::target::Target for GeometryTarget {
                         Box::new(TextEntry {
                             id: get_next_id(),
                             folder_id: None,
-                            content,
+                            content: content.into(),
                         })
                     },
                     content => {
@@ -545,6 +616,44 @@ impl crate::target::Target for GeometryTarget {
                 hidden: true,
             }));
         }
+
+        state.expressions.list.push(Box::new(FolderEntry {
+            id: "desmosify:utils".into(),
+            title: "Utilities".into(),
+            collapsed: true,
+            secret: false,
+        }));
+
+        state.expressions.list.push(Box::new(ExpressionEntry {
+            id: get_next_id(),
+            folder_id: Some("desmosify:utils".into()),
+            content: Some(Box::new(SyntaxNode::Equality(
+                Box::new(SyntaxNode::Subscript(
+                    Box::new(SyntaxNode::Command("delta".into())),
+                    Box::new(SyntaxNode::Alphanumeric("dummyvar".into())),
+                )),
+                Box::new(SyntaxNode::Decimal(0.0)),
+            ))),
+            hidden: false,
+        }));
+        state.expressions.list.push(Box::new(ExpressionEntry {
+            id: get_next_id(),
+            folder_id: Some("desmosify:utils".into()),
+            content: Some(Box::new(SyntaxNode::Equality(
+                Box::new(SyntaxNode::Subscript(
+                    Box::new(SyntaxNode::Command("delta".into())),
+                    Box::new(SyntaxNode::Alphanumeric("noaction".into())),
+                )),
+                Box::new(SyntaxNode::RightArrow(
+                    Box::new(SyntaxNode::Subscript(
+                        Box::new(SyntaxNode::Command("delta".into())),
+                        Box::new(SyntaxNode::Alphanumeric("dummyvar".into())),
+                    )),
+                    Box::new(SyntaxNode::Decimal(0.0)),
+                )),
+            ))),
+            hidden: false,
+        }));
 
         state.to_json()
     }

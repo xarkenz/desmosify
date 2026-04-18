@@ -1,7 +1,7 @@
 use super::*;
 
 use crate::{Definitions, Signatures, ConstantValue};
-use crate::syntax::{Expression, ExpressionValue};
+use crate::ast::{Expression, ExpressionValue};
 
 use json::JsonValue;
 
