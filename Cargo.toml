@@ -2,7 +2,7 @@
 name = "desmosify"
 version = "0.1.0"
 authors = ["xarkenz"]
-edition = "2021"
+edition = "2024"
 default-run = "desmosify-test"
 
 [lib]

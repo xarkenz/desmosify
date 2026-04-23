@@ -245,7 +245,7 @@ impl<T: BufRead> Scanner<T> {
                 }
                 'A'..='Z' | 'a'..='z' => {
                     self.put_back(ch);
-                    suffix = Some(self.scan_float_suffix()?);
+                    suffix = Some(self.scan_real_suffix()?);
                     break;
                 }
                 _ => {
@@ -279,7 +279,7 @@ impl<T: BufRead> Scanner<T> {
     }
 
     /// Currently not supported; always returns `Err`.
-    fn scan_float_suffix(&mut self) -> crate::Result<()> {
+    fn scan_real_suffix(&mut self) -> crate::Result<()> {
         let (span, _content) = self.scan_alphanumeric_word()?;
 
         Err(Box::new(crate::Error {

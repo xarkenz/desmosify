@@ -147,7 +147,6 @@ impl UnaryOperation {
 
 #[derive(Copy, Clone, Eq, PartialEq, Debug)]
 pub enum BinaryOperation {
-    Index, // TODO: index ranges
     MemberAccess,
     Exponent,
     Multiply,
@@ -168,7 +167,6 @@ pub enum BinaryOperation {
 impl BinaryOperation {
     pub fn precedence(&self) -> Precedence {
         match self {
-            Self::Index |
             Self::MemberAccess => Precedence::Postfix,
             Self::Exponent => Precedence::Exponential,
             Self::Multiply |
@@ -193,7 +191,6 @@ impl BinaryOperation {
 
     pub fn from_token(token: &TokenKind) -> Option<Self> {
         match token {
-            TokenKind::SquareLeft => Some(Self::Index),
             TokenKind::Dot => Some(Self::MemberAccess),
             TokenKind::Star2 => Some(Self::Exponent),
             TokenKind::Star => Some(Self::Multiply),
@@ -215,7 +212,6 @@ impl BinaryOperation {
 
     pub fn fmt_with_operands(&self, f: &mut std::fmt::Formatter, lhs: &ExpressionKind, rhs: &ExpressionKind) -> std::fmt::Result {
         match self {
-            Self::Index => write!(f, "{lhs}[{rhs}]"),
             Self::MemberAccess => write!(f, "{lhs}.{rhs}"),
             Self::Exponent => write!(f, "{lhs} ** {rhs}"),
             Self::Multiply => write!(f, "{lhs} * {rhs}"),
@@ -241,6 +237,16 @@ pub enum RangeKind {
     Exclusive,
 }
 
+impl RangeKind {
+    pub fn from_token(token: &TokenKind) -> Option<Self> {
+        match token {
+            TokenKind::RangeInclusive => Some(Self::Inclusive),
+            TokenKind::RangeExclusive => Some(Self::Exclusive),
+            _ => None
+        }
+    }
+}
+
 impl std::fmt::Display for RangeKind {
     fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
         match self {
@@ -251,7 +257,61 @@ impl std::fmt::Display for RangeKind {
 }
 
 #[derive(Clone, Debug)]
-pub struct ListMapLoop {
+pub enum ExpressionIndexOperation {
+    Single {
+        index: Box<Expression>,
+    },
+    Range {
+        kind: RangeKind,
+        from_index: Box<Expression>,
+        to_index: Box<Expression>,
+        step: Option<Box<Expression>>,
+    },
+    RangeFrom {
+        from_index: Box<Expression>,
+        step: Option<Box<Expression>>,
+    },
+    RangeTo {
+        kind: RangeKind,
+        to_index: Box<Expression>,
+    },
+}
+
+impl ExpressionIndexOperation {
+    pub fn is_range(&self) -> bool {
+        matches!(self, Self::Range { .. } | Self::RangeFrom { .. } | Self::RangeTo { .. })
+    }
+}
+
+impl std::fmt::Display for ExpressionIndexOperation {
+    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+        match self {
+            Self::Single { index } => {
+                write!(f, "{index}")
+            }
+            Self::Range { kind, from_index, to_index, step } => {
+                write!(f, "{from_index} {kind} {to_index}")?;
+                if let Some(step) = step {
+                    write!(f, " : {step}")?;
+                }
+                Ok(())
+            }
+            Self::RangeFrom { from_index, step } => {
+                write!(f, "{from_index} ..")?;
+                if let Some(step) = step {
+                    write!(f, " : {step}")?;
+                }
+                Ok(())
+            }
+            Self::RangeTo { kind, to_index } => {
+                write!(f, "{kind} {to_index}")
+            }
+        }
+    }
+}
+
+#[derive(Clone, Debug)]
+pub struct ExpressionListMapLoop {
     pub identifier: Rc<str>,
     pub list: Expression,
 }
@@ -259,7 +319,7 @@ pub struct ListMapLoop {
 #[derive(Clone, Debug)]
 pub enum ExpressionKind {
     Literal(Literal),
-    Builtin(Rc<str>),
+    Intrinsic(Rc<str>),
     Grouping {
         expression: Box<Expression>,
     },
@@ -295,20 +355,24 @@ pub enum ExpressionKind {
         count: Box<Expression>,
     },
     ListMap {
-        loops: Box<[ListMapLoop]>,
+        loops: Box<[ExpressionListMapLoop]>,
         expression: Box<Expression>,
     },
     ListFilter {
         list: Box<Expression>,
         condition: Box<Expression>,
     },
-    Conditional {
-        condition_consequents: Box<[(Expression, Expression)]>,
-        alternative: Option<Box<Expression>>,
+    Index {
+        list: Box<Expression>,
+        operation: ExpressionIndexOperation,
     },
     FunctionCall {
         function: Box<Expression>,
         arguments: Box<[Expression]>,
+    },
+    Conditional {
+        condition_consequents: Box<[(Expression, Expression)]>,
+        alternative: Option<Box<Expression>>,
     },
     Let {
         identifier: Rc<str>,
@@ -324,7 +388,7 @@ impl std::fmt::Display for ExpressionKind {
             Self::Literal(literal) => {
                 write!(f, "{literal}")
             }
-            Self::Builtin(name) => {
+            Self::Intrinsic(name) => {
                 write!(f, "@{name}")
             }
             Self::Grouping { expression } => {
@@ -364,13 +428,26 @@ impl std::fmt::Display for ExpressionKind {
             }
             Self::ListMap { loops, expression } => {
                 write!(f, "[{expression}")?;
-                for ListMapLoop { identifier, list } in loops {
+                for ExpressionListMapLoop { identifier, list } in loops {
                     write!(f, " for {identifier} in {list}")?;
                 }
                 write!(f, "]")
             }
             Self::ListFilter { list, condition } => {
                 write!(f, "[{list} where {condition}]")
+            }
+            Self::Index { list, operation } => {
+                write!(f, "{list}[{operation}]")
+            }
+            Self::FunctionCall { function, arguments } => match arguments.as_ref() {
+                [] => write!(f, "{function}()"),
+                [first, rest @ ..] => {
+                    write!(f, "{function}({first}")?;
+                    for argument in rest {
+                        write!(f, ", {}", argument)?;
+                    }
+                    write!(f, ")")
+                }
             }
             Self::Conditional { condition_consequents, alternative } => {
                 let (condition, consequent) = &condition_consequents[0];
@@ -382,16 +459,6 @@ impl std::fmt::Display for ExpressionKind {
                     write!(f, ", {alternative}")?;
                 }
                 write!(f, "}}")
-            }
-            Self::FunctionCall { function, arguments } => match arguments.as_ref() {
-                [] => write!(f, "{function}()"),
-                [first, rest @ ..] => {
-                    write!(f, "{function}({first}")?;
-                    for argument in rest {
-                        write!(f, ", {}", argument)?;
-                    }
-                    write!(f, ")")
-                }
             }
             Self::Let { identifier, value_type, value, expression } => {
                 write!(f, "let {identifier}")?;
@@ -416,6 +483,7 @@ impl std::fmt::Display for Expression {
     }
 }
 
+// TODO: let
 #[derive(Clone, Debug)]
 pub enum ActionExpressionKind {
     Disable,
@@ -534,20 +602,8 @@ impl std::fmt::Display for VariableKind {
     }
 }
 
-// TODO: allow assigning values
 #[derive(Clone, Debug)]
-pub struct EnumerationVariant {
-    pub identifier: Rc<str>,
-}
-
-impl std::fmt::Display for EnumerationVariant {
-    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
-        write!(f, "{}", self.identifier)
-    }
-}
-
-#[derive(Clone, Debug)]
-pub enum DefinitionKind {
+pub enum ValueDefinition {
     Let {
         parameters: Option<ParameterList>,
         value_type: Box<TypeExpression>,
@@ -562,9 +618,31 @@ pub enum DefinitionKind {
         parameters: ParameterList,
         action: Box<ActionExpression>,
     },
-    EnumerationType {
+}
+
+// TODO: allow assigning values
+#[derive(Clone, Debug)]
+pub struct EnumerationVariant {
+    pub identifier: Rc<str>,
+}
+
+impl std::fmt::Display for EnumerationVariant {
+    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+        write!(f, "{}", self.identifier)
+    }
+}
+
+#[derive(Clone, Debug)]
+pub enum TypeDefinition {
+    Enumeration {
         variants: Box<[EnumerationVariant]>,
     },
+}
+
+#[derive(Clone, Debug)]
+pub enum DefinitionKind {
+    Type(TypeDefinition),
+    Value(ValueDefinition),
 }
 
 #[derive(Clone, Debug)]
@@ -577,20 +655,7 @@ pub struct Definition {
 impl std::fmt::Display for Definition {
     fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
         match &self.kind {
-            DefinitionKind::Let { parameters, value_type, value } => {
-                write!(f, "let {}", self.identifier)?;
-                if let Some(parameters) = parameters {
-                    write!(f, "{parameters}")?;
-                }
-                write!(f, ": {value_type} = {value};")
-            }
-            DefinitionKind::Variable { kind, value_type, value } => {
-                write!(f, "{kind} {}: {value_type} = {value};", self.identifier)
-            }
-            DefinitionKind::Action { parameters, action } => {
-                write!(f, "action {}{parameters} {action}", self.identifier)
-            }
-            DefinitionKind::EnumerationType { variants } => {
+            DefinitionKind::Type(TypeDefinition::Enumeration { variants }) => {
                 write!(f, "enum {} ", self.identifier)?;
                 match variants.as_ref() {
                     [] => {
@@ -604,6 +669,19 @@ impl std::fmt::Display for Definition {
                         write!(f, " }}")
                     }
                 }
+            }
+            DefinitionKind::Value(ValueDefinition::Let { parameters, value_type, value }) => {
+                write!(f, "let {}", self.identifier)?;
+                if let Some(parameters) = parameters {
+                    write!(f, "{parameters}")?;
+                }
+                write!(f, ": {value_type} = {value};")
+            }
+            DefinitionKind::Value(ValueDefinition::Variable { kind, value_type, value }) => {
+                write!(f, "{kind} {}: {value_type} = {value};", self.identifier)
+            }
+            DefinitionKind::Value(ValueDefinition::Action { parameters, action }) => {
+                write!(f, "action {}{parameters} {action}", self.identifier)
             }
         }
     }

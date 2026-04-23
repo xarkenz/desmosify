@@ -83,8 +83,8 @@ pub enum TokenKind {
     Tilde,
     ArrowRight,
     DoubleArrowRight,
-    InclusiveRange,
-    ExclusiveRange,
+    RangeInclusive,
+    RangeExclusive,
     // Keywords
     Action,
     Disable,
@@ -105,6 +105,20 @@ pub enum TokenKind {
     With,
     // Miscellaneous
     Literal(Literal),
+}
+
+impl TokenKind {
+    pub fn get_symbolic_literal(&self) -> Option<&'static str> {
+        SYMBOLIC_TOKENS
+            .iter()
+            .find_map(|&(literal, ref kind)| (kind == self).then_some(literal))
+    }
+
+    pub fn get_keyword_literal(&self) -> Option<&'static str> {
+        KEYWORD_TOKENS
+            .iter()
+            .find_map(|&(literal, ref kind)| (kind == self).then_some(literal))
+    }
 }
 
 impl std::fmt::Display for TokenKind {
@@ -152,8 +166,8 @@ impl std::fmt::Display for TokenKind {
             Self::Tilde => write!(f, "~"),
             Self::ArrowRight => write!(f, "->"),
             Self::DoubleArrowRight => write!(f, "=>"),
-            Self::InclusiveRange => write!(f, "..="),
-            Self::ExclusiveRange => write!(f, "..<"),
+            Self::RangeInclusive => write!(f, "..="),
+            Self::RangeExclusive => write!(f, "..<"),
             Self::Action => write!(f, "action"),
             Self::Disable => write!(f, "disable"),
             Self::Display => write!(f, "display"),
@@ -219,8 +233,8 @@ pub const SYMBOLIC_TOKENS: &[(&str, TokenKind)] = &[
     ("~", TokenKind::Tilde),
     ("->", TokenKind::ArrowRight),
     ("=>", TokenKind::DoubleArrowRight),
-    ("..=", TokenKind::InclusiveRange),
-    ("..<", TokenKind::ExclusiveRange),
+    ("..=", TokenKind::RangeInclusive),
+    ("..<", TokenKind::RangeExclusive),
 ];
 
 pub const KEYWORD_TOKENS: &[(&str, TokenKind)] = &[

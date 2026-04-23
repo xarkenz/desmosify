@@ -67,14 +67,28 @@ impl<'a, T: BufRead> Parser<'a, T> {
             }))
     }
 
-    pub fn expect_identifier(&self) -> crate::Result<&Rc<str>> {
+    pub fn expect_identifier(&self) -> crate::Result<Rc<str>> {
         let token = self.get_token()?;
         match &token.kind {
-            TokenKind::Literal(Literal::Identifier(identifier)) => Ok(identifier),
+            TokenKind::Literal(Literal::Identifier(identifier)) => Ok(identifier.clone()),
             _ => Err(Box::new(crate::Error {
                 kind: crate::ErrorKind::ExpectedIdentifier,
                 span: Some(token.span),
             }))
+        }
+    }
+
+    pub fn expect_identifier_or_keyword(&self) -> crate::Result<Rc<str>> {
+        let token = self.get_token()?;
+        match &token.kind {
+            TokenKind::Literal(Literal::Identifier(identifier)) => Ok(identifier.clone()),
+            _ => match token.kind.get_keyword_literal() {
+                Some(literal) => Ok(literal.into()),
+                None => Err(Box::new(crate::Error {
+                    kind: crate::ErrorKind::ExpectedIdentifier,
+                    span: Some(token.span),
+                }))
+            }
         }
     }
 
@@ -198,9 +212,9 @@ impl<'a, T: BufRead> Parser<'a, T> {
                 }
                 TokenKind::AtSign => {
                     self.consume_token()?; // AtSign
-                    let identifier = self.expect_identifier()?.clone();
+                    let identifier = self.expect_identifier_or_keyword()?;
 
-                    ExpressionKind::Builtin(identifier)
+                    ExpressionKind::Intrinsic(identifier)
                 }
                 TokenKind::ParenLeft => {
                     self.consume_token()?; // ParenLeft
@@ -260,8 +274,8 @@ impl<'a, T: BufRead> Parser<'a, T> {
                         let first_item = self.parse_expression(None, &[
                             TokenKind::Comma,
                             TokenKind::SquareRight,
-                            TokenKind::InclusiveRange,
-                            TokenKind::ExclusiveRange,
+                            TokenKind::RangeInclusive,
+                            TokenKind::RangeExclusive,
                             TokenKind::Semicolon,
                             TokenKind::For,
                             TokenKind::Where,
@@ -288,13 +302,9 @@ impl<'a, T: BufRead> Parser<'a, T> {
                                     items: items.into_boxed_slice(),
                                 }
                             }
-                            Some(kind @ (TokenKind::InclusiveRange | TokenKind::ExclusiveRange)) => {
+                            Some(kind @ (TokenKind::RangeInclusive | TokenKind::RangeExclusive)) => {
                                 // List range
-                                let range_kind = match kind {
-                                    TokenKind::InclusiveRange => RangeKind::Inclusive,
-                                    TokenKind::ExclusiveRange => RangeKind::Exclusive,
-                                    _ => unreachable!()
-                                };
+                                let range_kind = RangeKind::from_token(kind).unwrap();
                                 self.consume_token()?; // Whatever the range operator token was
 
                                 let range_end = self.parse_expression(None, &[TokenKind::Colon, TokenKind::SquareRight])?;
@@ -327,13 +337,13 @@ impl<'a, T: BufRead> Parser<'a, T> {
 
                                 while !matches!(self.current_token_kind(), Some(TokenKind::SquareRight)) {
                                     self.consume_token()?; // For
-                                    let identifier = self.expect_identifier()?.clone();
+                                    let identifier = self.expect_identifier()?;
                                     self.consume_token()?; // Literal(Identifier)
                                     self.expect_token_from(&[TokenKind::In])?;
                                     self.consume_token()?; // In
                                     let list = self.parse_expression(None, &[TokenKind::For, TokenKind::SquareRight])?;
 
-                                    loops.push(ListMapLoop {
+                                    loops.push(ExpressionListMapLoop {
                                         identifier,
                                         list,
                                     });
@@ -396,12 +406,12 @@ impl<'a, T: BufRead> Parser<'a, T> {
                 TokenKind::Let => {
                     // Let expression
                     self.consume_token()?; // Let
-                    let identifier = self.expect_identifier()?.clone();
+                    let identifier = self.expect_identifier()?;
                     self.consume_token()?; // Literal(Identifier)
-                    self.expect_token_from(&[TokenKind::Colon, TokenKind::Equal])?;
+                    let token = self.expect_token_from(&[TokenKind::Colon, TokenKind::Equal])?;
 
                     let mut value_type = None;
-                    if let Some(TokenKind::Colon) = self.current_token_kind() {
+                    if let TokenKind::Colon = token.kind {
                         self.consume_token()?; // Colon
                         value_type = Some(self.parse_type(&[TokenKind::Equal])?);
                     }
@@ -475,13 +485,13 @@ impl<'a, T: BufRead> Parser<'a, T> {
         let start_span = self.current_span();
         let mut lhs = self.parse_operand(allowed_ends)?;
 
-        while let Some(token) = self.current_token() {
-            if allowed_ends.contains(&token.kind) {
+        while let Some(operator_token) = self.current_token() {
+            if allowed_ends.contains(&operator_token.kind) {
                 // Allowed ends are checked before operations, even if one of the allowed ends
                 // doubles as a valid operator.
                 break;
             }
-            else if let Some(operation) = BinaryOperation::from_token(&token.kind) {
+            else if let Some(operation) = BinaryOperation::from_token(&operator_token.kind) {
                 let precedence = operation.precedence();
 
                 if parent_precedence.is_some_and(|parent_precedence| parent_precedence > precedence || (
@@ -494,23 +504,10 @@ impl<'a, T: BufRead> Parser<'a, T> {
                 }
 
                 self.consume_token()?; // Whatever the operator token was
-                let (span, rhs) = match operation {
-                    BinaryOperation::Index => {
-                        let expression = self.parse_expression(None, &[TokenKind::SquareRight])?;
-                        let span = start_span.expand_to(self.current_span());
-                        self.consume_token()?; // SquareRight
-
-                        (span, expression)
-                    }
-                    _ => {
-                        let rhs = self.parse_expression(Some(precedence), allowed_ends)?;
-
-                        (start_span.expand_to(rhs.span), rhs)
-                    }
-                };
+                let rhs = self.parse_expression(Some(precedence), allowed_ends)?;
 
                 lhs = Expression {
-                    span,
+                    span: start_span.expand_to(rhs.span),
                     kind: ExpressionKind::Binary {
                         operation,
                         lhs: Box::new(lhs),
@@ -518,12 +515,105 @@ impl<'a, T: BufRead> Parser<'a, T> {
                     },
                 };
             }
-            else if let TokenKind::ParenLeft = token.kind {
-                // Left parenthesis indicates a function call
+            else if let TokenKind::SquareLeft = operator_token.kind {
+                // Parse an indexing operation
+                if parent_precedence.is_some_and(|parent_precedence| parent_precedence >= Precedence::Postfix) {
+                    // Parent operation should be made into a subtree of the indexing operation
+                    // (which has postfix precedence). Usually the parent operation is some
+                    // sort of access operation, e.g. `a.b()`.
+                    break;
+                }
+
+                self.consume_token()?; // SquareLeft
+                let index_operation;
+
+                if let Some(range_kind) = RangeKind::from_token(&self.get_token()?.kind) {
+                    self.consume_token()?; // Whatever the range operator token was
+                    let to_index = self.parse_expression(None, &[TokenKind::SquareRight])?;
+
+                    index_operation = ExpressionIndexOperation::RangeTo {
+                        kind: range_kind,
+                        to_index: Box::new(to_index),
+                    };
+                }
+                else {
+                    let index = self.parse_expression(None, &[
+                        TokenKind::RangeInclusive,
+                        TokenKind::RangeExclusive,
+                        TokenKind::Dot2,
+                        TokenKind::SquareRight,
+                    ])?;
+
+                    if let Some(range_kind) = RangeKind::from_token(&self.get_token()?.kind) {
+                        self.consume_token()?; // Whatever the range operator token was
+                        let to_index = self.parse_expression(None, &[TokenKind::Colon, TokenKind::SquareRight])?;
+
+                        let step = match self.current_token_kind() {
+                            Some(TokenKind::Colon) => {
+                                self.consume_token()?; // Colon
+                                let step = self.parse_expression(None, &[TokenKind::SquareRight])?;
+
+                                Some(Box::new(step))
+                            }
+                            Some(TokenKind::SquareRight) => {
+                                None
+                            }
+                            _ => unreachable!()
+                        };
+
+                        index_operation = ExpressionIndexOperation::Range {
+                            kind: range_kind,
+                            from_index: Box::new(index),
+                            to_index: Box::new(to_index),
+                            step,
+                        };
+                    }
+                    else if let Some(TokenKind::Dot2) = self.current_token_kind() {
+                        self.consume_token()?; // Dot2
+                        let token = self.expect_token_from(&[TokenKind::Colon, TokenKind::SquareRight])?;
+
+                        let step = match token.kind {
+                            TokenKind::Colon => {
+                                self.consume_token()?; // Colon
+                                let step = self.parse_expression(None, &[TokenKind::SquareRight])?;
+
+                                Some(Box::new(step))
+                            }
+                            TokenKind::SquareRight => {
+                                None
+                            }
+                            _ => unreachable!()
+                        };
+
+                        index_operation = ExpressionIndexOperation::RangeFrom {
+                            from_index: Box::new(index),
+                            step,
+                        };
+                    }
+                    else {
+                        index_operation = ExpressionIndexOperation::Single {
+                            index: Box::new(index),
+                        };
+                    }
+                }
+
+                let span = start_span.expand_to(self.current_span());
+                self.consume_token()?; // SquareRight
+
+                lhs = Expression {
+                    span,
+                    kind: ExpressionKind::Index {
+                        list: Box::new(lhs),
+                        operation: index_operation,
+                    },
+                };
+            }
+            else if let TokenKind::ParenLeft = operator_token.kind {
+                // Parse a function call
                 if parent_precedence.is_some_and(|parent_precedence| parent_precedence >= Precedence::Postfix) {
                     // Parent operation should be made into a subtree of the call operation
                     // (which has postfix precedence). Usually the parent operation is some
-                    // sort of access operation, e.g. `a.b()` or `a::b()`
+                    // sort of access operation, e.g. `a.b()`.
                     break;
                 }
 
@@ -543,7 +633,7 @@ impl<'a, T: BufRead> Parser<'a, T> {
             else {
                 return Err(Box::new(crate::Error {
                     kind: crate::ErrorKind::ExpectedOperation {
-                        got_token: token.kind.clone(),
+                        got_token: operator_token.kind.clone(),
                     },
                     span: Some(self.current_span()),
                 }));
@@ -585,7 +675,7 @@ impl<'a, T: BufRead> Parser<'a, T> {
             }
             TokenKind::Action => {
                 self.consume_token()?; // Action
-                let identifier = self.expect_identifier()?.clone();
+                let identifier = self.expect_identifier()?;
                 self.consume_token()?; // Literal(Identifier)
                 self.expect_token_from(&[TokenKind::ParenLeft])?;
                 self.consume_token()?; // ParenLeft
@@ -682,7 +772,7 @@ impl<'a, T: BufRead> Parser<'a, T> {
         let mut parameters = Vec::new();
 
         while !matches!(self.current_token_kind(), Some(TokenKind::ParenRight)) {
-            let identifier = self.expect_identifier()?.clone();
+            let identifier = self.expect_identifier()?;
             self.consume_token()?; // Literal(Identifier)
             self.expect_token_from(&[TokenKind::Colon])?;
             self.consume_token()?; // Colon
@@ -717,7 +807,7 @@ impl<'a, T: BufRead> Parser<'a, T> {
             TokenKind::Let => {
                 self.consume_token()?; // Let
 
-                let identifier = self.expect_identifier()?.clone();
+                let identifier = self.expect_identifier()?;
                 let span = start_span.expand_to(self.current_span());
                 self.consume_token()?; // Literal(Identifier)
 
@@ -737,11 +827,11 @@ impl<'a, T: BufRead> Parser<'a, T> {
 
                 Ok(Some(Declaration::Definition(Definition {
                     identifier,
-                    kind: DefinitionKind::Let {
+                    kind: DefinitionKind::Value(ValueDefinition::Let {
                         parameters,
                         value_type: Box::new(value_type),
                         value: Box::new(value),
-                    },
+                    }),
                     span,
                 })))
             }
@@ -757,7 +847,7 @@ impl<'a, T: BufRead> Parser<'a, T> {
                     }
                 };
 
-                let identifier = self.expect_identifier()?.clone();
+                let identifier = self.expect_identifier()?;
                 let span = start_span.expand_to(self.current_span());
                 self.consume_token()?; // Literal(Identifier)
 
@@ -770,18 +860,18 @@ impl<'a, T: BufRead> Parser<'a, T> {
 
                 Ok(Some(Declaration::Definition(Definition {
                     identifier,
-                    kind: DefinitionKind::Variable {
+                    kind: DefinitionKind::Value(ValueDefinition::Variable {
                         kind: variable_kind,
                         value_type: Box::new(value_type),
                         value: Box::new(value),
-                    },
+                    }),
                     span,
                 })))
             }
             TokenKind::Action => {
                 self.consume_token()?; // Action
 
-                let identifier = self.expect_identifier()?.clone();
+                let identifier = self.expect_identifier()?;
                 let span = start_span.expand_to(self.current_span());
                 self.consume_token()?; // Literal(Identifier)
 
@@ -795,17 +885,17 @@ impl<'a, T: BufRead> Parser<'a, T> {
 
                 Ok(Some(Declaration::Definition(Definition {
                     identifier,
-                    kind: DefinitionKind::Action {
+                    kind: DefinitionKind::Value(ValueDefinition::Action {
                         parameters,
                         action: Box::new(action),
-                    },
+                    }),
                     span,
                 })))
             }
             TokenKind::Enum => {
                 self.consume_token()?; // Enum
 
-                let identifier = self.expect_identifier()?.clone();
+                let identifier = self.expect_identifier()?;
                 let span = start_span.expand_to(self.current_span());
                 self.consume_token()?; // Literal(Identifier)
 
@@ -814,14 +904,14 @@ impl<'a, T: BufRead> Parser<'a, T> {
                 let mut variants = Vec::new();
 
                 while !matches!(self.current_token_kind(), Some(TokenKind::CurlyRight)) {
-                    let identifier = self.expect_identifier()?.clone();
+                    let identifier = self.expect_identifier()?;
                     self.consume_token()?; // Literal(Identifier)
-                    self.expect_token_from(&[TokenKind::Comma, TokenKind::CurlyRight])?;
+                    let token = self.expect_token_from(&[TokenKind::Comma, TokenKind::CurlyRight])?;
                     variants.push(EnumerationVariant {
                         identifier,
                     });
 
-                    if let Some(TokenKind::Comma) = self.current_token_kind() {
+                    if let TokenKind::Comma = token.kind {
                         self.consume_token()?; // Comma
                     }
                 }
@@ -829,9 +919,9 @@ impl<'a, T: BufRead> Parser<'a, T> {
 
                 Ok(Some(Declaration::Definition(Definition {
                     identifier,
-                    kind: DefinitionKind::EnumerationType {
+                    kind: DefinitionKind::Type(TypeDefinition::Enumeration {
                         variants: variants.into_boxed_slice(),
-                    },
+                    }),
                     span,
                 })))
             }
@@ -917,13 +1007,13 @@ impl<'a, T: BufRead> Parser<'a, T> {
                         self.consume_token()?; // Colon
 
                         while !matches!(self.current_token_kind(), Some(TokenKind::Semicolon | TokenKind::CurlyRight)) {
-                            let attribute_key = self.expect_identifier()?.clone();
+                            let attribute_key = self.expect_identifier()?;
                             let attribute_span = self.current_span();
                             self.consume_token()?; // Literal(Identifier)
 
-                            self.expect_token_from(&[TokenKind::ParenLeft, TokenKind::CurlyLeft])?;
-                            let attribute_value = match self.current_token_kind() {
-                                Some(TokenKind::ParenLeft) => {
+                            let token = self.expect_token_from(&[TokenKind::ParenLeft, TokenKind::CurlyLeft])?;
+                            let attribute_value = match token.kind {
+                                TokenKind::ParenLeft => {
                                     self.consume_token()?; // ParenLeft
                                     let arguments = self.parse_argument_list()?;
                                     element_span = element_span.expand_to(self.current_span());
@@ -931,7 +1021,7 @@ impl<'a, T: BufRead> Parser<'a, T> {
 
                                     DisplayAttributeValue::Arguments(arguments)
                                 }
-                                Some(TokenKind::CurlyLeft) => {
+                                TokenKind::CurlyLeft => {
                                     let action = self.parse_action(&[])?;
                                     element_span = element_span.expand_to(action.span);
 
@@ -940,8 +1030,8 @@ impl<'a, T: BufRead> Parser<'a, T> {
                                 _ => unreachable!()
                             };
 
-                            self.expect_token_from(&[TokenKind::Comma, TokenKind::Semicolon, TokenKind::CurlyRight])?;
-                            if let Some(TokenKind::Comma) = self.current_token_kind() {
+                            let token = self.expect_token_from(&[TokenKind::Comma, TokenKind::Semicolon, TokenKind::CurlyRight])?;
+                            if let TokenKind::Comma = token.kind {
                                 self.consume_token()?; // Comma
                             }
 
@@ -972,5 +1062,15 @@ impl<'a, T: BufRead> Parser<'a, T> {
             }
             _ => unreachable!(),
         }
+    }
+
+    pub fn parse_all_declarations(&mut self) -> crate::Result<Vec<Declaration>> {
+        let mut declarations = Vec::new();
+
+        while let Some(declaration) = self.parse_declaration()? {
+            declarations.push(declaration);
+        }
+
+        Ok(declarations)
     }
 }

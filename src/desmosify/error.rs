@@ -156,6 +156,15 @@ pub enum ErrorKind {
     UnexpectedConditionalKeyword {
         keyword: token::TokenKind,
     },
+    ReservedIdentifier {
+        identifier: Box<str>,
+    },
+    ConflictingGlobalIdentifiers {
+        identifier: Box<str>,
+    },
+    UnrecognizedType {
+        identifier: Box<str>,
+    },
 }
 
 impl std::fmt::Display for ErrorKind {
@@ -190,6 +199,9 @@ impl std::fmt::Display for ErrorKind {
             Self::ExpectedClosingBracket { bracket } => write!(f, "expected closing '{bracket}'"),
             Self::ConditionalMissingCondition => write!(f, "conditional expression requires at least one condition"),
             Self::UnexpectedConditionalKeyword { keyword } => write!(f, "unexpected '{keyword}' without supporting 'if' (did you add an extra comma?)"),
+            Self::ConflictingGlobalIdentifiers { identifier } => write!(f, "multiple global definitions for identifier '{identifier}'"),
+            Self::ReservedIdentifier { identifier } => write!(f, "'{identifier}' is a reserved identifier"),
+            Self::UnrecognizedType { identifier } => write!(f, "unrecognized type '{identifier}'"),
         }
     }
 }
