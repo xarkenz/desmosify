@@ -165,25 +165,92 @@ pub enum ErrorKind {
     UnrecognizedType {
         identifier: Box<str>,
     },
+    InvalidListItemType {
+        item_type: String,
+    },
+    InvalidPointComponentType {
+        component_type: String,
+    },
+    InvalidIntrinsicArity {
+        identifier: Box<str>,
+        min: usize,
+        max: usize,
+        got: usize,
+    },
+    InvalidVariadicIntrinsicArity {
+        identifier: Box<str>,
+        min: usize,
+        got: usize,
+    },
+    MismatchedTypes {
+        expected: String,
+        got: String,
+    },
+    ExpectedNumericType {
+        got_type: String,
+    },
+    ExpectedNumericOrPointType {
+        got_type: String,
+    },
+    ExpectedNumericPoint2DType {
+        got_type: String,
+    },
+    ExpectedNumericPoint3DType {
+        got_type: String,
+    },
+    ExpectedTypeArgument,
+    ExpectedEnumType,
+    CannotMergeTypes {
+        type_1: String,
+        type_2: String,
+    },
 }
 
 impl std::fmt::Display for ErrorKind {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            Self::SourceFileOpen { cause } => write!(f, "unable to open file: {cause}"),
-            Self::SourceFileRead { cause } => write!(f, "error while reading file: {cause}"),
-            Self::OutputFileOpen { path, cause } => write!(f, "unable to create file '{}': {cause}", path.display()),
-            Self::OutputFileWrite { path, cause } => write!(f, "error while writing file '{}': {cause}", path.display()),
-            Self::InvalidToken => write!(f, "unrecognized token"),
-            Self::InvalidLiteralSuffix => write!(f, "unsupported literal suffix"),
-            Self::InvalidCharacterEscape { what } => write!(f, "unrecognized character escape '\\{what}'"),
-            Self::InvalidHexEscapeDigit { what } => write!(f, "expected hexadecimal digit, got '{what}'"),
-            Self::InvalidUnicode16Escape { value } => write!(f, "invalid 16-bit Unicode character '\\u{value:04X}'"),
-            Self::InvalidUnicode32Escape { value } => write!(f, "invalid 32-bit Unicode character '\\U{value:08X}'"),
-            Self::UnclosedString => write!(f, "unclosed string literal"),
-            Self::UnclosedCharacter => write!(f, "expected single quote to close character literal"),
-            Self::UnclosedComment => write!(f, "unclosed block comment"),
-            Self::ExpectedToken => write!(f, "unexpected end of file"),
+            Self::SourceFileOpen { cause } => {
+                write!(f, "unable to open file: {cause}")
+            }
+            Self::SourceFileRead { cause } => {
+                write!(f, "error while reading file: {cause}")
+            }
+            Self::OutputFileOpen { path, cause } => {
+                write!(f, "unable to create file '{}': {cause}", path.display())
+            }
+            Self::OutputFileWrite { path, cause } => {
+                write!(f, "error while writing file '{}': {cause}", path.display())
+            }
+            Self::InvalidToken => {
+                write!(f, "unrecognized token")
+            }
+            Self::InvalidLiteralSuffix => {
+                write!(f, "unsupported literal suffix")
+            }
+            Self::InvalidCharacterEscape { what } => {
+                write!(f, "unrecognized character escape '\\{what}'")
+            }
+            Self::InvalidHexEscapeDigit { what } => {
+                write!(f, "expected hexadecimal digit, got '{what}'")
+            }
+            Self::InvalidUnicode16Escape { value } => {
+                write!(f, "invalid 16-bit Unicode character '\\u{value:04X}'")
+            }
+            Self::InvalidUnicode32Escape { value } => {
+                write!(f, "invalid 32-bit Unicode character '\\U{value:08X}'")
+            }
+            Self::UnclosedString => {
+                write!(f, "unclosed string literal")
+            }
+            Self::UnclosedCharacter => {
+                write!(f, "expected single quote to close character literal")
+            }
+            Self::UnclosedComment => {
+                write!(f, "unclosed block comment")
+            }
+            Self::ExpectedToken => {
+                write!(f, "unexpected end of file")
+            }
             Self::ExpectedTokenFromList { got_token, allowed_tokens } => {
                 write!(f, "expected '{}'", &allowed_tokens[0])?;
                 for token in &allowed_tokens[1..] {
@@ -191,17 +258,75 @@ impl std::fmt::Display for ErrorKind {
                 }
                 write!(f, "; got '{got_token}'")
             }
-            Self::ExpectedIdentifier => write!(f, "expected an identifier"),
-            Self::ExpectedString => write!(f, "expected a quoted string"),
-            Self::ExpectedOperand { got_token } => write!(f, "expected an operand, got '{got_token}'"),
-            Self::ExpectedOperation { got_token } => write!(f, "expected an operation, got '{got_token}'"),
-            Self::ExpectedType { got_token } => write!(f, "expected a type, got '{got_token}'"),
-            Self::ExpectedClosingBracket { bracket } => write!(f, "expected closing '{bracket}'"),
-            Self::ConditionalMissingCondition => write!(f, "conditional expression requires at least one condition"),
-            Self::UnexpectedConditionalKeyword { keyword } => write!(f, "unexpected '{keyword}' without supporting 'if' (did you add an extra comma?)"),
-            Self::ConflictingGlobalIdentifiers { identifier } => write!(f, "multiple global definitions for identifier '{identifier}'"),
-            Self::ReservedIdentifier { identifier } => write!(f, "'{identifier}' is a reserved identifier"),
-            Self::UnrecognizedType { identifier } => write!(f, "unrecognized type '{identifier}'"),
+            Self::ExpectedIdentifier => {
+                write!(f, "expected an identifier")
+            }
+            Self::ExpectedString => {
+                write!(f, "expected a quoted string")
+            }
+            Self::ExpectedOperand { got_token } => {
+                write!(f, "expected an operand, got '{got_token}'")
+            }
+            Self::ExpectedOperation { got_token } => {
+                write!(f, "expected an operation, got '{got_token}'")
+            }
+            Self::ExpectedType { got_token } => {
+                write!(f, "expected a type, got '{got_token}'")
+            }
+            Self::ExpectedClosingBracket { bracket } => {
+                write!(f, "expected closing '{bracket}'")
+            }
+            Self::ConditionalMissingCondition => {
+                write!(f, "conditional expression requires at least one condition")
+            }
+            Self::UnexpectedConditionalKeyword { keyword } => {
+                write!(f, "unexpected '{keyword}' without supporting 'if' (did you add an extra comma?)")
+            }
+            Self::ConflictingGlobalIdentifiers { identifier } => {
+                write!(f, "multiple global definitions for identifier '{identifier}'")
+            }
+            Self::ReservedIdentifier { identifier } => {
+                write!(f, "'{identifier}' is a reserved identifier")
+            }
+            Self::UnrecognizedType { identifier } => {
+                write!(f, "unrecognized type '{identifier}'")
+            }
+            Self::InvalidListItemType { item_type } => {
+                write!(f, "type '{item_type}' cannot be used inside a list")
+            }
+            Self::InvalidPointComponentType { component_type } => {
+                write!(f, "type '{component_type}' cannot be the component of a point")
+            }
+            Self::InvalidIntrinsicArity { identifier, min, max, got } => {
+                write!(f, "function '@{identifier}' expects between {min} and {max} arguments but received {got}")
+            }
+            Self::InvalidVariadicIntrinsicArity { identifier, min, got } => {
+                write!(f, "function '@{identifier}' expects at least {min} arguments but received {got}")
+            }
+            Self::MismatchedTypes { expected, got } => {
+                write!(f, "expected a value of type '{expected}', but got '{got}' instead")
+            }
+            Self::ExpectedNumericType { got_type } => {
+                write!(f, "expected a numeric type, got '{got_type}'")
+            }
+            Self::ExpectedNumericOrPointType { got_type } => {
+                write!(f, "expected a numeric type or numeric point type, got '{got_type}'")
+            }
+            Self::ExpectedNumericPoint2DType { got_type } => {
+                write!(f, "expected a numeric 2D point type, got '{got_type}'")
+            }
+            Self::ExpectedNumericPoint3DType { got_type } => {
+                write!(f, "expected a numeric 3D point type, got '{got_type}'")
+            }
+            Self::ExpectedTypeArgument => {
+                write!(f, "this function requires a type to be given as its argument")
+            }
+            Self::ExpectedEnumType => {
+                write!(f, "expected an enumeration type")
+            }
+            Self::CannotMergeTypes { type_1, type_2 } => {
+                write!(f, "types '{type_1}' and '{type_2}' are incompatible")
+            }
         }
     }
 }

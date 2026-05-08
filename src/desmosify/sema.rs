@@ -1,5 +1,5 @@
 use std::rc::Rc;
-use crate::sema::types::DataType;
+use crate::sema::types::Type;
 use crate::sema::values::{ActionValue, Value};
 
 pub mod intrinsic;
@@ -9,12 +9,12 @@ pub mod context;
 
 #[derive(Clone, Debug)]
 pub struct ProgramLet {
-    parameters: Option<Box<[(Rc<str>, DataType)]>>,
+    parameters: Option<Box<[(Rc<str>, Type)]>>,
     value: Value,
 }
 
 impl ProgramLet {
-    pub fn parameters(&self) -> Option<&[(Rc<str>, DataType)]> {
+    pub fn parameters(&self) -> Option<&[(Rc<str>, Type)]> {
         self.parameters.as_deref()
     }
 
@@ -47,12 +47,12 @@ impl ProgramVariable {
 
 #[derive(Clone, Debug)]
 pub struct ProgramAction {
-    parameters: Box<[(Rc<str>, DataType)]>,
+    parameters: Box<[(Rc<str>, Type)]>,
     action: ActionValue,
 }
 
 impl ProgramAction {
-    pub fn parameters(&self) -> &[(Rc<str>, DataType)] {
+    pub fn parameters(&self) -> &[(Rc<str>, Type)] {
         &self.parameters
     }
 
