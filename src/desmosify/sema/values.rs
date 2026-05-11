@@ -3,30 +3,63 @@ use crate::ast::{BinaryOperation, RangeKind, UnaryOperation};
 use crate::sema::intrinsic::{IntrinsicFunction, IntrinsicValue};
 use crate::sema::types::Type;
 
-// #[derive(Clone, Debug)]
-// pub struct MaybeBroadcast<T: Clone + std::fmt::Debug> {
-//     pub inner: T,
-//     pub is_list: bool,
-// }
-
-// impl<T: Clone + std::fmt::Debug> MaybeBroadcast<T> {
-//     pub fn new(inner: T, is_list: bool) -> Self {
-//         Self {
-//             inner,
-//             is_list,
-//         }
-//     }
-// }
-
-#[derive(Copy, Clone, Debug)]
+#[derive(Copy, Clone, PartialEq, Debug)]
 pub enum MathematicalConstant {
     Pi,
     Tau,
     E,
 }
 
-#[derive(Clone, Debug)]
-pub enum Constant {
+#[derive(Clone, PartialEq, Debug)]
+pub struct GlobalReference {
+    pub identifier: Rc<str>,
+    pub value_type: Type,
+}
+
+#[derive(Clone, PartialEq, Debug)]
+pub struct LocalReference {
+    pub id: u64,
+    pub value_type: Type,
+}
+
+#[derive(Clone, PartialEq, Debug)]
+pub enum ValueIndexOperation {
+    Single {
+        index: Box<Value>,
+    },
+    Range {
+        kind: RangeKind,
+        from_index: Box<Value>,
+        to_index: Box<Value>,
+        step: Box<Value>,
+    },
+    RangeFrom {
+        from_index: Box<Value>,
+        step: Box<Value>,
+    },
+    RangeTo {
+        kind: RangeKind,
+        to_index: Box<Value>,
+    },
+}
+
+impl ValueIndexOperation {
+    pub fn generates_list(&self) -> bool {
+        match self {
+            Self::Single { index } => index.get_type().is_list(),
+            Self::Range { .. } | Self::RangeFrom { .. } | Self::RangeTo { .. } => true,
+        }
+    }
+}
+
+#[derive(Clone, PartialEq, Debug)]
+pub struct ValueListMapLoop {
+    pub local: LocalReference,
+    pub list: Value,
+}
+
+#[derive(Clone, PartialEq, Debug)]
+pub enum Value {
     Type {
         identifier: Rc<str>,
     },
@@ -37,167 +70,11 @@ pub enum Constant {
     },
     Int(i64),
     Bool(bool),
-    Point2 {
-        x: Box<Constant>,
-        y: Box<Constant>,
-    },
-    Point3 {
-        x: Box<Constant>,
-        y: Box<Constant>,
-        z: Box<Constant>,
-    },
-    List {
-        items: Vec<Constant>,
-        item_type: Type,
-    },
     EnumVariant {
         type_identifier: Rc<str>,
         variant_ordinal: i64,
     },
-}
-
-impl Constant {
-    pub fn get_type(&self) -> Type {
-        match self {
-            Self::Type { .. } => {
-                Type::Meta
-            }
-            Self::Real(..) | Self::Mathematical { .. } => {
-                Type::Real
-            }
-            Self::Int(..) => {
-                Type::Int
-            }
-            Self::Bool(..) => {
-                Type::Bool
-            }
-            Self::Point2 { x, y } => {
-                Type::Point2 {
-                    x_type: Box::new(x.get_type()),
-                    y_type: Box::new(y.get_type()),
-                }
-            }
-            Self::Point3 { x, y, z } => {
-                Type::Point3 {
-                    x_type: Box::new(x.get_type()),
-                    y_type: Box::new(y.get_type()),
-                    z_type: Box::new(z.get_type()),
-                }
-            }
-            Self::List { item_type, .. } => {
-                item_type.clone().into_list()
-            }
-            Self::EnumVariant { type_identifier, .. } => {
-                Type::UserValue {
-                    type_identifier: type_identifier.clone(),
-                }
-            }
-        }
-    }
-
-    pub fn coerce_to(self, target_type: &Type) -> crate::Result<Self> {
-        let self_type = self.get_type();
-        let (self_is_list, self_type) = self_type.flatten_list();
-        let (target_is_list, target_type) = target_type.flatten_list();
-
-        let mismatched_types_error = || Box::new(crate::Error {
-            kind: crate::ErrorKind::MismatchedTypes {
-                expected: target_type.to_string(),
-                got: self_type.to_string(),
-            },
-            span: None,
-        });
-
-        if target_is_list != self_is_list {
-            return Err(mismatched_types_error());
-        }
-        else if self_type == target_type || matches!(self_type, Type::Any) || matches!(target_type, Type::Any) {
-            // The value shouldn't need to be transformed in any way
-            return Ok(self);
-        }
-
-        match (self, target_type) {
-            (Self::Int(value), Type::Real) => {
-                Ok(Self::Real(value as f64))
-            }
-            (Self::Bool(value), Type::Int) => {
-                Ok(Self::Int(value as i64))
-            }
-            (Self::Bool(value), Type::Real) => {
-                Ok(Self::Real(value as i32 as f64))
-            }
-            (Self::Point2 { x, y }, Type::Point2 { x_type, y_type }) => {
-                Ok(Self::Point2 {
-                    x: Box::new(x.coerce_to(x_type)?),
-                    y: Box::new(y.coerce_to(y_type)?),
-                })
-            }
-            (Self::Point3 { x, y, z }, Type::Point3 { x_type, y_type, z_type }) => {
-                Ok(Self::Point3 {
-                    x: Box::new(x.coerce_to(x_type)?),
-                    y: Box::new(y.coerce_to(y_type)?),
-                    z: Box::new(z.coerce_to(z_type)?)
-                })
-            }
-            (Self::EnumVariant { variant_ordinal, .. }, Type::Int) => {
-                Ok(Self::Int(variant_ordinal))
-            }
-            (Self::EnumVariant { variant_ordinal, .. }, Type::Real) => {
-                Ok(Self::Real(variant_ordinal as f64))
-            }
-            _ => Err(mismatched_types_error())
-        }
-    }
-}
-
-#[derive(Clone, Debug)]
-pub struct GlobalReference {
-    pub identifier: Rc<str>,
-    pub value_type: Type,
-}
-
-#[derive(Clone, Debug)]
-pub struct LocalReference {
-    pub id: usize,
-    pub value_type: Type,
-}
-
-#[derive(Clone, Debug)]
-pub enum ValueIndexOperation {
-    Single {
-        index: Box<Value>,
-    },
-    Range {
-        kind: RangeKind,
-        from_index: Box<Value>,
-        to_index: Box<Value>,
-        step: Option<Box<Value>>,
-    },
-    RangeFrom {
-        from_index: Box<Value>,
-        step: Option<Box<Value>>,
-    },
-    RangeTo {
-        kind: RangeKind,
-        to_index: Box<Value>,
-    },
-}
-
-impl ValueIndexOperation {
-    pub fn is_range(&self) -> bool {
-        matches!(self, Self::Range { .. } | Self::RangeFrom { .. } | Self::RangeTo { .. })
-    }
-}
-
-#[derive(Clone, Debug)]
-pub struct ValueListMapLoop {
-    pub identifier: Rc<str>,
-    pub list: Value,
-}
-
-#[derive(Clone, Debug)]
-pub enum Value {
-    Constant(Constant),
+    Str(Rc<str>),
     Intrinsic(Box<IntrinsicValue>),
     IntrinsicFunction(&'static IntrinsicFunction),
     Global(GlobalReference),
@@ -216,11 +93,13 @@ pub enum Value {
     Point2 {
         x: Box<Value>,
         y: Box<Value>,
+        point_type: Type,
     },
     Point3 {
         x: Box<Value>,
         y: Box<Value>,
         z: Box<Value>,
+        point_type: Type,
     },
     GetX {
         point: Box<Value>,
@@ -268,13 +147,13 @@ pub enum Value {
         alternative: Box<Value>,
         result_type: Type,
     },
-    FunctionCall {
+    UserFunctionCall {
         function: Box<Value>,
         arguments: Box<[Value]>,
         return_type: Type,
     },
     Let {
-        identifier: Rc<str>,
+        local: LocalReference,
         value: Box<Value>,
         inner: Box<Value>,
     },
@@ -283,14 +162,33 @@ pub enum Value {
 impl Value {
     pub fn get_type(&self) -> Type {
         match self {
-            Self::Constant(constant) => {
-                constant.get_type()
+            Self::Type { identifier } => {
+                Type::Meta {
+                    identifier: identifier.clone(),
+                }
+            }
+            Self::Real(..) | Self::Mathematical { .. } => {
+                Type::Real
+            }
+            Self::Int(..) => {
+                Type::Int
+            }
+            Self::Bool(..) => {
+                Type::Bool
+            }
+            Self::EnumVariant { type_identifier, .. } => {
+                Type::UserValue {
+                    type_identifier: type_identifier.clone(),
+                }
+            }
+            Self::Str(..) => {
+                Type::Str
             }
             Self::Intrinsic(intrinsic) => {
                 intrinsic.get_type()
             }
             Self::IntrinsicFunction(function) => {
-                Type::IntrinsicFunction(function)
+                Type::IntrinsicFunction(*function)
             }
             Self::Global(reference) => {
                 reference.value_type.clone()
@@ -304,18 +202,11 @@ impl Value {
             Self::Binary { result_type, .. } => {
                 result_type.clone()
             }
-            Self::Point2 { x, y } => {
-                Type::Point2 {
-                    x_type: Box::new(x.get_type()),
-                    y_type: Box::new(y.get_type()),
-                }
+            Self::Point2 { point_type, .. } => {
+                point_type.clone()
             }
-            Self::Point3 { x, y, z } => {
-                Type::Point3 {
-                    x_type: Box::new(x.get_type()),
-                    y_type: Box::new(y.get_type()),
-                    z_type: Box::new(z.get_type()),
-                }
+            Self::Point3 { point_type, .. } => {
+                point_type.clone()
             }
             Self::GetX { x_type, .. } => {
                 x_type.clone()
@@ -342,12 +233,12 @@ impl Value {
                 item_type.clone().into_list()
             }
             Self::Index { operation, item_type, .. } => {
-                item_type.clone().unflatten_list(operation.is_range())
+                item_type.clone().unflatten_list(operation.generates_list())
             }
             Self::Conditional { result_type, .. } => {
                 result_type.clone()
             }
-            Self::FunctionCall { return_type, .. } => {
+            Self::UserFunctionCall { return_type, .. } => {
                 return_type.clone()
             }
             Self::Let { inner, .. } => {
@@ -356,46 +247,90 @@ impl Value {
         }
     }
 
-    pub fn coerce_to(self, target_type: &Type) -> crate::Result<Self> {
-        if let Self::Constant(constant) = self {
-            return constant.coerce_to(target_type).map(Self::Constant);
+    pub fn is_zero(&self) -> bool {
+        match *self {
+            Self::Real(value) => value == 0.0,
+            Self::Mathematical { coefficient, .. } => coefficient == 0.0,
+            Self::Int(value) => value == 0,
+            Self::Bool(value) => !value,
+            _ => false,
         }
+    }
 
+    pub fn is_one(&self) -> bool {
+        match *self {
+            Self::Real(value) => value == 1.0,
+            Self::Int(value) => value == 1,
+            Self::Bool(value) => value,
+            _ => false,
+        }
+    }
+
+    pub fn coerce_to(self, target_type: &Type, allow_broadcast: bool) -> crate::Result<Self> {
         let self_type = self.get_type();
         let (self_is_list, self_type) = self_type.flatten_list();
         let (target_is_list, target_type) = target_type.flatten_list();
 
-        if target_is_list == self_is_list && self_type.can_coerce_to(target_type) {
+        let mismatched_types_error = || Box::new(crate::Error {
+            kind: crate::ErrorKind::MismatchedTypes {
+                expected: target_type.to_string(),
+                got: self_type.to_string(),
+            },
+            span: None,
+        });
+
+        if self_is_list != target_is_list && !(allow_broadcast && self_is_list) {
+            Err(mismatched_types_error())
+        }
+        else if self_type == target_type || matches!(self_type, Type::Any) || matches!(target_type, Type::Any) {
             // The value shouldn't need to be transformed in any way
             Ok(self)
         }
         else {
-            Err(Box::new(crate::Error {
-                kind: crate::ErrorKind::MismatchedTypes {
-                    expected: target_type.to_string(),
-                    got: self_type.to_string(),
-                },
-                span: None,
-            }))
+            match (self, target_type) {
+                (Self::Int(value), Type::Real) => {
+                    Ok(Self::Real(value as f64))
+                }
+                (Self::Bool(value), Type::Int) => {
+                    Ok(Self::Int(value as i64))
+                }
+                (Self::Bool(value), Type::Real) => {
+                    Ok(Self::Real(value as i32 as f64))
+                }
+                (Self::EnumVariant { variant_ordinal, .. }, Type::Int) => {
+                    Ok(Self::Int(variant_ordinal))
+                }
+                (Self::EnumVariant { variant_ordinal, .. }, Type::Real) => {
+                    Ok(Self::Real(variant_ordinal as f64))
+                }
+                (self_, _) => {
+                    if self_type.can_coerce_to(target_type) {
+                        Ok(self_)
+                    }
+                    else {
+                        Err(mismatched_types_error())
+                    }
+                }
+            }
         }
     }
-}
 
-// impl MaybeBroadcast<Value> {
-//     pub fn get_type(&self) -> DataType {
-//         let inner_type = self.inner.get_type();
-//         let wrap_list = self.is_list && !matches!(inner_type, DataType::List { .. });
-//         inner_type.unflatten_list(wrap_list)
-//     }
-//
-//     pub fn get_item_type(&self) -> DataType {
-//         let inner_type = self.inner.get_type();
-//     }
-//
-//     pub fn coerce_to(self, target_type: &DataType) -> crate::Result<Self> {
-//         //
-//     }
-// }
+    pub fn coerce_to_arithmetic(mut self, constraint: fn(&Type) -> crate::Result<()>) -> crate::Result<(Self, Type)> {
+        let (self_is_list, mut self_type) = self.get_type().into_flatten_list();
+
+        constraint(&self_type)?;
+
+        match &self_type {
+            Type::Bool => {
+                self = self.coerce_to(&Type::Int, false)?;
+                self_type = Type::Int;
+            }
+            _ => {}
+        }
+
+        Ok((self, self_type.unflatten_list(self_is_list)))
+    }
+}
 
 #[derive(Clone, Debug)]
 pub enum ActionValue {
@@ -415,4 +350,38 @@ pub enum ActionValue {
         condition_consequents: Box<[(Value, ActionValue)]>,
         alternative: Box<ActionValue>,
     },
+}
+
+impl ActionValue {
+    pub fn empty() -> Self {
+        Self::Compound {
+            actions: Box::new([]),
+        }
+    }
+
+    pub fn is_empty(&self) -> bool {
+        match self {
+            Self::Compound { actions } => actions.iter().all(Self::is_empty),
+            _ => false
+        }
+    }
+
+    pub fn merge(self, other: Self) -> Self {
+        Self::Compound {
+            actions: match (self, other) {
+                (Self::Compound { actions: self_actions }, Self::Compound { actions: other_actions }) => {
+                    self_actions.into_iter().chain(other_actions).collect()
+                }
+                (Self::Compound { actions }, other) => {
+                    actions.into_iter().chain(std::iter::once(other)).collect()
+                }
+                (self_, Self::Compound { actions }) => {
+                    std::iter::once(self_).chain(actions).collect()
+                }
+                (self_, other) => {
+                    Box::new([self_, other])
+                }
+            },
+        }
+    }
 }

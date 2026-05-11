@@ -1,20 +1,20 @@
 use std::rc::Rc;
-use crate::sema::types::Type;
-use crate::sema::values::{ActionValue, Value};
+use crate::sema::values::{ActionValue, LocalReference, Value};
 
+pub mod context;
+pub mod interpret;
 pub mod intrinsic;
 pub mod types;
 pub mod values;
-pub mod context;
 
 #[derive(Clone, Debug)]
 pub struct ProgramLet {
-    parameters: Option<Box<[(Rc<str>, Type)]>>,
+    parameters: Option<Box<[LocalReference]>>,
     value: Value,
 }
 
 impl ProgramLet {
-    pub fn parameters(&self) -> Option<&[(Rc<str>, Type)]> {
+    pub fn parameters(&self) -> Option<&[LocalReference]> {
         self.parameters.as_deref()
     }
 
@@ -47,12 +47,12 @@ impl ProgramVariable {
 
 #[derive(Clone, Debug)]
 pub struct ProgramAction {
-    parameters: Box<[(Rc<str>, Type)]>,
+    parameters: Box<[LocalReference]>,
     action: ActionValue,
 }
 
 impl ProgramAction {
-    pub fn parameters(&self) -> &[(Rc<str>, Type)] {
+    pub fn parameters(&self) -> &[LocalReference] {
         &self.parameters
     }
 

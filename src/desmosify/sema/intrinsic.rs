@@ -1,18 +1,18 @@
-use crate::ast::{DefinitionKind, TypeDefinition};
+use crate::ast::{DefinitionKind, RangeKind, TypeDefinition};
 use crate::sema::context::GlobalContext;
 use crate::sema::types::Type;
-use crate::sema::values::{Constant, MathematicalConstant, Value};
+use crate::sema::values::{MathematicalConstant, Value};
 
 #[derive(Clone, Debug)]
 pub struct IntrinsicFunction {
     identifier: &'static str,
     min_arity: usize,
     max_arity: Option<usize>,
-    interpret_call: fn(context: &GlobalContext, arguments: Vec<Value>) -> crate::Result<Value>,
+    interpret_call: fn(context: &GlobalContext, arguments: Box<[Value]>) -> crate::Result<Value>,
 }
 
 impl IntrinsicFunction {
-    pub fn interpret_call(&self, context: &GlobalContext, arguments: Vec<Value>) -> crate::Result<Value> {
+    pub fn interpret_call(&self, context: &GlobalContext, arguments: Box<[Value]>) -> crate::Result<Value> {
         self.check_arity(arguments.len())?;
 
         (self.interpret_call)(context, arguments)
@@ -118,7 +118,7 @@ pub enum IntrinsicParameterizedReducerKind {
     Tscore,
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, PartialEq, Debug)]
 pub enum IntrinsicValue {
     Unary {
         kind: IntrinsicUnaryKind,
@@ -195,18 +195,18 @@ pub fn get_core_intrinsics() -> impl Iterator<Item = (&'static str, Value)> {
             (function.identifier, Value::IntrinsicFunction(function))
         })
         .chain([
-            ("PI", Value::Constant(Constant::Mathematical {
+            ("PI", Value::Mathematical {
                 kind: MathematicalConstant::Pi,
                 coefficient: 1.0,
-            })),
-            ("TAU", Value::Constant(Constant::Mathematical {
+            }),
+            ("TAU", Value::Mathematical {
                 kind: MathematicalConstant::Tau,
                 coefficient: 1.0,
-            })),
-            ("E", Value::Constant(Constant::Mathematical {
+            }),
+            ("E", Value::Mathematical {
                 kind: MathematicalConstant::E,
                 coefficient: 1.0,
-            })),
+            }),
             ("width_pixels", IntrinsicValue::Width.into()),
             ("height_pixels", IntrinsicValue::Height.into()),
         ])
@@ -353,14 +353,14 @@ pub const CORE_INTRINSIC_FUNCTIONS: &[&IntrinsicFunction] = &[
 
 pub fn interpret_trig_call(
     kind: IntrinsicUnaryKind,
-    arguments: Vec<Value>,
+    arguments: Box<[Value]>,
 ) -> crate::Result<Value> {
     let argument = arguments.into_iter().next().unwrap();
     let is_list = argument.get_type().is_list();
 
     Ok(IntrinsicValue::Unary {
         kind,
-        argument: argument.coerce_to(&Type::Real)?,
+        argument: argument.coerce_to(&Type::Real, true)?,
         result_type: Type::Real.unflatten_list(is_list),
     }.into())
 }
@@ -382,7 +382,7 @@ pub fn interpret_reducer_call(
     kind: IntrinsicReducerKind,
     argument_check: Option<fn(&Type) -> crate::Result<()>>,
     result_override: Option<Type>,
-    arguments: Vec<Value>,
+    arguments: Box<[Value]>,
 ) -> crate::Result<Value> {
     if let Some(argument_check) = argument_check {
         for argument in &arguments {
@@ -390,30 +390,31 @@ pub fn interpret_reducer_call(
         }
     }
 
-    if arguments.len() == 1 {
-        let argument = arguments.into_iter().next().unwrap();
+    if let [argument] = arguments.as_ref() {
         let (is_list, argument_type) = argument.get_type().into_flatten_list();
         let result_type = result_override.unwrap_or(argument_type);
+
         if is_list {
             Ok(IntrinsicValue::Reducer {
                 kind,
-                list: argument,
+                list: arguments.into_iter().next().unwrap(),
                 result_type,
             }.into())
         }
         else {
             Ok(IntrinsicValue::ArgumentsReducer {
                 kind,
-                arguments: Box::new([argument]),
+                arguments,
                 result_type,
             }.into())
         }
     }
     else {
         let result_type = Type::broadcast(result_override, arguments.iter().map(Value::get_type))?;
+
         Ok(IntrinsicValue::ArgumentsReducer {
             kind,
-            arguments: arguments.into_boxed_slice(),
+            arguments,
             result_type,
         }.into())
     }
@@ -499,7 +500,7 @@ pub static JOIN: IntrinsicFunction = IntrinsicFunction {
         )?;
 
         Ok(IntrinsicValue::Join {
-            arguments: arguments.into_boxed_slice(),
+            arguments,
             result_type: item_type.into_list(),
         }.into())
     },
@@ -630,7 +631,7 @@ pub static ENUM_VARIANTS: IntrinsicFunction = IntrinsicFunction {
     min_arity: 1,
     max_arity: Some(1),
     interpret_call: |context, arguments| {
-        let Value::Constant(Constant::Type { identifier }) = arguments.into_iter().next().unwrap() else {
+        let Type::Meta { identifier } = arguments.into_iter().next().unwrap().get_type() else {
             return Err(Box::new(crate::Error {
                 kind: crate::ErrorKind::ExpectedTypeArgument,
                 span: None,
@@ -645,16 +646,20 @@ pub static ENUM_VARIANTS: IntrinsicFunction = IntrinsicFunction {
             }));
         };
 
-        Ok(Value::Constant(Constant::List {
-            items: (0..variants.len())
-                .map(|ordinal| Constant::EnumVariant {
-                    type_identifier: identifier.clone(),
-                    variant_ordinal: ordinal as i64,
-                })
-                .collect(),
+        Ok(Value::ListRange {
+            kind: RangeKind::Exclusive,
+            start: Box::new(Value::EnumVariant {
+                type_identifier: identifier.clone(),
+                variant_ordinal: 0,
+            }),
+            end: Box::new(Value::EnumVariant {
+                type_identifier: identifier.clone(),
+                variant_ordinal: variants.len() as i64,
+            }),
+            step: Box::new(Value::Int(1)),
             item_type: Type::UserValue {
                 type_identifier: identifier,
             },
-        }))
+        })
     },
 };

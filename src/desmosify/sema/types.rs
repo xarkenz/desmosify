@@ -7,43 +7,11 @@ pub struct FunctionSignature {
     pub return_type: Type,
 }
 
-impl FunctionSignature {
-    pub fn get_return_type(&self, arguments: &[Type]) -> Option<&Type> {
-        let accepts_arguments = arguments.len() == self.parameter_types.len() &&
-            std::iter::zip(arguments, &self.parameter_types)
-                .all(|(argument, parameter)| argument.can_coerce_to(parameter));
-
-        accepts_arguments.then_some(&self.return_type)
-    }
-}
-
-// #[derive(Clone, Debug)]
-// pub struct MaybeList<T: Clone + std::fmt::Debug> {
-//     pub inner: T,
-//     pub is_list: bool,
-// }
-//
-// impl<T: Clone + std::fmt::Debug> MaybeList<T> {
-//     pub fn new(inner: T, is_list: bool) -> Self {
-//         Self {
-//             inner,
-//             is_list,
-//         }
-//     }
-// }
-//
-// impl<T: Clone + std::fmt::Debug> From<T> for MaybeList<T> {
-//     fn from(inner: T) -> Self {
-//         Self {
-//             inner,
-//             is_list: false,
-//         }
-//     }
-// }
-
 #[derive(Clone, PartialEq, Debug)]
 pub enum Type {
-    Meta,
+    Meta {
+        identifier: Rc<str>,
+    },
     Any,
     Real,
     Int,
@@ -107,6 +75,18 @@ impl Type {
         }
     }
 
+    pub fn require_flatten_list(self, span: Option<crate::Span>) -> crate::Result<Self> {
+        match self {
+            Self::List { item_type } => Ok(*item_type),
+            other_type => Err(Box::new(crate::Error {
+                kind: crate::ErrorKind::ExpectedListType {
+                    got_type: other_type.to_string(),
+                },
+                span,
+            }))
+        }
+    }
+
     pub fn flatten_list(&self) -> (bool, &Self) {
         match self {
             Self::List { item_type } => (true, item_type),
@@ -133,8 +113,8 @@ impl Type {
     pub fn can_coerce_to(&self, target: &Self) -> bool {
         use self::Type::*;
         self == target || match (self, target) {
-            (_, Any) => !matches!(self, Meta | Str | UserFunction { .. } | IntrinsicFunction { .. }),
-            (Any, _) => !matches!(target, Meta | Str | UserFunction { .. } | IntrinsicFunction { .. }),
+            (_, Any) => !matches!(self, Meta { .. } | Str | UserFunction { .. } | IntrinsicFunction { .. }),
+            (Any, _) => !matches!(target, Meta { .. } | Str | UserFunction { .. } | IntrinsicFunction { .. }),
             (Int, Real) => true,
             (Bool, Int | Real) => true,
             (
@@ -181,7 +161,7 @@ impl Type {
         }
         else {
             Err(Box::new(crate::Error {
-                kind: crate::ErrorKind::ExpectedNumericPoint2DType {
+                kind: crate::ErrorKind::ExpectedNumericPoint2Type {
                     got_type: self.to_string(),
                 },
                 span: None,
@@ -203,7 +183,7 @@ impl Type {
         }
         else {
             Err(Box::new(crate::Error {
-                kind: crate::ErrorKind::ExpectedNumericPoint3DType {
+                kind: crate::ErrorKind::ExpectedNumericPoint3Type {
                     got_type: self.to_string(),
                 },
                 span: None,
@@ -230,32 +210,47 @@ impl Type {
     }
 
     pub fn merge(&self, other: &Self) -> crate::Result<Self> {
-        if let Self::Any = self {
-            Ok(Self::Any)
-        }
-        else if let Self::Any = other {
-            Ok(Self::Any)
-        }
-        else if self.can_coerce_to(&Self::Int) && other.can_coerce_to(&Self::Int) {
-            Ok(Self::Int)
-        }
-        else if self.can_coerce_to(&Self::Real) && other.can_coerce_to(&Self::Real) {
-            Ok(Self::Real)
-        }
-        else if self.can_coerce_to(other) {
-            Ok(other.clone())
-        }
-        else if other.can_coerce_to(self) {
-            Ok(self.clone())
-        }
-        else {
-            Err(Box::new(crate::Error {
-                kind: crate::ErrorKind::CannotMergeTypes {
-                    type_1: self.to_string(),
-                    type_2: other.to_string(),
-                },
-                span: None,
-            }))
+        match (self, other) {
+            (Self::Any, _) => Ok(other.clone()),
+            (_, Self::Any) => Ok(self.clone()),
+            (
+                Self::Point2 { x_type: self_x, y_type: self_y },
+                Self::Point2 { x_type: other_x, y_type: other_y },
+            ) => Ok(Self::Point2 {
+                x_type: Box::new(Self::merge(self_x, other_x)?),
+                y_type: Box::new(Self::merge(self_y, other_y)?),
+            }),
+            (
+                Self::Point3 { x_type: self_x, y_type: self_y, z_type: self_z },
+                Self::Point3 { x_type: other_x, y_type: other_y, z_type: other_z },
+            ) => Ok(Self::Point3 {
+                x_type: Box::new(Self::merge(self_x, other_x)?),
+                y_type: Box::new(Self::merge(self_y, other_y)?),
+                z_type: Box::new(Self::merge(self_z, other_z)?),
+            }),
+            _ => {
+                if self.can_coerce_to(&Self::Int) && other.can_coerce_to(&Self::Int) {
+                    Ok(Self::Int)
+                }
+                else if self.can_coerce_to(&Self::Real) && other.can_coerce_to(&Self::Real) {
+                    Ok(Self::Real)
+                }
+                else if self.can_coerce_to(other) {
+                    Ok(other.clone())
+                }
+                else if other.can_coerce_to(self) {
+                    Ok(self.clone())
+                }
+                else {
+                    Err(Box::new(crate::Error {
+                        kind: crate::ErrorKind::CannotMergeTypes {
+                            type_1: self.to_string(),
+                            type_2: other.to_string(),
+                        },
+                        span: None,
+                    }))
+                }
+            }
         }
     }
 
@@ -285,7 +280,7 @@ impl Type {
 impl std::fmt::Display for Type {
     fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
         match self {
-            Self::Meta => write!(f, "<type>"),
+            Self::Meta { .. } => write!(f, "<type>"),
             Self::Any => write!(f, "?"),
             Self::Real => write!(f, "real"),
             Self::Int => write!(f, "int"),
@@ -312,14 +307,3 @@ impl std::fmt::Display for Type {
         }
     }
 }
-
-// impl std::fmt::Display for MaybeList<DataType> {
-//     fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
-//         if self.is_list {
-//             write!(f, "[{}]", self.inner)
-//         }
-//         else {
-//             write!(f, "{}", self.inner)
-//         }
-//     }
-// }

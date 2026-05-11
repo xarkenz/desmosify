@@ -3,17 +3,18 @@ use std::rc::Rc;
 use crate::ast::{Declaration, Definition, DefinitionKind, DisplayDeclaration, PublicDeclaration, TickerDeclaration, TypeExpression, TypeExpressionKind, ValueDefinition};
 use crate::sema::intrinsic::get_core_intrinsics;
 use crate::sema::types::{Type, FunctionSignature};
-use crate::sema::values::Value;
+use crate::sema::values::{LocalReference, Value};
 
 #[derive(Clone, Debug)]
 pub struct TypedDefinition {
     pub definition: Definition,
-    pub instance_type: Type,
+    pub value_type: Type,
 }
 
 #[derive(Debug)]
 pub struct GlobalContext {
     definitions: HashMap<Rc<str>, TypedDefinition>,
+    action_definitions: HashMap<Rc<str>, TypedDefinition>,
     intrinsics: HashMap<&'static str, Value>,
     ticker_declarations: Vec<TickerDeclaration>,
     public_declarations: Vec<PublicDeclaration>,
@@ -24,6 +25,7 @@ impl GlobalContext {
     pub fn from_declarations(mut declarations: Vec<Declaration>) -> crate::Result<Self> {
         let mut context = Self {
             definitions: HashMap::new(),
+            action_definitions: HashMap::new(),
             intrinsics: get_core_intrinsics().collect(),
             ticker_declarations: Vec::new(),
             public_declarations: Vec::new(),
@@ -45,8 +47,8 @@ impl GlobalContext {
             };
 
             context.add_definition(TypedDefinition {
-                instance_type: Type::UserValue {
-                    type_identifier: type_definition.identifier.clone(),
+                value_type: Type::Meta {
+                    identifier: type_definition.identifier.clone(),
                 },
                 definition: type_definition,
             })?;
@@ -55,46 +57,52 @@ impl GlobalContext {
         // Process the remaining declarations, including value definitions.
         for declaration in declarations {
             match declaration {
-                Declaration::Definition(definition) => {
-                    let data_type = match &definition.kind {
-                        DefinitionKind::Type(..) => {
-                            // We already processed type definitions.
-                            unreachable!()
-                        },
-                        DefinitionKind::Value(ValueDefinition::Let { parameters, value_type, .. }) => {
-                            let value_type = context.resolve_type(value_type)?;
-                            if let Some(parameters) = parameters {
-                                Type::UserFunction {
-                                    signature: Box::new(FunctionSignature {
-                                        parameter_types: parameters.0
-                                            .iter()
-                                            .map(|(_, parameter_type)| context.resolve_type(parameter_type))
-                                            .collect::<crate::Result<_>>()?,
-                                        return_type: value_type,
-                                    }),
-                                }
-                            }
-                            else {
-                                value_type
-                            }
-                        }
-                        DefinitionKind::Value(ValueDefinition::Variable { value_type, .. }) => {
-                            context.resolve_type(value_type)?
-                        }
-                        DefinitionKind::Value(ValueDefinition::Action { parameters, .. }) => {
-                            Type::Action {
-                                parameter_types: parameters.0
-                                    .iter()
-                                    .map(|(_, parameter_type)| context.resolve_type(parameter_type))
-                                    .collect::<crate::Result<_>>()?,
-                            }
-                        }
-                    };
+                Declaration::Definition(definition) => match &definition.kind {
+                    DefinitionKind::Type(..) => {
+                        // We already processed type definitions.
+                        unreachable!()
+                    },
+                    DefinitionKind::Value(ValueDefinition::Let { parameters, value_type, .. }) => {
+                        let mut value_type = context.resolve_type(value_type)?;
 
-                    context.add_definition(TypedDefinition {
-                        definition,
-                        instance_type: data_type,
-                    })?;
+                        if let Some(parameters) = parameters {
+                            value_type = Type::UserFunction {
+                                signature: Box::new(FunctionSignature {
+                                    parameter_types: parameters.0
+                                        .iter()
+                                        .map(|(_, parameter_type)| context.resolve_type(parameter_type))
+                                        .collect::<crate::Result<_>>()?,
+                                    return_type: value_type,
+                                }),
+                            };
+                        }
+
+                        context.add_definition(TypedDefinition {
+                            definition,
+                            value_type,
+                        })?;
+                    }
+                    DefinitionKind::Value(ValueDefinition::Variable { value_type, .. }) => {
+                        let value_type = context.resolve_type(value_type)?;
+
+                        context.add_definition(TypedDefinition {
+                            definition,
+                            value_type,
+                        })?;
+                    }
+                    DefinitionKind::Value(ValueDefinition::Action { parameters, .. }) => {
+                        let value_type = Type::Action {
+                            parameter_types: parameters.0
+                                .iter()
+                                .map(|(_, parameter_type)| context.resolve_type(parameter_type))
+                                .collect::<crate::Result<_>>()?,
+                        };
+
+                        context.add_definition(TypedDefinition {
+                            definition,
+                            value_type,
+                        })?;
+                    }
                 }
                 Declaration::Ticker(ticker_declaration) => {
                     context.add_ticker_declaration(ticker_declaration);
@@ -126,6 +134,21 @@ impl GlobalContext {
         }
     }
 
+    pub fn add_action_definition(&mut self, definition: TypedDefinition) -> crate::Result<()> {
+        let identifier = definition.definition.identifier.clone();
+        if let Some(old_definition) = self.definitions.insert(identifier, definition) {
+            Err(Box::new(crate::Error {
+                kind: crate::ErrorKind::ConflictingActionIdentifiers {
+                    identifier: old_definition.definition.identifier.as_ref().into(),
+                },
+                span: Some(old_definition.definition.span),
+            }))
+        }
+        else {
+            Ok(())
+        }
+    }
+
     pub fn add_ticker_declaration(&mut self, ticker_declaration: TickerDeclaration) {
         self.ticker_declarations.push(ticker_declaration);
     }
@@ -138,17 +161,45 @@ impl GlobalContext {
         self.display_declarations.push(display_declaration);
     }
 
+    pub fn definitions(&self) -> impl Iterator<Item = &TypedDefinition> {
+        self.definitions.values()
+    }
+
     pub fn find_definition(&self, identifier: &str) -> Option<&TypedDefinition> {
         self.definitions.get(identifier)
+    }
+
+    pub fn action_definitions(&self) -> impl Iterator<Item = &TypedDefinition> {
+        self.action_definitions.values()
+    }
+
+    pub fn find_action_definition(&self, identifier: &str) -> Option<&TypedDefinition> {
+        self.action_definitions.get(identifier)
+    }
+
+    pub fn intrinsics(&self) -> impl Iterator<Item = &Value> {
+        self.intrinsics.values()
     }
 
     pub fn find_intrinsic(&self, identifier: &str) -> Option<&Value> {
         self.intrinsics.get(identifier)
     }
 
+    pub fn ticker_declarations(&self) -> &[TickerDeclaration] {
+        &self.ticker_declarations
+    }
+
+    pub fn public_declarations(&self) -> &[PublicDeclaration] {
+        &self.public_declarations
+    }
+
+    pub fn display_declarations(&self) -> &[DisplayDeclaration] {
+        &self.display_declarations
+    }
+
     pub fn resolve_type(&self, type_expression: &TypeExpression) -> crate::Result<Type> {
         let check_point_component = |component_type: Type| {
-            if component_type.is_list() {
+            if !component_type.is_numeric() {
                 Err(Box::new(crate::Error {
                     kind: crate::ErrorKind::InvalidPointComponentType {
                         component_type: component_type.to_string(),
@@ -170,11 +221,11 @@ impl GlobalContext {
                     Ok(primitive)
                 }
                 else if let Some(TypedDefinition {
-                                     instance_type: Type::UserValue { type_identifier },
+                                     value_type: Type::Meta { identifier },
                                      ..
                                  }) = self.find_definition(identifier) {
                     Ok(Type::UserValue {
-                        type_identifier: type_identifier.clone(),
+                        type_identifier: identifier.clone(),
                     })
                 }
                 else {
@@ -248,6 +299,17 @@ impl<'a> LocalContext<'a> {
     pub fn add_local(&mut self, identifier: Rc<str>, value: Value) {
         // TODO: prevent duplicate names?
         self.locals.insert(identifier, value);
+    }
+
+    pub fn add_local_variable(&mut self, identifier: Rc<str>, next_local_id: &mut u64, value_type: Type) -> LocalReference {
+        let local_reference = LocalReference {
+            id: *next_local_id,
+            value_type,
+        };
+        self.add_local(identifier, Value::Local(local_reference.clone()));
+        *next_local_id += 1;
+
+        local_reference
     }
 
     pub fn find_local(&self, identifier: &str) -> Option<&Value> {

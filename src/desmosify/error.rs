@@ -162,6 +162,9 @@ pub enum ErrorKind {
     ConflictingGlobalIdentifiers {
         identifier: Box<str>,
     },
+    ConflictingActionIdentifiers {
+        identifier: Box<str>,
+    },
     UnrecognizedType {
         identifier: Box<str>,
     },
@@ -170,6 +173,10 @@ pub enum ErrorKind {
     },
     InvalidPointComponentType {
         component_type: String,
+    },
+    InvalidArity {
+        expected: usize,
+        got: usize,
     },
     InvalidIntrinsicArity {
         identifier: Box<str>,
@@ -192,10 +199,16 @@ pub enum ErrorKind {
     ExpectedNumericOrPointType {
         got_type: String,
     },
-    ExpectedNumericPoint2DType {
+    ExpectedNumericPoint2Type {
         got_type: String,
     },
-    ExpectedNumericPoint3DType {
+    ExpectedNumericPoint3Type {
+        got_type: String,
+    },
+    ExpectedListType {
+        got_type: String,
+    },
+    ExpectedFunctionType {
         got_type: String,
     },
     ExpectedTypeArgument,
@@ -203,6 +216,27 @@ pub enum ErrorKind {
     CannotMergeTypes {
         type_1: String,
         type_2: String,
+    },
+    IncompatibleTickerIntervals,
+    InvalidUpdateLhs,
+    UnexpectedExpressionKind,
+    IntegerTooLarge,
+    UndefinedIntrinsic {
+        identifier: Box<str>,
+    },
+    UndefinedAction {
+        identifier: Box<str>,
+    },
+    UndefinedIdentifier {
+        identifier: Box<str>,
+    },
+    UndefinedEnumVariant {
+        enum_identifier: Box<str>,
+        variant_identifier: Box<str>,
+    },
+    InvalidAccessOperation {
+        lhs_type: String,
+        rhs: Box<str>,
     },
 }
 
@@ -283,7 +317,10 @@ impl std::fmt::Display for ErrorKind {
                 write!(f, "unexpected '{keyword}' without supporting 'if' (did you add an extra comma?)")
             }
             Self::ConflictingGlobalIdentifiers { identifier } => {
-                write!(f, "multiple global definitions for identifier '{identifier}'")
+                write!(f, "conflicting global definitions for identifier '{identifier}'")
+            }
+            Self::ConflictingActionIdentifiers { identifier } => {
+                write!(f, "multiple actions defined with identifier '{identifier}'")
             }
             Self::ReservedIdentifier { identifier } => {
                 write!(f, "'{identifier}' is a reserved identifier")
@@ -297,6 +334,9 @@ impl std::fmt::Display for ErrorKind {
             Self::InvalidPointComponentType { component_type } => {
                 write!(f, "type '{component_type}' cannot be the component of a point")
             }
+            Self::InvalidArity { expected, got } => {
+                write!(f, "expected {expected} arguments, got {got}")
+            }
             Self::InvalidIntrinsicArity { identifier, min, max, got } => {
                 write!(f, "function '@{identifier}' expects between {min} and {max} arguments but received {got}")
             }
@@ -307,16 +347,22 @@ impl std::fmt::Display for ErrorKind {
                 write!(f, "expected a value of type '{expected}', but got '{got}' instead")
             }
             Self::ExpectedNumericType { got_type } => {
-                write!(f, "expected a numeric type, got '{got_type}'")
+                write!(f, "expected a numeric value, got '{got_type}'")
             }
             Self::ExpectedNumericOrPointType { got_type } => {
-                write!(f, "expected a numeric type or numeric point type, got '{got_type}'")
+                write!(f, "expected a numeric value or numeric point, got '{got_type}'")
             }
-            Self::ExpectedNumericPoint2DType { got_type } => {
-                write!(f, "expected a numeric 2D point type, got '{got_type}'")
+            Self::ExpectedNumericPoint2Type { got_type } => {
+                write!(f, "expected a numeric 2D point, got '{got_type}'")
             }
-            Self::ExpectedNumericPoint3DType { got_type } => {
-                write!(f, "expected a numeric 3D point type, got '{got_type}'")
+            Self::ExpectedNumericPoint3Type { got_type } => {
+                write!(f, "expected a numeric 3D point, got '{got_type}'")
+            }
+            Self::ExpectedListType { got_type } => {
+                write!(f, "expected a list, got '{got_type}'")
+            }
+            Self::ExpectedFunctionType { got_type } => {
+                write!(f, "expected a function, got '{got_type}'")
             }
             Self::ExpectedTypeArgument => {
                 write!(f, "this function requires a type to be given as its argument")
@@ -326,6 +372,33 @@ impl std::fmt::Display for ErrorKind {
             }
             Self::CannotMergeTypes { type_1, type_2 } => {
                 write!(f, "types '{type_1}' and '{type_2}' are incompatible")
+            }
+            Self::IncompatibleTickerIntervals => {
+                write!(f, "having multiple tickers with different intervals is not yet allowed")
+            }
+            Self::InvalidUpdateLhs => {
+                write!(f, "only variables defined using 'var' can be updated")
+            }
+            Self::UnexpectedExpressionKind => {
+                write!(f, "unexpected expression kind")
+            }
+            Self::IntegerTooLarge => {
+                write!(f, "integer too large")
+            }
+            Self::UndefinedIntrinsic { identifier } => {
+                write!(f, "intrinsic '@{}' is not defined", identifier)
+            }
+            Self::UndefinedAction { identifier } => {
+                write!(f, "action '{identifier}' is not defined")
+            }
+            Self::UndefinedIdentifier { identifier } => {
+                write!(f, "identifier '{identifier}' is not defined")
+            }
+            Self::UndefinedEnumVariant { enum_identifier, variant_identifier } => {
+                write!(f, "enum '{enum_identifier}' has no variant '{variant_identifier}'")
+            }
+            Self::InvalidAccessOperation { lhs_type, rhs } => {
+                write!(f, "'{lhs_type}' has no member '{rhs}'")
             }
         }
     }
