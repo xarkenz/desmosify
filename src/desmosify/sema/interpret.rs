@@ -528,7 +528,16 @@ pub fn interpret_expression(context: &GlobalContext, next_local_id: &mut u64, lo
                         }));
                     }
 
-                    todo!()
+                    // FIXME: this is not type-safe in terms of broadcasting
+                    let arguments = std::iter::zip(arguments, &signature.parameter_types)
+                        .map(|(argument, parameter_type)| argument.coerce_to(parameter_type, true))
+                        .collect::<crate::Result<_>>()?;
+
+                    Ok(Value::UserFunctionCall {
+                        function: Box::new(function_value),
+                        arguments,
+                        return_type: signature.return_type,
+                    })
                 }
                 got_type => {
                     Err(Box::new(crate::Error {
@@ -541,7 +550,46 @@ pub fn interpret_expression(context: &GlobalContext, next_local_id: &mut u64, lo
             }
         }
         ExpressionKind::Conditional { condition_consequents, alternative } => {
-            todo!()
+            let mut result_is_list = false;
+            let mut result_type = Type::Any;
+
+            let condition_consequents: Box<[_]> = condition_consequents
+                .iter()
+                .map(|(condition, consequent)| {
+                    let condition = interpret_expression(context, next_local_id, local_context, condition)?
+                        .coerce_to(&Type::Bool, true)?;
+                    let consequent = interpret_expression(context, next_local_id, local_context, consequent)?;
+                    let (consequent_is_list, consequent_type) = consequent.get_type().into_flatten_list();
+                    result_is_list |= condition.get_type().is_list() || consequent_is_list;
+                    result_type = result_type.merge(&consequent_type)?;
+
+                    Ok((condition, consequent))
+                })
+                .collect::<crate::Result<_>>()?;
+
+            let alternative = alternative
+                .as_ref()
+                .map_or(Ok(Value::Undefined), |alternative| {
+                    let alternative = interpret_expression(context, next_local_id, local_context, alternative)?;
+                    let (alternative_is_list, alternative_type) = alternative.get_type().into_flatten_list();
+                    result_is_list |= alternative_is_list;
+                    result_type = result_type.merge(&alternative_type)?;
+
+                    alternative.coerce_to(&result_type, true)
+                })?;
+
+            let condition_consequents = condition_consequents
+                .into_iter()
+                .map(|(condition, consequent)| {
+                    Ok((condition, consequent.coerce_to(&result_type, true)?))
+                })
+                .collect::<crate::Result<_>>()?;
+
+            Ok(Value::Conditional {
+                condition_consequents,
+                alternative: Box::new(alternative),
+                result_type: result_type.unflatten_list(result_is_list),
+            })
         }
         ExpressionKind::Let { identifier, value_type, value, expression } => {
             let mut value = interpret_expression(context, next_local_id, local_context, value)?;

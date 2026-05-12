@@ -63,6 +63,7 @@ pub enum Value {
     Type {
         identifier: Rc<str>,
     },
+    Undefined,
     Real(f64),
     Mathematical {
         kind: MathematicalConstant,
@@ -166,6 +167,9 @@ impl Value {
                 Type::Meta {
                     identifier: identifier.clone(),
                 }
+            }
+            Self::Undefined => {
+                Type::Any
             }
             Self::Real(..) | Self::Mathematical { .. } => {
                 Type::Real

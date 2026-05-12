@@ -68,10 +68,17 @@ impl Type {
         matches!(self, Self::List { .. })
     }
 
-    pub fn list_item_type(&self) -> Option<&Self> {
+    pub fn flatten_list(&self) -> (bool, &Self) {
         match self {
-            Self::List { item_type } => Some(item_type),
-            _ => None
+            Self::List { item_type } => (true, item_type),
+            _ => (false, self)
+        }
+    }
+
+    pub fn into_flatten_list(self) -> (bool, Self) {
+        match self {
+            Self::List { item_type } => (true, *item_type),
+            _ => (false, self)
         }
     }
 
@@ -84,20 +91,6 @@ impl Type {
                 },
                 span,
             }))
-        }
-    }
-
-    pub fn flatten_list(&self) -> (bool, &Self) {
-        match self {
-            Self::List { item_type } => (true, item_type),
-            _ => (false, self)
-        }
-    }
-
-    pub fn into_flatten_list(self) -> (bool, Self) {
-        match self {
-            Self::List { item_type } => (true, *item_type),
-            _ => (false, self)
         }
     }
 

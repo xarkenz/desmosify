@@ -1,0 +1,8 @@
+// This one is particularly dastardly
+let cannot_broadcast(x: real): real = [x][1];
+
+// Some of these allow x to be broadcasted, some don't
+let returns_list(list: [int], x: int): [int] = list[1..] + x;
+let also_returns_list(list: [int], x: int): [int] = @join(list, x);
+let returns_scalar(list: [int], x: int): int = @total(list) + x;
+let also_returns_scalar(list: [int], x: int): int = @total(list + x);
