@@ -1,9 +1,5 @@
-use super::*;
-
-use crate::{Definitions, Signatures, ConstantValue};
-use crate::ast::{Expression, ExpressionValue};
-
 use json::JsonValue;
+use crate::sema::Program;
 
 pub struct GraphingTarget;
 
@@ -14,7 +10,7 @@ impl crate::target::Target for GraphingTarget {
         "desmos-graphing"
     }
 
-    fn compile(&self, definitions: &Definitions, signatures: &Signatures) -> Self::Output {
+    fn compile(&self, program: &Program) -> Self::Output {
         todo!()
     }
 }

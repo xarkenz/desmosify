@@ -1,8 +1,9 @@
-pub mod desmos;
+use crate::sema::Program;
 
 pub trait Target {
     type Output;
 
     fn name(&self) -> &'static str;
-    fn compile(&self, definitions: &crate::Definitions, signatures: &crate::Signatures) -> Self::Output;
+
+    fn compile(&self, program: &Program) -> Self::Output;
 }

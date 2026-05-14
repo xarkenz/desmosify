@@ -29,9 +29,9 @@ pub fn interpret_program(context: &GlobalContext) -> crate::Result<Program> {
     }
 
     Ok(Program {
-        lets,
-        variables,
-        actions,
+        lets: lets.into_boxed_slice(),
+        variables: variables.into_boxed_slice(),
+        actions: actions.into_boxed_slice(),
         ticker: interpret_ticker_declarations(context, &mut next_local_id)?,
         public: interpret_public_declarations(context, &mut next_local_id)?,
         display: interpret_display_declarations(context, &mut next_local_id)?,
@@ -201,6 +201,7 @@ pub fn interpret_display_declarations(context: &GlobalContext, next_local_id: &m
                             DisplayAttributeValue::Action(action) => {
                                 let mut action_context = local_context.new_inner();
                                 // TODO: figure out how to do this better
+                                // TODO: only available when list?
                                 action_context.add_scoped_intrinsic("index", IntrinsicValue::Index.into());
                                 ProgramDisplayAttributeValue::Action(interpret_action_expression(context, next_local_id, &local_context, action)?)
                             }
@@ -369,10 +370,10 @@ pub fn interpret_expression(context: &GlobalContext, next_local_id: &mut u64, lo
             interpret_expression(context, next_local_id, local_context, expression)
         }
         ExpressionKind::Unary { operation, operand } => {
-            todo!()
+            interpret_unary_operation(context, next_local_id, local_context, *operation, operand)
         }
         ExpressionKind::Binary { operation, lhs, rhs } => {
-            todo!()
+            interpret_binary_operation(context, next_local_id, local_context, *operation, lhs, rhs)
         }
         ExpressionKind::Point2 { x, y } => {
             let x = interpret_expression(context, next_local_id, local_context, x)?;

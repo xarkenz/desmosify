@@ -146,9 +146,9 @@ impl ProgramDisplay {
 
 #[derive(Clone, Debug)]
 pub struct Program {
-    lets: Vec<ProgramLet>,
-    variables: Vec<ProgramVariable>,
-    actions: Vec<ProgramAction>,
+    lets: Box<[ProgramLet]>,
+    variables: Box<[ProgramVariable]>,
+    actions: Box<[ProgramAction]>,
     ticker: Option<ProgramTicker>,
     public: Option<ProgramPublic>,
     display: Option<ProgramDisplay>,
