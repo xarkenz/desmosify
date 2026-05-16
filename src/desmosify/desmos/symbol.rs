@@ -1,5 +1,5 @@
 use std::collections::HashMap;
-use crate::desmos::{BinaryKind, GraphExpression};
+use crate::desmos::{GraphBinaryKind, GraphExpression};
 
 pub struct AsciiWords<'a>(&'a str);
 
@@ -95,7 +95,7 @@ impl SymbolTable {
 
     pub fn get_symbol(&mut self, identifier: &str) -> GraphExpression {
         GraphExpression::Binary {
-            kind: BinaryKind::Subscript,
+            kind: GraphBinaryKind::Subscript,
             lhs: Box::new(self.symbol_prefix().clone()),
             rhs: Box::new(GraphExpression::Alphanumeric(self.get_symbol_subscript(identifier))),
         }

@@ -343,7 +343,7 @@ impl GeometryTarget {
                     elements: vec![
                         GraphExpression::InequalityChain {
                             lhs: operands.pop().unwrap(),
-                            first_kind: InequalityKind::LessThan,
+                            first_kind: GraphInequalityKind::LessThan,
                             rhs: operands.pop().unwrap(),
                             chain: Vec::new()
                         },
@@ -356,7 +356,7 @@ impl GeometryTarget {
                     elements: vec![
                         GraphExpression::InequalityChain {
                             lhs: operands.pop().unwrap(),
-                            first_kind: InequalityKind::GreaterThan,
+                            first_kind: GraphInequalityKind::GreaterThan,
                             rhs: operands.pop().unwrap(),
                             chain: Vec::new()
                         },
@@ -369,7 +369,7 @@ impl GeometryTarget {
                     elements: vec![
                         GraphExpression::InequalityChain {
                             lhs: operands.pop().unwrap(),
-                            first_kind: InequalityKind::LessEqual,
+                            first_kind: GraphInequalityKind::LessEqual,
                             rhs: operands.pop().unwrap(),
                             chain: Vec::new()
                         },
@@ -382,7 +382,7 @@ impl GeometryTarget {
                     elements: vec![
                         GraphExpression::InequalityChain {
                             lhs: operands.pop().unwrap(),
-                            first_kind: InequalityKind::GreaterEqual,
+                            first_kind: GraphInequalityKind::GreaterEqual,
                             rhs: operands.pop().unwrap(),
                             chain: Vec::new()
                         },
@@ -556,7 +556,7 @@ impl crate::target::Target for GeometryTarget {
             id
         };
 
-        state.expressions.entries.push(Box::new(FolderEntry {
+        state.expressions.entries.push(Box::new(GraphFolderEntry {
             id: "**dcg_geo_folder**".into(),
             title: "geometry".into(),
             collapsed: true,
@@ -567,14 +567,14 @@ impl crate::target::Target for GeometryTarget {
             for expression in public {
                 let entry: Box<dyn GraphEntry> = match *self.translate_expression(expression) {
                     GraphExpression::Alphanumeric(content) => {
-                        Box::new(TextEntry {
+                        Box::new(GraphTextEntry {
                             id: get_next_id(),
                             folder_id: None,
                             text: content.into(),
                         })
                     },
                     content => {
-                        Box::new(ExpressionEntry {
+                        Box::new(GraphExpressionEntry {
                             id: get_next_id(),
                             folder_id: None,
                             expression: Some(Box::new(content)),
@@ -587,7 +587,7 @@ impl crate::target::Target for GeometryTarget {
             }
         }
 
-        state.expressions.entries.push(Box::new(FolderEntry {
+        state.expressions.entries.push(Box::new(GraphFolderEntry {
             id: "desmosify:actions".into(),
             title: "Actions".into(),
             collapsed: true,
@@ -597,7 +597,7 @@ impl crate::target::Target for GeometryTarget {
         for (name, action) in &definitions.actions {
             let signature = signatures.user_defined.get(name).unwrap();
 
-            state.expressions.entries.push(Box::new(ExpressionEntry {
+            state.expressions.entries.push(Box::new(GraphExpressionEntry {
                 id: get_next_id(),
                 folder_id: Some("desmosify:actions".into()),
                 expression: Some(Box::new(GraphExpression::Equality {
@@ -611,7 +611,7 @@ impl crate::target::Target for GeometryTarget {
             }));
         }
 
-        state.expressions.entries.push(Box::new(FolderEntry {
+        state.expressions.entries.push(Box::new(GraphFolderEntry {
             id: "desmosify:defs".into(),
             title: "Definitions".into(),
             collapsed: true,
@@ -621,7 +621,7 @@ impl crate::target::Target for GeometryTarget {
         for (name, expression) in &definitions.identifiers {
             let signature = signatures.user_defined.get(name).unwrap();
 
-            state.expressions.entries.push(Box::new(ExpressionEntry {
+            state.expressions.entries.push(Box::new(GraphExpressionEntry {
                 id: get_next_id(),
                 folder_id: Some("desmosify:defs".into()),
                 expression: Some(Box::new(GraphExpression::Equality {
@@ -635,14 +635,14 @@ impl crate::target::Target for GeometryTarget {
             }));
         }
 
-        state.expressions.entries.push(Box::new(FolderEntry {
+        state.expressions.entries.push(Box::new(GraphFolderEntry {
             id: "desmosify:utils".into(),
             title: "Utilities".into(),
             collapsed: true,
             secret: false,
         }));
 
-        state.expressions.entries.push(Box::new(ExpressionEntry {
+        state.expressions.entries.push(Box::new(GraphExpressionEntry {
             id: get_next_id(),
             folder_id: Some("desmosify:utils".into()),
             expression: Some(Box::new(GraphExpression::Equality {
@@ -654,7 +654,7 @@ impl crate::target::Target for GeometryTarget {
             })),
             hidden: false,
         }));
-        state.expressions.entries.push(Box::new(ExpressionEntry {
+        state.expressions.entries.push(Box::new(GraphExpressionEntry {
             id: get_next_id(),
             folder_id: Some("desmosify:utils".into()),
             expression: Some(Box::new(GraphExpression::Equality {
