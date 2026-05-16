@@ -570,7 +570,7 @@ pub fn interpret_expression(context: &GlobalContext, next_local_id: &mut u64, lo
 
             let alternative = alternative
                 .as_ref()
-                .map_or(Ok(Value::Undefined), |alternative| {
+                .map_or(Ok(Value::Undefined(result_type.clone())), |alternative| {
                     let alternative = interpret_expression(context, next_local_id, local_context, alternative)?;
                     let (alternative_is_list, alternative_type) = alternative.get_type().into_flatten_list();
                     result_is_list |= alternative_is_list;

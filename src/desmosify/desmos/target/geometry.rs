@@ -131,84 +131,84 @@ impl GeometryTarget {
         "nCr",
     ];
 
-    pub fn translate_constant_value(&self, value: &ConstantValue) -> Box<Expression> {
+    pub fn translate_constant_value(&self, value: &ConstantValue) -> Box<GraphExpression> {
         Box::new(match value {
-            ConstantValue::Real(value) => Expression::Decimal(*value),
-            ConstantValue::Int(value) => Expression::Decimal(*value as f64),
-            ConstantValue::Bool(value) => Expression::Decimal(if *value { 1.0 } else { 0.0 }),
-            ConstantValue::Point(x_value, y_value) => Expression::Parentheses {
-                body: Box::new(Expression::Sequence {
+            ConstantValue::Real(value) => GraphExpression::Decimal(*value),
+            ConstantValue::Int(value) => GraphExpression::Decimal(*value as f64),
+            ConstantValue::Bool(value) => GraphExpression::Decimal(if *value { 1.0 } else { 0.0 }),
+            ConstantValue::Point(x_value, y_value) => GraphExpression::Parentheses {
+                body: Box::new(GraphExpression::Sequence {
                     elements: vec![
-                        Expression::Decimal(*x_value),
-                        Expression::Decimal(*y_value),
+                        GraphExpression::Decimal(*x_value),
+                        GraphExpression::Decimal(*y_value),
                     ]
                 })
             },
-            ConstantValue::IPoint(x_value, y_value) => Expression::Parentheses {
-                body: Box::new(Expression::Sequence {
+            ConstantValue::IPoint(x_value, y_value) => GraphExpression::Parentheses {
+                body: Box::new(GraphExpression::Sequence {
                     elements: vec![
-                        Expression::Decimal(*x_value as f64),
-                        Expression::Decimal(*y_value as f64),
+                        GraphExpression::Decimal(*x_value as f64),
+                        GraphExpression::Decimal(*y_value as f64),
                     ]
                 })
             },
             ConstantValue::Color(color) => match color {
-                &crate::Color::Rgb { red, green, blue } => Expression::Call {
-                    callee: Box::new(Expression::Command("rgb".into())),
-                    arguments: Box::new(Expression::Sequence {
+                &crate::Color::Rgb { red, green, blue } => GraphExpression::Call {
+                    callee: Box::new(GraphExpression::OperatorName("rgb".into())),
+                    arguments: Box::new(GraphExpression::Sequence {
                         elements: vec![
-                            Expression::Decimal(red),
-                            Expression::Decimal(green),
-                            Expression::Decimal(blue),
+                            GraphExpression::Decimal(red),
+                            GraphExpression::Decimal(green),
+                            GraphExpression::Decimal(blue),
                         ]
                     })
                 },
-                &crate::Color::Hsv { hue, saturation, value } => Expression::Call {
-                    callee: Box::new(Expression::Command("hsv".into())),
-                    arguments: Box::new(Expression::Sequence {
+                &crate::Color::Hsv { hue, saturation, value } => GraphExpression::Call {
+                    callee: Box::new(GraphExpression::OperatorName("hsv".into())),
+                    arguments: Box::new(GraphExpression::Sequence {
                         elements: vec![
-                            Expression::Decimal(hue),
-                            Expression::Decimal(saturation),
-                            Expression::Decimal(value),
+                            GraphExpression::Decimal(hue),
+                            GraphExpression::Decimal(saturation),
+                            GraphExpression::Decimal(value),
                         ]
                     })
                 },
             },
-            ConstantValue::Polygon(points) => Expression::Call {
-                callee: Box::new(Expression::Command("polygon".into())),
-                arguments: Box::new(Expression::Sequence {
+            ConstantValue::Polygon(points) => GraphExpression::Call {
+                callee: Box::new(GraphExpression::OperatorName("polygon".into())),
+                arguments: Box::new(GraphExpression::Sequence {
                     elements: Vec::from_iter(points.iter().map(|&(x_value, y_value)| {
-                        Expression::Parentheses {
-                            body: Box::new(Expression::Sequence(vec![
-                                Expression::Decimal(x_value),
-                                Expression::Decimal(y_value),
+                        GraphExpression::Parentheses {
+                            body: Box::new(GraphExpression::Sequence(vec![
+                                GraphExpression::Decimal(x_value),
+                                GraphExpression::Decimal(y_value),
                             ]))
                         }
                     }))
                 })
             },
-            ConstantValue::Segment((x1_value, y1_value), (x2_value, y2_value)) => Expression::Call {
-                callee: Box::new(Expression::Command("segment".into())),
-                arguments: Box::new(Expression::Sequence {
+            ConstantValue::Segment((x1_value, y1_value), (x2_value, y2_value)) => GraphExpression::Call {
+                callee: Box::new(GraphExpression::OperatorName("segment".into())),
+                arguments: Box::new(GraphExpression::Sequence {
                     elements: vec![
-                        Expression::Parentheses {
-                            body: Box::new(Expression::Sequence(vec![
-                                Expression::Decimal(*x1_value),
-                                Expression::Decimal(*y1_value),
+                        GraphExpression::Parentheses {
+                            body: Box::new(GraphExpression::Sequence(vec![
+                                GraphExpression::Decimal(*x1_value),
+                                GraphExpression::Decimal(*y1_value),
                             ]))
                         },
-                        Expression::Parentheses {
-                            body: Box::new(Expression::Sequence(vec![
-                                Expression::Decimal(*x2_value),
-                                Expression::Decimal(*y2_value),
+                        GraphExpression::Parentheses {
+                            body: Box::new(GraphExpression::Sequence(vec![
+                                GraphExpression::Decimal(*x2_value),
+                                GraphExpression::Decimal(*y2_value),
                             ]))
                         },
                     ]
                 })
             },
-            ConstantValue::Str(content) => Expression::Alphanumeric(content.clone()),
-            ConstantValue::List { items, .. } => Expression::List {
-                body: Box::new(Expression::Sequence {
+            ConstantValue::Str(content) => GraphExpression::Alphanumeric(content.clone()),
+            ConstantValue::List { items, .. } => GraphExpression::List {
+                body: Box::new(GraphExpression::Sequence {
                     elements: items
                         .iter()
                         .map(|value| *self.translate_constant_value(value))
@@ -219,50 +219,50 @@ impl GeometryTarget {
         })
     }
 
-    pub fn translate_name(&self, name: &str) -> Box<Expression> {
-        Box::new(Expression::Subscript {
-            base: Box::new(Expression::Letter('X')),
-            script: Box::new(Expression::Alphanumeric(name.chars().filter(|&ch| ch != '_').collect()))
+    pub fn translate_name(&self, name: &str) -> Box<GraphExpression> {
+        Box::new(GraphExpression::Subscript {
+            base: Box::new(GraphExpression::Letter('X')),
+            script: Box::new(GraphExpression::Alphanumeric(name.chars().filter(|&ch| ch != '_').collect()))
         })
     }
 
-    pub fn translate_operator(&self, operation: crate::Operation, operands: &[Expression]) -> Box<Expression> {
+    pub fn translate_operator(&self, operation: crate::Operation, operands: &[GraphExpression]) -> Box<GraphExpression> {
         let raw_operands = operands;
         let mut operands = Vec::from_iter(raw_operands.iter()
             .rev()
             .map(|operand| self.translate_expression(operand)));
 
         Box::new(match operation {
-            crate::Operation::PointLiteral => Expression::Parentheses {
-                body: Box::new(Expression::Sequence { elements: operands.into_iter().map(|component| *component).collect() })
+            crate::Operation::PointLiteral => GraphExpression::Parentheses {
+                body: Box::new(GraphExpression::Sequence { elements: operands.into_iter().map(|component| *component).collect() })
             },
-            crate::Operation::ListLiteral => Expression::List {
-                body: Box::new(Expression::Sequence { elements: operands.into_iter().map(|item| *item).collect() })
+            crate::Operation::ListLiteral => GraphExpression::List {
+                body: Box::new(GraphExpression::Sequence { elements: operands.into_iter().map(|item| *item).collect() })
             },
-            crate::Operation::ListFill => Expression::List {
-                body: Box::new(Expression::For {
+            crate::Operation::ListFill => GraphExpression::List {
+                body: Box::new(GraphExpression::For {
                     lhs: operands.pop().unwrap(),
-                    rhs: Box::new(Expression::Equality {
-                        lhs: Box::new(Expression::Letter('x')),
-                        rhs: Box::new(Expression::SquareBrackets(
-                            Box::new(Expression::Range {
-                                start: Box::new(Expression::Decimal(1.0)),
+                    rhs: Box::new(GraphExpression::Equality {
+                        lhs: Box::new(GraphExpression::Letter('x')),
+                        rhs: Box::new(GraphExpression::SquareBrackets(
+                            Box::new(GraphExpression::Range {
+                                start: Box::new(GraphExpression::Decimal(1.0)),
                                 end: Some(operands.pop().unwrap())
                             }),
                         ))
                     })
                 })
             },
-            crate::Operation::ListMap => Expression::List {
-                body: Box::new(Expression::For {
+            crate::Operation::ListMap => GraphExpression::List {
+                body: Box::new(GraphExpression::For {
                     lhs: match *operands.pop().unwrap() {
-                        Expression::SquareBrackets(content) => match content.as_ref() {
-                            Expression::For(_, _) => content,
-                            _ => Box::new(Expression::SquareBrackets(content))
+                        GraphExpression::SquareBrackets(content) => match content.as_ref() {
+                            GraphExpression::For(_, _) => content,
+                            _ => Box::new(GraphExpression::SquareBrackets(content))
                         },
                         operand => Box::new(operand)
                     },
-                    rhs: Box::new(Expression::Equality {
+                    rhs: Box::new(GraphExpression::Equality {
                         lhs: operands.pop().unwrap(),
                         rhs: operands.pop().unwrap()
                     })
@@ -270,193 +270,193 @@ impl GeometryTarget {
             },
             crate::Operation::ListFilter => todo!(),
             crate::Operation::MemberAccess => todo!(),
-            crate::Operation::BuiltIn => Expression::Command(
+            crate::Operation::BuiltIn => GraphExpression::OperatorName(
                 match &raw_operands[0].value {
                     ExpressionValue::Name(name) => name.clone(),
                     _ => panic!()
                 },
             ),
-            crate::Operation::Call => Expression::Call {
+            crate::Operation::Call => GraphExpression::Call {
                 callee: operands.pop().unwrap(),
-                arguments: Box::new(Expression::Sequence { elements: operands.into_iter().map(|argument| *argument).collect() })
+                arguments: Box::new(GraphExpression::Sequence { elements: operands.into_iter().map(|argument| *argument).collect() })
             },
-            crate::Operation::ActionCall => Expression::Call {
+            crate::Operation::ActionCall => GraphExpression::Call {
                 callee: operands.pop().unwrap(),
-                arguments: Box::new(Expression::Sequence { elements: operands.into_iter().map(|argument| *argument).collect() })
+                arguments: Box::new(GraphExpression::Sequence { elements: operands.into_iter().map(|argument| *argument).collect() })
             },
-            crate::Operation::Index => Expression::Parentheses {
-                body: Box::new(Expression::Index {
+            crate::Operation::Index => GraphExpression::Parentheses {
+                body: Box::new(GraphExpression::Index {
                     indexee: operands.pop().unwrap(),
                     index: operands.pop().unwrap()
                 })
             },
-            crate::Operation::Posate => Expression::Parentheses { body: Box::new(Expression::Positive { operand: operands.pop().unwrap() }) },
-            crate::Operation::Negate => Expression::Parentheses { body: Box::new(Expression::Negative { operand: operands.pop().unwrap() }) },
-            crate::Operation::Not => Expression::Piecewise {
-                body: Box::new(Expression::Sequence {
+            crate::Operation::Posate => GraphExpression::Parentheses { body: Box::new(GraphExpression::Positive { operand: operands.pop().unwrap() }) },
+            crate::Operation::Negate => GraphExpression::Parentheses { body: Box::new(GraphExpression::Negative { operand: operands.pop().unwrap() }) },
+            crate::Operation::Not => GraphExpression::Piecewise {
+                body: Box::new(GraphExpression::Sequence {
                     elements: vec![
-                        Expression::Equality {
+                        GraphExpression::Equality {
                             lhs: operands.pop().unwrap(),
-                            rhs: Box::new(Expression::Decimal(0.0))
+                            rhs: Box::new(GraphExpression::Decimal(0.0))
                         },
-                        Expression::Decimal(0.0),
+                        GraphExpression::Decimal(0.0),
                     ]
                 })
             },
-            crate::Operation::Exponent => Expression::Superscript {
+            crate::Operation::Exponent => GraphExpression::Superscript {
                 base: operands.pop().unwrap(),
                 script: operands.pop().unwrap()
             },
-            crate::Operation::Multiply => Expression::Parentheses {
-                body: Box::new(Expression::Multiply {
+            crate::Operation::Multiply => GraphExpression::Parentheses {
+                body: Box::new(GraphExpression::Multiply {
                     lhs: operands.pop().unwrap(),
                     rhs: operands.pop().unwrap()
                 })
             },
-            crate::Operation::Divide => Expression::Fraction {
+            crate::Operation::Divide => GraphExpression::Fraction {
                 numerator: operands.pop().unwrap(),
                 denominator: operands.pop().unwrap()
             },
-            crate::Operation::Modulus => Expression::Call {
-                callee: Box::new(Expression::Command("mod".into())),
-                arguments: Box::new(Expression::Sequence {
+            crate::Operation::Modulus => GraphExpression::Call {
+                callee: Box::new(GraphExpression::OperatorName("mod".into())),
+                arguments: Box::new(GraphExpression::Sequence {
                     elements: vec![
                         *operands.pop().unwrap(),
                         *operands.pop().unwrap(),
                     ]
                 })
             },
-            crate::Operation::Add => Expression::Parentheses {
-                body: Box::new(Expression::Add {
+            crate::Operation::Add => GraphExpression::Parentheses {
+                body: Box::new(GraphExpression::Add {
                     lhs: operands.pop().unwrap(),
                     rhs: operands.pop().unwrap()
                 })
             },
-            crate::Operation::Subtract => Expression::Parentheses {
-                body: Box::new(Expression::Subtract {
+            crate::Operation::Subtract => GraphExpression::Parentheses {
+                body: Box::new(GraphExpression::Subtract {
                     lhs: operands.pop().unwrap(),
                     rhs: operands.pop().unwrap()
                 })
             },
-            crate::Operation::LessThan => Expression::Piecewise {
-                body: Box::new(Expression::Sequence {
+            crate::Operation::LessThan => GraphExpression::Piecewise {
+                body: Box::new(GraphExpression::Sequence {
                     elements: vec![
-                        Expression::InequalityChain {
+                        GraphExpression::InequalityChain {
                             lhs: operands.pop().unwrap(),
-                            first_kind: InequalityKind::Less,
+                            first_kind: InequalityKind::LessThan,
                             rhs: operands.pop().unwrap(),
                             chain: Vec::new()
                         },
-                        Expression::Decimal(0.0),
+                        GraphExpression::Decimal(0.0),
                     ]
                 })
             },
-            crate::Operation::GreaterThan => Expression::Piecewise {
-                body: Box::new(Expression::Sequence {
+            crate::Operation::GreaterThan => GraphExpression::Piecewise {
+                body: Box::new(GraphExpression::Sequence {
                     elements: vec![
-                        Expression::InequalityChain {
+                        GraphExpression::InequalityChain {
                             lhs: operands.pop().unwrap(),
-                            first_kind: InequalityKind::Greater,
+                            first_kind: InequalityKind::GreaterThan,
                             rhs: operands.pop().unwrap(),
                             chain: Vec::new()
                         },
-                        Expression::Decimal(0.0),
+                        GraphExpression::Decimal(0.0),
                     ]
                 })
             },
-            crate::Operation::LessEqual => Expression::Piecewise {
-                body: Box::new(Expression::Sequence {
+            crate::Operation::LessEqual => GraphExpression::Piecewise {
+                body: Box::new(GraphExpression::Sequence {
                     elements: vec![
-                        Expression::InequalityChain {
+                        GraphExpression::InequalityChain {
                             lhs: operands.pop().unwrap(),
                             first_kind: InequalityKind::LessEqual,
                             rhs: operands.pop().unwrap(),
                             chain: Vec::new()
                         },
-                        Expression::Decimal(0.0),
+                        GraphExpression::Decimal(0.0),
                     ]
                 })
             },
-            crate::Operation::GreaterEqual => Expression::Piecewise {
-                body: Box::new(Expression::Sequence {
+            crate::Operation::GreaterEqual => GraphExpression::Piecewise {
+                body: Box::new(GraphExpression::Sequence {
                     elements: vec![
-                        Expression::InequalityChain {
+                        GraphExpression::InequalityChain {
                             lhs: operands.pop().unwrap(),
                             first_kind: InequalityKind::GreaterEqual,
                             rhs: operands.pop().unwrap(),
                             chain: Vec::new()
                         },
-                        Expression::Decimal(0.0),
+                        GraphExpression::Decimal(0.0),
                     ]
                 })
             },
-            crate::Operation::Equal => Expression::Piecewise {
-                body: Box::new(Expression::Sequence {
+            crate::Operation::Equal => GraphExpression::Piecewise {
+                body: Box::new(GraphExpression::Sequence {
                     elements: vec![
-                        Expression::Equality {
+                        GraphExpression::Equality {
                             lhs: operands.pop().unwrap(),
                             rhs: operands.pop().unwrap()
                         },
-                        Expression::Decimal(0.0),
+                        GraphExpression::Decimal(0.0),
                     ]
                 })
             },
             // Desmos doesn't have != built-in, so we have to negate ==
-            crate::Operation::NotEqual => Expression::Piecewise {
-                body: Box::new(Expression::Sequence {
+            crate::Operation::NotEqual => GraphExpression::Piecewise {
+                body: Box::new(GraphExpression::Sequence {
                     elements: vec![
-                        Expression::Colon {
-                            lhs: Box::new(Expression::Equality {
+                        GraphExpression::Colon {
+                            lhs: Box::new(GraphExpression::Equality {
                                 lhs: operands.pop().unwrap(),
                                 rhs: operands.pop().unwrap()
                             }),
-                            rhs: Box::new(Expression::Decimal(0.0))
+                            rhs: Box::new(GraphExpression::Decimal(0.0))
                         },
-                        Expression::Decimal(1.0),
+                        GraphExpression::Decimal(1.0),
                     ]
                 })
             },
-            crate::Operation::And => Expression::Piecewise {
-                body: Box::new(Expression::Sequence {
+            crate::Operation::And => GraphExpression::Piecewise {
+                body: Box::new(GraphExpression::Sequence {
                     elements: vec![
-                        Expression::Colon {
-                            lhs: Box::new(Expression::Equality {
+                        GraphExpression::Colon {
+                            lhs: Box::new(GraphExpression::Equality {
                                 lhs: operands.pop().unwrap(),
-                                rhs: Box::new(Expression::Decimal(0.0))
+                                rhs: Box::new(GraphExpression::Decimal(0.0))
                             }),
-                            rhs: Box::new(Expression::Decimal(0.0))
+                            rhs: Box::new(GraphExpression::Decimal(0.0))
                         },
                         *operands.pop().unwrap(),
                     ]
                 })
             },
-            crate::Operation::Or => Expression::Piecewise {
-                body: Box::new(Expression::Sequence {
+            crate::Operation::Or => GraphExpression::Piecewise {
+                body: Box::new(GraphExpression::Sequence {
                     elements: vec![
-                        Expression::Colon {
-                            lhs: Box::new(Expression::Equality {
+                        GraphExpression::Colon {
+                            lhs: Box::new(GraphExpression::Equality {
                                 lhs: operands.pop().unwrap(),
-                                rhs: Box::new(Expression::Decimal(1.0))
+                                rhs: Box::new(GraphExpression::Decimal(1.0))
                             }),
-                            rhs: Box::new(Expression::Decimal(1.0))
+                            rhs: Box::new(GraphExpression::Decimal(1.0))
                         },
                         *operands.pop().unwrap(),
                     ]
                 })
             },
-            crate::Operation::ExclusiveRange => Expression::List {
-                body: Box::new(Expression::Range {
+            crate::Operation::ExclusiveRange => GraphExpression::List {
+                body: Box::new(GraphExpression::Range {
                     start: operands.pop().unwrap(),
-                    end: operands.pop().map(|operand| Box::new(Expression::Parentheses {
-                        body: Box::new(Expression::Subtract {
+                    end: operands.pop().map(|operand| Box::new(GraphExpression::Parentheses {
+                        body: Box::new(GraphExpression::Subtract {
                             lhs: operand,
-                            rhs: Box::new(Expression::Decimal(1.0))
+                            rhs: Box::new(GraphExpression::Decimal(1.0))
                         })
                     }))
                 })
             },
-            crate::Operation::InclusiveRange => Expression::List {
-                body: Box::new(Expression::Range {
+            crate::Operation::InclusiveRange => GraphExpression::List {
+                body: Box::new(GraphExpression::Range {
                     start: operands.pop().unwrap(),
                     end: operands.pop()
                 })
@@ -464,10 +464,10 @@ impl GeometryTarget {
             crate::Operation::Conditional => {
                 let mut branches = Vec::new();
                 while operands.len() > 1 {
-                    branches.push(Expression::Colon {
-                        lhs: Box::new(Expression::Equality {
+                    branches.push(GraphExpression::Colon {
+                        lhs: Box::new(GraphExpression::Equality {
                             lhs: operands.pop().unwrap(),
-                            rhs: Box::new(Expression::Decimal(1.0))
+                            rhs: Box::new(GraphExpression::Decimal(1.0))
                         }),
                         rhs: operands.pop().unwrap()
                     });
@@ -475,10 +475,10 @@ impl GeometryTarget {
                 if let Some(operand) = operands.pop() {
                     branches.push(*operand);
                 }
-                Expression::Piecewise { body: Box::new(Expression::Sequence { elements: branches }) }
+                GraphExpression::Piecewise { body: Box::new(GraphExpression::Sequence { elements: branches }) }
             },
             crate::Operation::Assignment => todo!(),
-            crate::Operation::Update => Expression::RightArrow {
+            crate::Operation::Update => GraphExpression::RightArrow {
                 lhs: operands.pop().unwrap(),
                 rhs: operands.pop().unwrap()
             },
@@ -486,7 +486,7 @@ impl GeometryTarget {
         })
     }
 
-    pub fn translate_expression(&self, expression: &Expression) -> Box<Expression> {
+    pub fn translate_expression(&self, expression: &GraphExpression) -> Box<GraphExpression> {
         match &expression.value {
             ExpressionValue::Literal(value) => self.translate_constant_value(value),
             ExpressionValue::Name(name) => self.translate_name(name),
@@ -494,23 +494,23 @@ impl GeometryTarget {
         }
     }
 
-    pub fn translate_action(&self, action: &Action) -> Box<Expression> {
+    pub fn translate_action(&self, action: &Action) -> Box<GraphExpression> {
         match action {
-            Action::Block(subactions) => Box::new(Expression::Parentheses { body: Box::new(Expression::Sequence { elements: subactions.iter().map(|subaction| *self.translate_action(subaction)).collect() }) }),
-            Action::Update(target, value) => Box::new(Expression::RightArrow {
+            Action::Block(subactions) => Box::new(GraphExpression::Parentheses { body: Box::new(GraphExpression::Sequence { elements: subactions.iter().map(|subaction| *self.translate_action(subaction)).collect() }) }),
+            Action::Update(target, value) => Box::new(GraphExpression::RightArrow {
                 lhs: self.translate_expression(target),
                 rhs: self.translate_expression(value)
             }),
-            Action::Call(name, arguments) => Box::new(Expression::Call {
+            Action::Call(name, arguments) => Box::new(GraphExpression::Call {
                 callee: self.translate_expression(name),
-                arguments: Box::new(Expression::Sequence { elements: arguments.iter().map(|argument| *self.translate_expression(argument)).collect() })
+                arguments: Box::new(GraphExpression::Sequence { elements: arguments.iter().map(|argument| *self.translate_expression(argument)).collect() })
             }),
             Action::Conditional(branches, default_branch) => {
                 let mut piecewise_branches = Vec::from_iter(branches.iter().map(|(condition, consequent)| {
-                    Expression::Colon {
-                        lhs: Box::new(Expression::Equality {
+                    GraphExpression::Colon {
+                        lhs: Box::new(GraphExpression::Equality {
                             lhs: self.translate_expression(condition),
-                            rhs: Box::new(Expression::Decimal(1.0))
+                            rhs: Box::new(GraphExpression::Decimal(1.0))
                         }),
                         rhs: self.translate_action(consequent)
                     }
@@ -519,13 +519,13 @@ impl GeometryTarget {
                     piecewise_branches.push(*self.translate_action(default_branch));
                 }
                 else {
-                    piecewise_branches.push(Expression::Subscript {
-                        base: Box::new(Expression::Command("delta".into())),
-                        script: Box::new(Expression::Alphanumeric("noaction".into()))
+                    piecewise_branches.push(GraphExpression::Subscript {
+                        base: Box::new(GraphExpression::OperatorName("delta".into())),
+                        script: Box::new(GraphExpression::Alphanumeric("noaction".into()))
                     });
                 }
 
-                Box::new(Expression::Piecewise { body: Box::new(Expression::Sequence { elements: piecewise_branches }) })
+                Box::new(GraphExpression::Piecewise { body: Box::new(GraphExpression::Sequence { elements: piecewise_branches }) })
             },
         }
     }
@@ -542,10 +542,10 @@ impl crate::target::Target for GeometryTarget {
         let mut state = GraphState {
             version: 11,
             graph: GraphSettings {
-                product: "geometry-calculator".into()
+                product_name: "geometry-calculator".into()
             },
-            expressions: Expressions {
-                list: Vec::new(),
+            expressions: GraphExpressionList {
+                entries: Vec::new(),
                 ticker: None,
             },
         };
@@ -556,7 +556,7 @@ impl crate::target::Target for GeometryTarget {
             id
         };
 
-        state.expressions.list.push(Box::new(FolderEntry {
+        state.expressions.entries.push(Box::new(FolderEntry {
             id: "**dcg_geo_folder**".into(),
             title: "geometry".into(),
             collapsed: true,
@@ -565,29 +565,29 @@ impl crate::target::Target for GeometryTarget {
 
         if let Some(public) = &definitions.public {
             for expression in public {
-                let entry: Box<dyn Entry> = match *self.translate_expression(expression) {
-                    Expression::Alphanumeric(content) => {
+                let entry: Box<dyn GraphEntry> = match *self.translate_expression(expression) {
+                    GraphExpression::Alphanumeric(content) => {
                         Box::new(TextEntry {
                             id: get_next_id(),
                             folder_id: None,
-                            content: content.into(),
+                            text: content.into(),
                         })
                     },
                     content => {
                         Box::new(ExpressionEntry {
                             id: get_next_id(),
                             folder_id: None,
-                            content: Some(Box::new(content)),
+                            expression: Some(Box::new(content)),
                             hidden: false,
                         })
                     },
                 };
 
-                state.expressions.list.push(entry);
+                state.expressions.entries.push(entry);
             }
         }
 
-        state.expressions.list.push(Box::new(FolderEntry {
+        state.expressions.entries.push(Box::new(FolderEntry {
             id: "desmosify:actions".into(),
             title: "Actions".into(),
             collapsed: true,
@@ -597,13 +597,13 @@ impl crate::target::Target for GeometryTarget {
         for (name, action) in &definitions.actions {
             let signature = signatures.user_defined.get(name).unwrap();
 
-            state.expressions.list.push(Box::new(ExpressionEntry {
+            state.expressions.entries.push(Box::new(ExpressionEntry {
                 id: get_next_id(),
                 folder_id: Some("desmosify:actions".into()),
-                content: Some(Box::new(Expression::Equality {
-                    lhs: signature.parameters().map_or_else(|| self.translate_name(name), |parameters| Box::new(Expression::Call {
+                expression: Some(Box::new(GraphExpression::Equality {
+                    lhs: signature.parameters().map_or_else(|| self.translate_name(name), |parameters| Box::new(GraphExpression::Call {
                         callee: self.translate_name(name),
-                        arguments: Box::new(Expression::Sequence { elements: parameters.iter().map(|parameter| *self.translate_name(&parameter.name)).collect() })
+                        arguments: Box::new(GraphExpression::Sequence { elements: parameters.iter().map(|parameter| *self.translate_name(&parameter.name)).collect() })
                     })),
                     rhs: self.translate_action(action)
                 })),
@@ -611,7 +611,7 @@ impl crate::target::Target for GeometryTarget {
             }));
         }
 
-        state.expressions.list.push(Box::new(FolderEntry {
+        state.expressions.entries.push(Box::new(FolderEntry {
             id: "desmosify:defs".into(),
             title: "Definitions".into(),
             collapsed: true,
@@ -621,13 +621,13 @@ impl crate::target::Target for GeometryTarget {
         for (name, expression) in &definitions.identifiers {
             let signature = signatures.user_defined.get(name).unwrap();
 
-            state.expressions.list.push(Box::new(ExpressionEntry {
+            state.expressions.entries.push(Box::new(ExpressionEntry {
                 id: get_next_id(),
                 folder_id: Some("desmosify:defs".into()),
-                content: Some(Box::new(Expression::Equality {
-                    lhs: signature.parameters().map_or_else(|| self.translate_name(name), |parameters| Box::new(Expression::Call {
+                expression: Some(Box::new(GraphExpression::Equality {
+                    lhs: signature.parameters().map_or_else(|| self.translate_name(name), |parameters| Box::new(GraphExpression::Call {
                         callee: self.translate_name(name),
-                        arguments: Box::new(Expression::Sequence { elements: parameters.iter().map(|parameter| *self.translate_name(&parameter.name)).collect() })
+                        arguments: Box::new(GraphExpression::Sequence { elements: parameters.iter().map(|parameter| *self.translate_name(&parameter.name)).collect() })
                     })),
                     rhs: self.translate_expression(expression)
                 })),
@@ -635,39 +635,39 @@ impl crate::target::Target for GeometryTarget {
             }));
         }
 
-        state.expressions.list.push(Box::new(FolderEntry {
+        state.expressions.entries.push(Box::new(FolderEntry {
             id: "desmosify:utils".into(),
             title: "Utilities".into(),
             collapsed: true,
             secret: false,
         }));
 
-        state.expressions.list.push(Box::new(ExpressionEntry {
+        state.expressions.entries.push(Box::new(ExpressionEntry {
             id: get_next_id(),
             folder_id: Some("desmosify:utils".into()),
-            content: Some(Box::new(Expression::Equality {
-                lhs: Box::new(Expression::Subscript {
-                    base: Box::new(Expression::Command("delta".into())),
-                    script: Box::new(Expression::Alphanumeric("dummyvar".into()))
+            expression: Some(Box::new(GraphExpression::Equality {
+                lhs: Box::new(GraphExpression::Subscript {
+                    base: Box::new(GraphExpression::OperatorName("delta".into())),
+                    script: Box::new(GraphExpression::Alphanumeric("dummyvar".into()))
                 }),
-                rhs: Box::new(Expression::Decimal(0.0))
+                rhs: Box::new(GraphExpression::Decimal(0.0))
             })),
             hidden: false,
         }));
-        state.expressions.list.push(Box::new(ExpressionEntry {
+        state.expressions.entries.push(Box::new(ExpressionEntry {
             id: get_next_id(),
             folder_id: Some("desmosify:utils".into()),
-            content: Some(Box::new(Expression::Equality {
-                lhs: Box::new(Expression::Subscript {
-                    base: Box::new(Expression::Command("delta".into())),
-                    script: Box::new(Expression::Alphanumeric("noaction".into()))
+            expression: Some(Box::new(GraphExpression::Equality {
+                lhs: Box::new(GraphExpression::Subscript {
+                    base: Box::new(GraphExpression::OperatorName("delta".into())),
+                    script: Box::new(GraphExpression::Alphanumeric("noaction".into()))
                 }),
-                rhs: Box::new(Expression::RightArrow {
-                    lhs: Box::new(Expression::Subscript {
-                        base: Box::new(Expression::Command("delta".into())),
-                        script: Box::new(Expression::Alphanumeric("dummyvar".into()))
+                rhs: Box::new(GraphExpression::RightArrow {
+                    lhs: Box::new(GraphExpression::Subscript {
+                        base: Box::new(GraphExpression::OperatorName("delta".into())),
+                        script: Box::new(GraphExpression::Alphanumeric("dummyvar".into()))
                     }),
-                    rhs: Box::new(Expression::Decimal(0.0))
+                    rhs: Box::new(GraphExpression::Decimal(0.0))
                 })
             })),
             hidden: false,

@@ -63,7 +63,7 @@ pub enum Value {
     Type {
         identifier: Rc<str>,
     },
-    Undefined,
+    Undefined(Type),
     Real(f64),
     Mathematical {
         kind: MathematicalConstant,
@@ -168,8 +168,8 @@ impl Value {
                     identifier: identifier.clone(),
                 }
             }
-            Self::Undefined => {
-                Type::Any
+            Self::Undefined(value_type) => {
+                value_type.clone()
             }
             Self::Real(..) | Self::Mathematical { .. } => {
                 Type::Real
@@ -257,7 +257,7 @@ impl Value {
             Self::Mathematical { coefficient, .. } => coefficient == 0.0,
             Self::Int(value) => value == 0,
             Self::Bool(value) => !value,
-            _ => false,
+            _ => false
         }
     }
 
@@ -266,7 +266,15 @@ impl Value {
             Self::Real(value) => value == 1.0,
             Self::Int(value) => value == 1,
             Self::Bool(value) => value,
-            _ => false,
+            _ => false
+        }
+    }
+
+    pub fn is_undefined(&self) -> bool {
+        match *self {
+            Self::Undefined(..) => true,
+            Self::Real(value) if value.is_nan() => true,
+            _ => false
         }
     }
 

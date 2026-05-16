@@ -3,10 +3,8 @@ use crate::desmos::latex::{BracketType, Latex, LatexNode};
 
 pub mod latex;
 pub mod target;
-
-pub use target::geometry::GeometryTarget;
-pub use target::graphing::GraphingTarget;
-pub use target::graphing_3d::Graphing3DTarget;
+pub mod symbol;
+pub mod error;
 
 #[derive(Copy, Clone, Debug)]
 pub struct Color {
@@ -46,7 +44,7 @@ pub trait ToJson {
     fn to_json(&self) -> JsonValue;
 }
 
-pub trait Entry: ToJson + std::fmt::Debug {
+pub trait GraphEntry : ToJson + std::fmt::Debug {
     fn type_name(&self) -> &str;
     fn id(&self) -> &str;
 }
@@ -74,7 +72,7 @@ impl ToJson for FolderEntry {
     }
 }
 
-impl Entry for FolderEntry {
+impl GraphEntry for FolderEntry {
     fn type_name(&self) -> &str {
         "folder"
     }
@@ -88,7 +86,7 @@ impl Entry for FolderEntry {
 pub struct ExpressionEntry {
     pub id: String,
     pub folder_id: Option<String>,
-    pub content: Option<Box<Expression>>,
+    pub expression: Option<GraphExpression>,
     pub hidden: bool,
 }
 
@@ -101,7 +99,9 @@ impl ToJson for ExpressionEntry {
         if let Some(folder_id) = &self.folder_id {
             object["folderId"] = folder_id.as_str().into();
         }
-        object["latex"] = self.content.as_ref().map_or_else(String::new, |content| content.to_latex().to_string()).into();
+        object["latex"] = self.expression
+            .as_ref()
+            .map_or(String::new(), |content| content.to_latex().to_string()).into();
         if self.hidden {
             object["hidden"] = true.into();
         }
@@ -109,7 +109,7 @@ impl ToJson for ExpressionEntry {
     }
 }
 
-impl Entry for ExpressionEntry {
+impl GraphEntry for ExpressionEntry {
     fn type_name(&self) -> &str {
         "expression"
     }
@@ -123,7 +123,7 @@ impl Entry for ExpressionEntry {
 pub struct TextEntry {
     pub id: String,
     pub folder_id: Option<String>,
-    pub content: String,
+    pub text: String,
 }
 
 impl ToJson for TextEntry {
@@ -131,7 +131,7 @@ impl ToJson for TextEntry {
         let mut object = json::object!{
             "type": self.type_name(),
             "id": self.id(),
-            "text": self.content.as_str(),
+            "text": self.text.as_str(),
         };
         if let Some(folder_id) = &self.folder_id {
             object["folderId"] = folder_id.as_str().into();
@@ -140,7 +140,7 @@ impl ToJson for TextEntry {
     }
 }
 
-impl Entry for TextEntry {
+impl GraphEntry for TextEntry {
     fn type_name(&self) -> &str {
         "text"
     }
@@ -151,13 +151,13 @@ impl Entry for TextEntry {
 }
 
 #[derive(Debug)]
-pub struct Ticker {
+pub struct GraphTicker {
     pub playing: bool,
-    pub handler: Option<Box<Expression>>,
-    pub min_step: Option<Box<Expression>>,
+    pub handler: Option<Box<GraphExpression>>,
+    pub min_step: Option<Box<GraphExpression>>,
 }
 
-impl ToJson for Ticker {
+impl ToJson for GraphTicker {
     fn to_json(&self) -> JsonValue {
         let mut object = json::object!{
             "open": true,
@@ -174,16 +174,19 @@ impl ToJson for Ticker {
 }
 
 #[derive(Debug)]
-pub struct Expressions {
-    pub list: Vec<Box<dyn Entry>>,
-    pub ticker: Option<Ticker>,
+pub struct GraphExpressionList {
+    pub entries: Vec<Box<dyn GraphEntry>>,
+    pub ticker: Option<GraphTicker>,
 }
 
-impl ToJson for Expressions {
+impl ToJson for GraphExpressionList {
     fn to_json(&self) -> JsonValue {
-        let list = Vec::from_iter(self.list.iter().map(|entry| entry.to_json()));
+        let entries: Vec<_> = self.entries
+            .iter()
+            .map(|entry| entry.to_json())
+            .collect();
         let mut object = json::object!{
-            "list": list,
+            "list": entries,
         };
         if let Some(ticker) = &self.ticker {
             object["ticker"] = ticker.to_json();
@@ -194,13 +197,13 @@ impl ToJson for Expressions {
 
 #[derive(Debug)]
 pub struct GraphSettings {
-    pub product: String,
+    pub product_name: String,
 }
 
 impl ToJson for GraphSettings {
     fn to_json(&self) -> JsonValue {
         json::object!{
-            "product": self.product.as_str(),
+            "product": self.product_name.as_str(),
         }
     }
 }
@@ -209,7 +212,7 @@ impl ToJson for GraphSettings {
 pub struct GraphState {
     pub version: i32,
     pub graph: GraphSettings,
-    pub expressions: Expressions,
+    pub expressions: GraphExpressionList,
 }
 
 impl ToJson for GraphState {
@@ -224,8 +227,8 @@ impl ToJson for GraphState {
 
 #[derive(Copy, Clone, Debug)]
 pub enum InequalityKind {
-    Less,
-    Greater,
+    LessThan,
+    GreaterThan,
     LessEqual,
     GreaterEqual,
 }
@@ -234,8 +237,8 @@ impl InequalityKind {
     pub fn to_latex_node(&self) -> LatexNode {
         LatexNode::Escape {
             value: String::from(match self {
-                Self::Less => "lt",
-                Self::Greater => "gt",
+                Self::LessThan => "lt",
+                Self::GreaterThan => "gt",
                 Self::LessEqual => "le",
                 Self::GreaterEqual => "ge",
             }),
@@ -244,7 +247,7 @@ impl InequalityKind {
 }
 
 #[derive(Copy, Clone, Debug)]
-pub enum UnaryExpressionKind {
+pub enum UnaryKind {
     Positive,
     Negative,
     Factorial,
@@ -256,8 +259,8 @@ pub enum UnaryExpressionKind {
 }
 
 #[derive(Copy, Clone, Debug)]
-pub enum BinaryExpressionKind {
-    Equality,
+pub enum BinaryKind {
+    Equal,
     Regression,
     Add,
     Subtract,
@@ -280,19 +283,20 @@ pub enum BinaryExpressionKind {
     RightArrow,
 }
 
-#[derive(Debug)]
-pub enum Expression {
+#[derive(Clone, Debug)]
+pub enum GraphExpression {
     Letter(char),
     Integer(i64),
     Decimal(f64),
-    Command(Box<str>),
-    Alphanumeric(Box<str>),
+    OperatorName(String),
+    Escape(String),
+    Alphanumeric(String),
     Unary {
-        kind: UnaryExpressionKind,
+        kind: UnaryKind,
         inner: Box<Self>,
     },
     Binary {
-        kind: BinaryExpressionKind,
+        kind: BinaryKind,
         lhs: Box<Self>,
         rhs: Box<Self>,
     },
@@ -340,7 +344,7 @@ pub enum Expression {
     },
 }
 
-impl Expression {
+impl GraphExpression {
     pub fn to_latex(&self) -> Latex {
         match self {
             Self::Letter(letter) => {
@@ -368,44 +372,47 @@ impl Expression {
                     Latex::new().add_symbols(value.to_string())
                 }
             }
-            Self::Command(name) => {
-                Latex::new().add_operator_name(name.to_string())
+            Self::OperatorName(name) => {
+                Latex::new().add_operator_name(name.clone())
+            }
+            Self::Escape(name) => {
+                Latex::new().add_escape(name.clone())
             }
             Self::Alphanumeric(value) => {
-                Latex::new().add_symbols(value.to_string())
+                Latex::new().add_symbols(value.clone())
             }
             Self::Unary { kind, inner } => match kind {
-                UnaryExpressionKind::Positive => {
+                UnaryKind::Positive => {
                     Latex::new().add_symbol('+').add(inner.to_latex())
                 }
-                UnaryExpressionKind::Negative => {
+                UnaryKind::Negative => {
                     Latex::new().add_symbol('-').add(inner.to_latex())
                 }
-                UnaryExpressionKind::Factorial => {
+                UnaryKind::Factorial => {
                     inner.to_latex().add_symbol('!')
                 }
-                UnaryExpressionKind::Prime => {
+                UnaryKind::Prime => {
                     inner.to_latex().add_symbol('\'')
                 }
-                UnaryExpressionKind::Parentheses => {
+                UnaryKind::Parentheses => {
                     Latex::new()
                         .add_left(BracketType::Parenthesis)
                         .add(inner.to_latex())
                         .add_right(BracketType::Parenthesis)
                 }
-                UnaryExpressionKind::List => {
+                UnaryKind::List => {
                     Latex::new()
                         .add_left(BracketType::Square)
                         .add(inner.to_latex())
                         .add_right(BracketType::Square)
                 }
-                UnaryExpressionKind::Piecewise => {
+                UnaryKind::Piecewise => {
                     Latex::new()
                         .add_left(BracketType::Curly)
                         .add(inner.to_latex())
                         .add_right(BracketType::Curly)
                 }
-                UnaryExpressionKind::Pipes => {
+                UnaryKind::Pipes => {
                     Latex::new()
                         .add_left(BracketType::Pipe)
                         .add(inner.to_latex())
@@ -413,73 +420,73 @@ impl Expression {
                 }
             }
             Self::Binary { kind, lhs, rhs } => match kind {
-                BinaryExpressionKind::Equality => {
+                BinaryKind::Equal => {
                     lhs.to_latex().add_symbol('=').add(rhs.to_latex())
                 }
-                BinaryExpressionKind::Regression => {
+                BinaryKind::Regression => {
                     lhs.to_latex().add_symbol('~').add(rhs.to_latex())
                 }
-                BinaryExpressionKind::Add => {
+                BinaryKind::Add => {
                     lhs.to_latex().add_symbol('+').add(rhs.to_latex())
                 }
-                BinaryExpressionKind::Subtract => {
+                BinaryKind::Subtract => {
                     lhs.to_latex().add_symbol('-').add(rhs.to_latex())
                 }
-                BinaryExpressionKind::Multiply => {
+                BinaryKind::Multiply => {
                     lhs.to_latex().add_symbol('*').add(rhs.to_latex())
                 }
-                BinaryExpressionKind::DotMultiply => {
+                BinaryKind::DotMultiply => {
                     lhs.to_latex().add_escape("cdot".into()).add(rhs.to_latex())
                 }
-                BinaryExpressionKind::CrossMultiply => {
+                BinaryKind::CrossMultiply => {
                     lhs.to_latex().add_escape("cross".into()).add(rhs.to_latex())
                 }
-                BinaryExpressionKind::ImplicitMultiply => {
+                BinaryKind::ImplicitMultiply => {
                     lhs.to_latex().add(rhs.to_latex())
                 }
-                BinaryExpressionKind::Divide => {
+                BinaryKind::Divide => {
                     lhs.to_latex().add_symbol('/').add(rhs.to_latex())
                 }
-                BinaryExpressionKind::Fraction => {
+                BinaryKind::Fraction => {
                     Latex::new().add_frac(lhs.to_latex(), rhs.to_latex())
                 }
-                BinaryExpressionKind::Call => {
+                BinaryKind::Call => {
                     lhs.to_latex()
                         .add_left(BracketType::Parenthesis)
                         .add(rhs.to_latex())
                         .add_right(BracketType::Parenthesis)
                 }
-                BinaryExpressionKind::ImplicitCall => {
+                BinaryKind::ImplicitCall => {
                     lhs.to_latex().add(rhs.to_latex())
                 }
-                BinaryExpressionKind::Index => {
+                BinaryKind::Index => {
                     lhs.to_latex()
                         .add_left(BracketType::Square)
                         .add(rhs.to_latex())
                         .add_right(BracketType::Square)
                 }
-                BinaryExpressionKind::Subscript => {
+                BinaryKind::Subscript => {
                     lhs.to_latex().add_subscript(rhs.to_latex())
                 }
-                BinaryExpressionKind::Superscript => {
+                BinaryKind::Superscript => {
                     lhs.to_latex().add_superscript(rhs.to_latex())
                 }
-                BinaryExpressionKind::Colon => {
+                BinaryKind::Colon => {
                     lhs.to_latex().add_symbol(':').add(rhs.to_latex())
                 }
-                BinaryExpressionKind::For => {
+                BinaryKind::For => {
                     lhs.to_latex().add_operator_name("for".into()).add(rhs.to_latex())
                 }
-                BinaryExpressionKind::With => {
+                BinaryKind::With => {
                     lhs.to_latex().add_operator_name("with".into()).add(rhs.to_latex())
                 }
-                BinaryExpressionKind::Dot => {
+                BinaryKind::Dot => {
                     lhs.to_latex().add_symbol('.').add(rhs.to_latex())
                 }
-                BinaryExpressionKind::PercentOf => {
+                BinaryKind::PercentOf => {
                     lhs.to_latex().add_symbol('%').add_operator_name("of".into()).add(rhs.to_latex())
                 }
-                BinaryExpressionKind::RightArrow => {
+                BinaryKind::RightArrow => {
                     lhs.to_latex().add_escape("to".into()).add(rhs.to_latex())
                 }
             }

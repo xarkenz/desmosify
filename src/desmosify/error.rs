@@ -102,6 +102,7 @@ impl Span {
 
 #[derive(Debug)]
 pub enum ErrorKind {
+    Target(Box<dyn std::error::Error>),
     SourceFileOpen {
         cause: std::io::Error,
     },
@@ -243,6 +244,9 @@ pub enum ErrorKind {
 impl std::fmt::Display for ErrorKind {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
+            Self::Target(error) => {
+                error.fmt(f)
+            }
             Self::SourceFileOpen { cause } => {
                 write!(f, "unable to open file: {cause}")
             }
@@ -407,6 +411,7 @@ impl std::fmt::Display for ErrorKind {
 impl std::error::Error for ErrorKind {
     fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
         match self {
+            Self::Target(error) => Some(error.as_ref()),
             Self::SourceFileOpen { cause, .. } => Some(cause),
             Self::SourceFileRead { cause, .. } => Some(cause),
             Self::OutputFileOpen { cause, .. } => Some(cause),
