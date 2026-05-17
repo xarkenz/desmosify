@@ -3,7 +3,7 @@ use crate::desmos::{GraphBinaryKind, GraphExpressionEntry, GraphFolderEntry, Gra
 use crate::desmos::error::{DesmosError, DesmosErrorKind, DesmosResult};
 use crate::desmos::symbol::SymbolTable;
 use crate::sema::{Program, ProgramAction, ProgramDisplayElement, ProgramLet, ProgramPublicLine, ProgramTicker, ProgramVariable};
-use crate::sema::intrinsic::IntrinsicValue;
+use crate::sema::intrinsic::{IntrinsicBinaryKind, IntrinsicDoubleReducerKind, IntrinsicParameterizedReducerKind, IntrinsicReducerKind, IntrinsicUnaryKind, IntrinsicValue};
 use crate::sema::types::Type;
 use crate::sema::values::{ActionValue, MathematicalConstant, Value, ValueIndexOperation};
 
@@ -916,11 +916,165 @@ impl GraphExpressionListBuilder {
     }
 
     pub fn translate_intrinsic_value(&mut self, value: &IntrinsicValue) -> DesmosResult<GraphExpression> {
+        fn unary_function(name: &str, argument: GraphExpression) -> GraphExpression {
+            GraphExpression::Binary {
+                kind: GraphBinaryKind::Call,
+                lhs: Box::new(GraphExpression::OperatorName(name.into())),
+                rhs: Box::new(argument),
+            }
+        }
+        fn binary_infix(kind: GraphBinaryKind, lhs: GraphExpression, rhs: GraphExpression) -> GraphExpression {
+            GraphExpression::Unary {
+                kind: GraphUnaryKind::Parentheses,
+                inner: Box::new(GraphExpression::Binary {
+                    kind,
+                    lhs: Box::new(lhs),
+                    rhs: Box::new(rhs),
+                }),
+            }
+        }
+        fn get_reducer_name(kind: &IntrinsicReducerKind) -> &'static str {
+            match kind {
+                IntrinsicReducerKind::Mean => "mean",
+                IntrinsicReducerKind::Median => "median",
+                IntrinsicReducerKind::Min => "min",
+                IntrinsicReducerKind::Max => "max",
+                IntrinsicReducerKind::Stdev => "stdev",
+                IntrinsicReducerKind::Stdevp => "stdevp",
+                IntrinsicReducerKind::Var => "var",
+                IntrinsicReducerKind::Varp => "varp",
+                IntrinsicReducerKind::Mad => "mad",
+                IntrinsicReducerKind::Count => "count",
+                IntrinsicReducerKind::Total => "total",
+                IntrinsicReducerKind::Polygon => "polygon",
+                IntrinsicReducerKind::Lcm => "lcm",
+                IntrinsicReducerKind::Gcd => "gcd",
+            }
+        }
+        fn get_double_reducer_name(kind: &IntrinsicDoubleReducerKind) -> &'static str {
+            match kind {
+                IntrinsicDoubleReducerKind::Cov => "cov",
+                IntrinsicDoubleReducerKind::Covp => "covp",
+                IntrinsicDoubleReducerKind::Corr => "corr",
+                IntrinsicDoubleReducerKind::Spearman => "spearman",
+            }
+        }
+        fn get_parameterized_reducer_name(kind: &IntrinsicParameterizedReducerKind) -> &'static str {
+            match kind {
+                IntrinsicParameterizedReducerKind::Quartile => "quartile",
+                IntrinsicParameterizedReducerKind::Quantile => "quantile",
+                IntrinsicParameterizedReducerKind::Tscore => "tscore",
+            }
+        }
+
         match value {
-            _ => {
-                Err(Box::new(DesmosError {
-                    kind: DesmosErrorKind::UnsupportedValue,
-                }))
+            IntrinsicValue::Unary { kind, argument, .. } => {
+                let argument = self.translate_value(argument)?;
+
+                Ok(match kind {
+                    IntrinsicUnaryKind::Sin => unary_function("sin", argument),
+                    IntrinsicUnaryKind::Cos => unary_function("cos", argument),
+                    IntrinsicUnaryKind::Tan => unary_function("tan", argument),
+                    IntrinsicUnaryKind::Csc => unary_function("csc", argument),
+                    IntrinsicUnaryKind::Sec => unary_function("sec", argument),
+                    IntrinsicUnaryKind::Cot => unary_function("cot", argument),
+                    IntrinsicUnaryKind::Arcsin => unary_function("arcsin", argument),
+                    IntrinsicUnaryKind::Arccos => unary_function("arccos", argument),
+                    IntrinsicUnaryKind::Arctan => unary_function("arctan", argument),
+                    IntrinsicUnaryKind::Arccsc => unary_function("arccsc", argument),
+                    IntrinsicUnaryKind::Arcsec => unary_function("arcsec", argument),
+                    IntrinsicUnaryKind::Arccot => unary_function("arccot", argument),
+                    IntrinsicUnaryKind::Sinh => unary_function("sinh", argument),
+                    IntrinsicUnaryKind::Cosh => unary_function("cosh", argument),
+                    IntrinsicUnaryKind::Tanh => unary_function("tanh", argument),
+                    IntrinsicUnaryKind::Csch => unary_function("csch", argument),
+                    IntrinsicUnaryKind::Sech => unary_function("sech", argument),
+                    IntrinsicUnaryKind::Coth => unary_function("coth", argument),
+                })
+            }
+            IntrinsicValue::Binary { kind, lhs, rhs, .. } => {
+                let lhs = self.translate_value(lhs)?;
+                let rhs = self.translate_value(rhs)?;
+
+                Ok(match kind {
+                    IntrinsicBinaryKind::Dot => binary_infix(GraphBinaryKind::DotMultiply, lhs, rhs),
+                    IntrinsicBinaryKind::Cross => binary_infix(GraphBinaryKind::CrossMultiply, lhs, rhs),
+                })
+            }
+            IntrinsicValue::Reducer { kind, list, .. } => {
+                let name = get_reducer_name(kind);
+
+                Ok(GraphExpression::Binary {
+                    kind: GraphBinaryKind::Call,
+                    lhs: Box::new(GraphExpression::OperatorName(name.into())),
+                    rhs: Box::new(self.translate_value(list)?),
+                })
+            }
+            IntrinsicValue::ArgumentsReducer { kind, arguments, .. } => {
+                let name = get_reducer_name(kind);
+
+                Ok(GraphExpression::Binary {
+                    kind: GraphBinaryKind::Call,
+                    lhs: Box::new(GraphExpression::OperatorName(name.into())),
+                    rhs: Box::new(GraphExpression::Sequence {
+                        elements: arguments
+                            .iter()
+                            .map(|argument| self.translate_value(argument))
+                            .collect::<DesmosResult<_>>()?,
+                    }),
+                })
+            }
+            IntrinsicValue::DoubleReducer { kind, list_1, list_2, .. } => {
+                let name = get_double_reducer_name(kind);
+
+                Ok(GraphExpression::Binary {
+                    kind: GraphBinaryKind::Call,
+                    lhs: Box::new(GraphExpression::OperatorName(name.into())),
+                    rhs: Box::new(GraphExpression::Sequence {
+                        elements: Vec::from([
+                            self.translate_value(list_1)?,
+                            self.translate_value(list_2)?,
+                        ]),
+                    }),
+                })
+            }
+            IntrinsicValue::ParameterizedReducer { kind, list, parameter, .. } => {
+                let name = get_parameterized_reducer_name(kind);
+
+                Ok(GraphExpression::Binary {
+                    kind: GraphBinaryKind::Call,
+                    lhs: Box::new(GraphExpression::OperatorName(name.into())),
+                    rhs: Box::new(GraphExpression::Sequence {
+                        elements: Vec::from([
+                            self.translate_value(list)?,
+                            self.translate_value(parameter)?,
+                        ]),
+                    }),
+                })
+            }
+            IntrinsicValue::Join { arguments, .. } => {
+                Ok(GraphExpression::Binary {
+                    kind: GraphBinaryKind::Call,
+                    lhs: Box::new(GraphExpression::OperatorName("join".into())),
+                    rhs: Box::new(GraphExpression::Sequence {
+                        elements: arguments
+                            .iter()
+                            .map(|argument| self.translate_value(argument))
+                            .collect::<DesmosResult<_>>()?,
+                    }),
+                })
+            }
+            IntrinsicValue::Width => {
+                Ok(GraphExpression::OperatorName("width".into()))
+            }
+            IntrinsicValue::Height => {
+                Ok(GraphExpression::OperatorName("height".into()))
+            }
+            IntrinsicValue::Dt => {
+                Ok(GraphExpression::OperatorName("dt".into()))
+            }
+            IntrinsicValue::Index => {
+                Ok(GraphExpression::OperatorName("index".into()))
             }
         }
     }
@@ -1156,7 +1310,8 @@ impl GraphExpressionListBuilder {
     }
 
     pub fn add_display_element(&mut self, display_element: &ProgramDisplayElement) -> DesmosResult<()> {
-        todo!()
+        // TODO
+        Ok(())
     }
 
     pub fn set_program(&mut self, program: &Program) -> DesmosResult<()> {

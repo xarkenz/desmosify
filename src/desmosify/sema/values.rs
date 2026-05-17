@@ -285,8 +285,8 @@ impl Value {
 
         let mismatched_types_error = || Box::new(crate::Error {
             kind: crate::ErrorKind::MismatchedTypes {
-                expected: target_type.to_string(),
-                got: self_type.to_string(),
+                expected: target_type.clone().unflatten_list(target_is_list).to_string(),
+                got: self_type.clone().unflatten_list(self_is_list).to_string(),
             },
             span: None,
         });

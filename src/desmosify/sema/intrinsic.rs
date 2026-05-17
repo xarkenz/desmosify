@@ -126,7 +126,7 @@ pub enum IntrinsicValue {
         result_type: Type,
     },
     Binary {
-        kind: IntrinsicUnaryKind,
+        kind: IntrinsicBinaryKind,
         lhs: Value,
         rhs: Value,
         result_type: Type,

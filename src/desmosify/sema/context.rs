@@ -14,7 +14,9 @@ pub struct TypedDefinition {
 #[derive(Debug)]
 pub struct GlobalContext {
     definitions: HashMap<Rc<str>, TypedDefinition>,
+    definitions_order: Vec<Rc<str>>,
     action_definitions: HashMap<Rc<str>, TypedDefinition>,
+    action_definitions_order: Vec<Rc<str>>,
     intrinsics: HashMap<&'static str, Value>,
     ticker_declarations: Vec<TickerDeclaration>,
     public_declarations: Vec<PublicDeclaration>,
@@ -25,7 +27,9 @@ impl GlobalContext {
     pub fn from_declarations(mut declarations: Vec<Declaration>) -> crate::Result<Self> {
         let mut context = Self {
             definitions: HashMap::new(),
+            definitions_order: Vec::new(),
             action_definitions: HashMap::new(),
+            action_definitions_order: Vec::new(),
             intrinsics: get_core_intrinsics().collect(),
             ticker_declarations: Vec::new(),
             public_declarations: Vec::new(),
@@ -121,7 +125,7 @@ impl GlobalContext {
 
     pub fn add_definition(&mut self, definition: TypedDefinition) -> crate::Result<()> {
         let identifier = definition.definition.identifier.clone();
-        if let Some(old_definition) = self.definitions.insert(identifier, definition) {
+        if let Some(old_definition) = self.definitions.insert(identifier.clone(), definition) {
             Err(Box::new(crate::Error {
                 kind: crate::ErrorKind::ConflictingGlobalIdentifiers {
                     identifier: old_definition.definition.identifier.as_ref().into(),
@@ -130,13 +134,14 @@ impl GlobalContext {
             }))
         }
         else {
+            self.definitions_order.push(identifier);
             Ok(())
         }
     }
 
     pub fn add_action_definition(&mut self, definition: TypedDefinition) -> crate::Result<()> {
         let identifier = definition.definition.identifier.clone();
-        if let Some(old_definition) = self.action_definitions.insert(identifier, definition) {
+        if let Some(old_definition) = self.action_definitions.insert(identifier.clone(), definition) {
             Err(Box::new(crate::Error {
                 kind: crate::ErrorKind::ConflictingActionIdentifiers {
                     identifier: old_definition.definition.identifier.as_ref().into(),
@@ -145,6 +150,7 @@ impl GlobalContext {
             }))
         }
         else {
+            self.action_definitions_order.push(identifier);
             Ok(())
         }
     }
@@ -162,7 +168,9 @@ impl GlobalContext {
     }
 
     pub fn definitions(&self) -> impl Iterator<Item = (&Rc<str>, &TypedDefinition)> {
-        self.definitions.iter()
+        self.definitions_order
+            .iter()
+            .map(|identifier| (identifier, &self.definitions[identifier]))
     }
 
     pub fn find_definition(&self, identifier: &str) -> Option<&TypedDefinition> {
@@ -170,7 +178,9 @@ impl GlobalContext {
     }
 
     pub fn action_definitions(&self) -> impl Iterator<Item = (&Rc<str>, &TypedDefinition)> {
-        self.action_definitions.iter()
+        self.action_definitions_order
+            .iter()
+            .map(|identifier| (identifier, &self.action_definitions[identifier]))
     }
 
     pub fn find_action_definition(&self, identifier: &str) -> Option<&TypedDefinition> {
