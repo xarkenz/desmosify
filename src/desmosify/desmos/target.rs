@@ -1,18 +1,19 @@
-use crate::desmos::{GraphBinaryKind, GraphExpressionEntry, GraphFolderEntry, GraphEntry, GraphExpression, GraphExpressionList, GraphTicker, GraphInequalityKind, GraphUnaryKind};
+use crate::ast::{BinaryOperation, RangeKind, UnaryOperation};
+use crate::desmos::{GraphBinaryKind, GraphExpressionEntry, GraphFolderEntry, GraphEntry, GraphExpression, GraphExpressionList, GraphTicker, GraphInequalityKind, GraphUnaryKind, GraphTextEntry};
 use crate::desmos::error::{DesmosError, DesmosErrorKind, DesmosResult};
 use crate::desmos::symbol::SymbolTable;
+use crate::sema::{Program, ProgramAction, ProgramDisplayElement, ProgramLet, ProgramPublicLine, ProgramTicker, ProgramVariable};
 use crate::sema::intrinsic::IntrinsicValue;
 use crate::sema::types::Type;
 use crate::sema::values::{ActionValue, MathematicalConstant, Value, ValueIndexOperation};
 
-pub mod geometry;
-pub mod graphing;
-pub mod graphing_3d;
+mod geometry;
+mod graphing;
+mod graphing_3d;
 
-pub use geometry::GeometryTarget;
-pub use graphing::GraphingTarget;
-pub use graphing_3d::Graphing3DTarget;
-use crate::ast::{BinaryOperation, RangeKind, UnaryOperation};
+pub use geometry::DesmosGeometryTarget;
+pub use graphing::DesmosGraphingTarget;
+pub use graphing_3d::DesmosGraphing3DTarget;
 
 pub const INTRINSICS_FOLDER_ID: &str = "desmosify_intrinsics";
 pub const GLOBALS_FOLDER_ID: &str = "desmosify_globals";
@@ -79,11 +80,18 @@ impl GraphExpressionListBuilder {
             ticker: self.ticker,
             entries: self.public_entries
                 .into_iter()
+                .chain(self.intrinsic_entries)
                 .chain(self.global_entries)
                 .chain(self.action_entries)
                 .chain(self.display_entries)
                 .collect(),
         }
+    }
+
+    pub fn build_program(program: &Program) -> DesmosResult<GraphExpressionList> {
+        let mut builder = Self::new();
+        builder.set_program(program)?;
+        Ok(builder.finish())
     }
 
     pub fn create_entry_id(&mut self) -> String {
@@ -126,7 +134,7 @@ impl GraphExpressionListBuilder {
                 lhs: Box::new(symbol.clone()),
                 rhs: Box::new(GraphExpression::Integer(0)),
             },
-            hidden: false,
+            hidden: true,
         }));
 
         symbol
@@ -149,7 +157,7 @@ impl GraphExpressionListBuilder {
                     lhs: Box::new(symbol.clone()),
                     rhs: Box::new(GraphExpression::Integer(0)),
                 },
-                hidden: false,
+                hidden: true,
             }));
 
             self.dummy_unreachable_created = true;
@@ -254,7 +262,7 @@ impl GraphExpressionListBuilder {
                 id,
                 folder_id: Some(INTRINSICS_FOLDER_ID.into()),
                 expression,
-                hidden: false,
+                hidden: true,
             }));
 
             self.intrinsic_range_inclusive_created = true;
@@ -311,14 +319,18 @@ impl GraphExpressionListBuilder {
                         }),
                     }),
                     rhs: Box::new(GraphExpression::Binary {
-                        kind: GraphBinaryKind::Call,
-                        lhs: Box::new(self.get_intrinsic_range_inclusive()),
-                        rhs: Box::new(GraphExpression::Sequence {
-                            elements: Vec::from([
-                                GraphExpression::Letter('a'),
-                                GraphExpression::Letter('b'),
-                                GraphExpression::Letter('s'),
-                            ]),
+                        kind: GraphBinaryKind::Equal,
+                        lhs: Box::new(GraphExpression::Letter('x')),
+                        rhs: Box::new(GraphExpression::Binary {
+                            kind: GraphBinaryKind::Call,
+                            lhs: Box::new(self.get_intrinsic_range_inclusive()),
+                            rhs: Box::new(GraphExpression::Sequence {
+                                elements: Vec::from([
+                                    GraphExpression::Letter('a'),
+                                    GraphExpression::Letter('b'),
+                                    GraphExpression::Letter('s'),
+                                ]),
+                            }),
                         }),
                     }),
                 }),
@@ -327,7 +339,7 @@ impl GraphExpressionListBuilder {
                 id,
                 folder_id: Some(INTRINSICS_FOLDER_ID.into()),
                 expression,
-                hidden: false,
+                hidden: true,
             }));
 
             self.intrinsic_range_exclusive_created = true;
@@ -1005,5 +1017,170 @@ impl GraphExpressionListBuilder {
                 })
             }
         }
+    }
+
+    pub fn add_program_let(&mut self, program_let: &ProgramLet) -> DesmosResult<()> {
+        let id = self.create_entry_id();
+        let expression = GraphExpression::Binary {
+            kind: GraphBinaryKind::Equal,
+            lhs: Box::new(match program_let.parameters() {
+                Some(parameters) => GraphExpression::Binary {
+                    kind: GraphBinaryKind::Call,
+                    lhs: Box::new(self.get_global_symbol(&program_let.identifier())),
+                    rhs: Box::new(GraphExpression::Sequence {
+                        elements: parameters
+                            .iter()
+                            .map(|parameter| self.get_local_symbol(parameter.id))
+                            .collect(),
+                    }),
+                },
+                None => self.get_global_symbol(&program_let.identifier()),
+            }),
+            rhs: Box::new(self.translate_value(program_let.value())?),
+        };
+
+        self.global_entries.push(Box::new(GraphExpressionEntry {
+            id,
+            folder_id: Some(GLOBALS_FOLDER_ID.into()),
+            expression,
+            hidden: true,
+        }));
+
+        Ok(())
+    }
+
+    pub fn add_program_variable(&mut self, program_variable: &ProgramVariable) -> DesmosResult<()> {
+        let id = self.create_entry_id();
+        let expression = GraphExpression::Binary {
+            kind: GraphBinaryKind::Equal,
+            lhs: Box::new(self.get_global_symbol(&program_variable.identifier())),
+            rhs: Box::new(self.translate_value(program_variable.value())?),
+        };
+
+        // TODO: kinds
+        self.global_entries.push(Box::new(GraphExpressionEntry {
+            id,
+            folder_id: Some(GLOBALS_FOLDER_ID.into()),
+            expression,
+            hidden: true,
+        }));
+
+        Ok(())
+    }
+
+    pub fn add_program_action(&mut self, program_action: &ProgramAction) -> DesmosResult<()> {
+        let id = self.create_entry_id();
+        let expression = GraphExpression::Binary {
+            kind: GraphBinaryKind::Equal,
+            lhs: Box::new(GraphExpression::Binary {
+                kind: GraphBinaryKind::Call,
+                lhs: Box::new(self.get_action_symbol(&program_action.identifier())),
+                rhs: Box::new(GraphExpression::Sequence {
+                    elements: program_action
+                        .parameters()
+                        .iter()
+                        .map(|parameter| self.get_local_symbol(parameter.id))
+                        .collect(),
+                }),
+            }),
+            rhs: Box::new(self.translate_action_value(program_action.action())?),
+        };
+
+        self.action_entries.push(Box::new(GraphExpressionEntry {
+            id,
+            folder_id: Some(ACTIONS_FOLDER_ID.into()),
+            expression,
+            hidden: true,
+        }));
+
+        Ok(())
+    }
+
+    pub fn set_program_ticker(&mut self, program_ticker: Option<&ProgramTicker>) -> DesmosResult<()> {
+        self.ticker = match program_ticker {
+            Some(program_ticker) => Some(GraphTicker {
+                playing: false,
+                handler: self.translate_action_value(program_ticker.tick_action())?,
+                min_step: match program_ticker.interval_ms() {
+                    Some(interval_ms) => self.translate_value(interval_ms)?,
+                    None => GraphExpression::Empty,
+                },
+            }),
+            None => None,
+        };
+
+        Ok(())
+    }
+
+    pub fn add_public_line(&mut self, public_line: &ProgramPublicLine) -> DesmosResult<()> {
+        let id = self.create_entry_id();
+        let entry: Box<dyn GraphEntry> = match public_line {
+            ProgramPublicLine::Text(text) => {
+                let text = text.trim();
+                if text.is_empty() {
+                    Box::new(GraphExpressionEntry {
+                        id,
+                        folder_id: None,
+                        expression: GraphExpression::Empty,
+                        hidden: true,
+                    })
+                }
+                else {
+                    Box::new(GraphTextEntry {
+                        id,
+                        folder_id: None,
+                        text: text.to_string(),
+                    })
+                }
+            }
+            ProgramPublicLine::Expression(value) => {
+                Box::new(GraphExpressionEntry {
+                    id,
+                    folder_id: None,
+                    expression: self.translate_value(value)?,
+                    hidden: true,
+                })
+            }
+            ProgramPublicLine::Action(action) => {
+                Box::new(GraphExpressionEntry {
+                    id,
+                    folder_id: None,
+                    expression: self.translate_action_value(action)?,
+                    hidden: true,
+                })
+            }
+        };
+        self.public_entries.push(entry);
+
+        Ok(())
+    }
+
+    pub fn add_display_element(&mut self, display_element: &ProgramDisplayElement) -> DesmosResult<()> {
+        todo!()
+    }
+
+    pub fn set_program(&mut self, program: &Program) -> DesmosResult<()> {
+        for program_let in program.lets() {
+            self.add_program_let(program_let)?;
+        }
+        for program_variable in program.variables() {
+            self.add_program_variable(program_variable)?;
+        }
+        for program_action in program.actions() {
+            self.add_program_action(program_action)?;
+        }
+        self.set_program_ticker(program.ticker())?;
+        if let Some(program_public) = program.public() {
+            for public_line in program_public.lines() {
+                self.add_public_line(public_line)?;
+            }
+        }
+        if let Some(program_display) = program.display() {
+            for display_element in program_display.elements() {
+                self.add_display_element(display_element)?;
+            }
+        }
+
+        Ok(())
     }
 }

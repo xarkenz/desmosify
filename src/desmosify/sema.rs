@@ -9,11 +9,16 @@ pub mod values;
 
 #[derive(Clone, Debug)]
 pub struct ProgramLet {
+    identifier: Rc<str>,
     parameters: Option<Box<[LocalReference]>>,
     value: Value,
 }
 
 impl ProgramLet {
+    pub fn identifier(&self) -> Rc<str> {
+        self.identifier.clone()
+    }
+
     pub fn parameters(&self) -> Option<&[LocalReference]> {
         self.parameters.as_deref()
     }
@@ -31,11 +36,16 @@ pub enum ProgramVariableKind {
 
 #[derive(Clone, Debug)]
 pub struct ProgramVariable {
+    identifier: Rc<str>,
     kind: ProgramVariableKind,
     value: Value,
 }
 
 impl ProgramVariable {
+    pub fn identifier(&self) -> Rc<str> {
+        self.identifier.clone()
+    }
+
     pub fn kind(&self) -> &ProgramVariableKind {
         &self.kind
     }
@@ -47,11 +57,16 @@ impl ProgramVariable {
 
 #[derive(Clone, Debug)]
 pub struct ProgramAction {
+    identifier: Rc<str>,
     parameters: Box<[LocalReference]>,
     action: ActionValue,
 }
 
 impl ProgramAction {
+    pub fn identifier(&self) -> Rc<str> {
+        self.identifier.clone()
+    }
+
     pub fn parameters(&self) -> &[LocalReference] {
         &self.parameters
     }

@@ -98,7 +98,7 @@ impl GlobalContext {
                                 .collect::<crate::Result<_>>()?,
                         };
 
-                        context.add_definition(TypedDefinition {
+                        context.add_action_definition(TypedDefinition {
                             definition,
                             value_type,
                         })?;
@@ -136,7 +136,7 @@ impl GlobalContext {
 
     pub fn add_action_definition(&mut self, definition: TypedDefinition) -> crate::Result<()> {
         let identifier = definition.definition.identifier.clone();
-        if let Some(old_definition) = self.definitions.insert(identifier, definition) {
+        if let Some(old_definition) = self.action_definitions.insert(identifier, definition) {
             Err(Box::new(crate::Error {
                 kind: crate::ErrorKind::ConflictingActionIdentifiers {
                     identifier: old_definition.definition.identifier.as_ref().into(),
@@ -161,16 +161,16 @@ impl GlobalContext {
         self.display_declarations.push(display_declaration);
     }
 
-    pub fn definitions(&self) -> impl Iterator<Item = &TypedDefinition> {
-        self.definitions.values()
+    pub fn definitions(&self) -> impl Iterator<Item = (&Rc<str>, &TypedDefinition)> {
+        self.definitions.iter()
     }
 
     pub fn find_definition(&self, identifier: &str) -> Option<&TypedDefinition> {
         self.definitions.get(identifier)
     }
 
-    pub fn action_definitions(&self) -> impl Iterator<Item = &TypedDefinition> {
-        self.action_definitions.values()
+    pub fn action_definitions(&self) -> impl Iterator<Item = (&Rc<str>, &TypedDefinition)> {
+        self.action_definitions.iter()
     }
 
     pub fn find_action_definition(&self, identifier: &str) -> Option<&TypedDefinition> {

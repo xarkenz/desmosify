@@ -31,3 +31,11 @@ action next() {
     num_a := num_b,
     num_b := num_a + num_b,
 }
+
+enum TestEnum {
+    A,
+    B,
+    C,
+}
+
+let test_enum_variants: [TestEnum] = @enum_variants(TestEnum);

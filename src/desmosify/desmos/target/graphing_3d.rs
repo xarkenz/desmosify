@@ -1,13 +1,14 @@
-use json::JsonValue;
+use crate::desmos::GraphState;
+use crate::desmos::error::DesmosResult;
 use crate::sema::Program;
 
-pub struct Graphing3DTarget;
+pub struct DesmosGraphing3DTarget;
 
-impl crate::target::Target for Graphing3DTarget {
-    type Output = JsonValue;
+impl crate::target::Target for DesmosGraphing3DTarget {
+    type Output = DesmosResult<GraphState>;
 
     fn name(&self) -> &'static str {
-        "desmos-graphing-3d"
+        "desmos-graphing3d"
     }
 
     fn compile(&self, program: &Program) -> Self::Output {

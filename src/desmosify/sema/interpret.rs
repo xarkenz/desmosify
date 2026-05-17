@@ -1,3 +1,4 @@
+use std::rc::Rc;
 use crate::ast::{ActionExpression, ActionExpressionKind, BinaryOperation, DefinitionKind, DisplayAttributeValue, Expression, ExpressionIndexOperation, ExpressionKind, ParameterList, PublicLineKind, TypeDefinition, UnaryOperation, ValueDefinition, VariableKind};
 use crate::sema::{Program, ProgramAction, ProgramDisplay, ProgramDisplayAttribute, ProgramDisplayAttributeValue, ProgramDisplayElement, ProgramLet, ProgramPublic, ProgramPublicLine, ProgramTicker, ProgramVariable, ProgramVariableKind};
 use crate::sema::context::{GlobalContext, LocalContext};
@@ -13,16 +14,37 @@ pub fn interpret_program(context: &GlobalContext) -> crate::Result<Program> {
 
     let mut next_local_id = 0;
 
-    for definition in context.definitions().chain(context.action_definitions()) {
+    for (identifier, definition) in context.definitions().chain(context.action_definitions()) {
         match &definition.definition.kind {
             DefinitionKind::Value(ValueDefinition::Let { parameters, value, .. }) => {
-                lets.push(interpret_let_definition(context, &mut next_local_id, parameters.as_ref(), &definition.value_type, value)?);
+                lets.push(interpret_let_definition(
+                    context,
+                    &mut next_local_id,
+                    identifier.clone(),
+                    parameters.as_ref(),
+                    &definition.value_type,
+                    value,
+                )?);
             }
             DefinitionKind::Value(ValueDefinition::Variable { kind, value, .. }) => {
-                variables.push(interpret_variable_definition(context, &mut next_local_id, kind, &definition.value_type, value)?);
+                variables.push(interpret_variable_definition(
+                    context,
+                    &mut next_local_id,
+                    identifier.clone(),
+                    kind,
+                    &definition.value_type,
+                    value,
+                )?);
             }
             DefinitionKind::Value(ValueDefinition::Action { parameters, action }) => {
-                actions.push(interpret_action_definition(context, &mut next_local_id, parameters, &definition.value_type, action)?);
+                actions.push(interpret_action_definition(
+                    context,
+                    &mut next_local_id,
+                    identifier.clone(),
+                    parameters,
+                    &definition.value_type,
+                    action,
+                )?);
             }
             _ => {}
         }
@@ -38,7 +60,14 @@ pub fn interpret_program(context: &GlobalContext) -> crate::Result<Program> {
     })
 }
 
-pub fn interpret_let_definition(context: &GlobalContext, next_local_id: &mut u64, parameters: Option<&ParameterList>, value_type: &Type, value: &Expression) -> crate::Result<ProgramLet> {
+pub fn interpret_let_definition(
+    context: &GlobalContext,
+    next_local_id: &mut u64,
+    identifier: Rc<str>,
+    parameters: Option<&ParameterList>,
+    value_type: &Type,
+    value: &Expression,
+) -> crate::Result<ProgramLet> {
     let mut local_context = LocalContext::new();
 
     let (typed_parameters, expected_type) = if let Some(parameters) = parameters {
@@ -58,12 +87,20 @@ pub fn interpret_let_definition(context: &GlobalContext, next_local_id: &mut u64
         .coerce_to(expected_type, false)?;
 
     Ok(ProgramLet {
+        identifier,
         parameters: typed_parameters,
         value,
     })
 }
 
-pub fn interpret_variable_definition(context: &GlobalContext, next_local_id: &mut u64, kind: &VariableKind, value_type: &Type, value: &Expression) -> crate::Result<ProgramVariable> {
+pub fn interpret_variable_definition(
+    context: &GlobalContext,
+    next_local_id: &mut u64,
+    identifier: Rc<str>,
+    kind: &VariableKind,
+    value_type: &Type,
+    value: &Expression,
+) -> crate::Result<ProgramVariable> {
     let local_context = LocalContext::new();
 
     let kind = match kind {
@@ -75,12 +112,20 @@ pub fn interpret_variable_definition(context: &GlobalContext, next_local_id: &mu
         .coerce_to(value_type, false)?;
 
     Ok(ProgramVariable {
+        identifier,
         kind,
         value,
     })
 }
 
-pub fn interpret_action_definition(context: &GlobalContext, next_local_id: &mut u64, parameters: &ParameterList, action_type: &Type, action: &ActionExpression) -> crate::Result<ProgramAction> {
+pub fn interpret_action_definition(
+    context: &GlobalContext,
+    next_local_id: &mut u64,
+    identifier: Rc<str>,
+    parameters: &ParameterList,
+    action_type: &Type,
+    action: &ActionExpression,
+) -> crate::Result<ProgramAction> {
     let mut local_context = LocalContext::new();
 
     let Type::Action { parameter_types } = action_type else {
@@ -91,12 +136,18 @@ pub fn interpret_action_definition(context: &GlobalContext, next_local_id: &mut 
     let action = interpret_action_expression(context, next_local_id, &local_context, action)?;
 
     Ok(ProgramAction {
+        identifier,
         parameters: typed_parameters,
         action,
     })
 }
 
-pub fn process_parameters(next_local_id: &mut u64, local_context: &mut LocalContext, parameters: &ParameterList, parameter_types: &[Type]) -> Box<[LocalReference]> {
+pub fn process_parameters(
+    next_local_id: &mut u64,
+    local_context: &mut LocalContext,
+    parameters: &ParameterList,
+    parameter_types: &[Type],
+) -> Box<[LocalReference]> {
     std::iter::zip(&parameters.0, parameter_types)
         .map(|((identifier, _), parameter_type)| {
             local_context.add_local_variable(identifier.clone(), next_local_id, parameter_type.clone())
@@ -104,7 +155,10 @@ pub fn process_parameters(next_local_id: &mut u64, local_context: &mut LocalCont
         .collect()
 }
 
-pub fn interpret_ticker_declarations(context: &GlobalContext, next_local_id: &mut u64) -> crate::Result<Option<ProgramTicker>> {
+pub fn interpret_ticker_declarations(
+    context: &GlobalContext,
+    next_local_id: &mut u64,
+) -> crate::Result<Option<ProgramTicker>> {
     let (interval_ms, tick_action) = context
         .ticker_declarations()
         .iter()
@@ -146,7 +200,10 @@ pub fn interpret_ticker_declarations(context: &GlobalContext, next_local_id: &mu
     }
 }
 
-pub fn interpret_public_declarations(context: &GlobalContext, next_local_id: &mut u64) -> crate::Result<Option<ProgramPublic>> {
+pub fn interpret_public_declarations(
+    context: &GlobalContext,
+    next_local_id: &mut u64,
+) -> crate::Result<Option<ProgramPublic>> {
     // It's fine to create the local context here because it never changes.
     let local_context = LocalContext::new();
     let mut lines = Vec::new();
@@ -177,7 +234,10 @@ pub fn interpret_public_declarations(context: &GlobalContext, next_local_id: &mu
     }
 }
 
-pub fn interpret_display_declarations(context: &GlobalContext, next_local_id: &mut u64) -> crate::Result<Option<ProgramDisplay>> {
+pub fn interpret_display_declarations(
+    context: &GlobalContext,
+    next_local_id: &mut u64,
+) -> crate::Result<Option<ProgramDisplay>> {
     // It's fine to create the local context here because it never changes.
     // (For click actions, just create a fresh context.)
     let local_context = LocalContext::new();
@@ -223,7 +283,12 @@ pub fn interpret_display_declarations(context: &GlobalContext, next_local_id: &m
 }
 
 // TODO: detect multiple updates of same variable
-pub fn interpret_action_expression(context: &GlobalContext, next_local_id: &mut u64, local_context: &LocalContext, action: &ActionExpression) -> crate::Result<ActionValue> {
+pub fn interpret_action_expression(
+    context: &GlobalContext,
+    next_local_id: &mut u64,
+    local_context: &LocalContext,
+    action: &ActionExpression,
+) -> crate::Result<ActionValue> {
     match &action.kind {
         ActionExpressionKind::Disable => {
             Ok(ActionValue::Disable)
@@ -312,7 +377,12 @@ pub fn interpret_action_expression(context: &GlobalContext, next_local_id: &mut 
     }
 }
 
-pub fn interpret_expression(context: &GlobalContext, next_local_id: &mut u64, local_context: &LocalContext, expression: &Expression) -> crate::Result<Value> {
+pub fn interpret_expression(
+    context: &GlobalContext,
+    next_local_id: &mut u64,
+    local_context: &LocalContext,
+    expression: &Expression,
+) -> crate::Result<Value> {
     match &expression.kind {
         ExpressionKind::Literal(Literal::Identifier(identifier)) => {
             if let Some(value) = local_context.find_local(identifier) {
@@ -626,7 +696,13 @@ pub fn interpret_expression(context: &GlobalContext, next_local_id: &mut u64, lo
     }
 }
 
-pub fn interpret_unary_operation(context: &GlobalContext, next_local_id: &mut u64, local_context: &LocalContext, operation: UnaryOperation, operand: &Expression) -> crate::Result<Value> {
+pub fn interpret_unary_operation(
+    context: &GlobalContext,
+    next_local_id: &mut u64,
+    local_context: &LocalContext,
+    operation: UnaryOperation,
+    operand: &Expression,
+) -> crate::Result<Value> {
     let mut operand = interpret_expression(context, next_local_id, local_context, operand)?;
     let (is_list, mut operand_type) = operand.get_type().into_flatten_list();
 
@@ -648,7 +724,14 @@ pub fn interpret_unary_operation(context: &GlobalContext, next_local_id: &mut u6
     })
 }
 
-pub fn interpret_binary_operation(context: &GlobalContext, next_local_id: &mut u64, local_context: &LocalContext, operation: BinaryOperation, lhs: &Expression, rhs: &Expression) -> crate::Result<Value> {
+pub fn interpret_binary_operation(
+    context: &GlobalContext,
+    next_local_id: &mut u64,
+    local_context: &LocalContext,
+    operation: BinaryOperation,
+    lhs: &Expression,
+    rhs: &Expression,
+) -> crate::Result<Value> {
     if let BinaryOperation::MemberAccess = operation {
         return interpret_access_operation(context, next_local_id, local_context, lhs, rhs);
     }
@@ -759,7 +842,13 @@ pub fn interpret_binary_operation(context: &GlobalContext, next_local_id: &mut u
     })
 }
 
-fn interpret_access_operation(context: &GlobalContext, next_local_id: &mut u64, local_context: &LocalContext, lhs: &Expression, rhs: &Expression) -> crate::Result<Value> {
+fn interpret_access_operation(
+    context: &GlobalContext,
+    next_local_id: &mut u64,
+    local_context: &LocalContext,
+    lhs: &Expression,
+    rhs: &Expression,
+) -> crate::Result<Value> {
     let lhs = interpret_expression(context, next_local_id, local_context, lhs)?;
     let (lhs_is_list, lhs_type) = lhs.get_type().into_flatten_list();
 
@@ -842,7 +931,12 @@ fn interpret_access_operation(context: &GlobalContext, next_local_id: &mut u64, 
     }
 }
 
-pub fn interpret_index_operation(context: &GlobalContext, next_local_id: &mut u64, local_context: &LocalContext, operation: &ExpressionIndexOperation) -> crate::Result<ValueIndexOperation> {
+pub fn interpret_index_operation(
+    context: &GlobalContext,
+    next_local_id: &mut u64,
+    local_context: &LocalContext,
+    operation: &ExpressionIndexOperation,
+) -> crate::Result<ValueIndexOperation> {
     match operation {
         ExpressionIndexOperation::Single { index } => {
             let index = interpret_expression(context, next_local_id, local_context, index)?
