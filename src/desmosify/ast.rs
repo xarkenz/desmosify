@@ -313,6 +313,7 @@ impl std::fmt::Display for ExpressionIndexOperation {
 #[derive(Clone, Debug)]
 pub struct ExpressionListMapLoop {
     pub identifier: Rc<str>,
+    pub identifier_span: crate::Span,
     pub list: Expression,
 }
 
@@ -376,6 +377,7 @@ pub enum ExpressionKind {
     },
     Let {
         identifier: Rc<str>,
+        identifier_span: crate::Span,
         value_type: Option<Box<TypeExpression>>,
         value: Box<Expression>,
         expression: Box<Expression>,
@@ -428,7 +430,7 @@ impl std::fmt::Display for ExpressionKind {
             }
             Self::ListMap { loops, expression } => {
                 write!(f, "[{expression}")?;
-                for ExpressionListMapLoop { identifier, list } in loops {
+                for ExpressionListMapLoop { identifier, list, .. } in loops {
                     write!(f, " for {identifier} in {list}")?;
                 }
                 write!(f, "]")
@@ -460,7 +462,7 @@ impl std::fmt::Display for ExpressionKind {
                 }
                 write!(f, "}}")
             }
-            Self::Let { identifier, value_type, value, expression } => {
+            Self::Let { identifier, value_type, value, expression, .. } => {
                 write!(f, "let {identifier}")?;
                 if let Some(value_type) = value_type {
                     write!(f, ": {value_type}")?;
@@ -496,6 +498,7 @@ pub enum ActionExpressionKind {
     },
     ActionCall {
         identifier: Rc<str>,
+        identifier_span: crate::Span,
         arguments: Box<[Expression]>,
     },
     Conditional {
@@ -527,7 +530,7 @@ impl std::fmt::Display for ActionExpressionKind {
             Self::Update { variable, value } => {
                 write!(f, "{variable} := {value}")
             }
-            Self::ActionCall { identifier, arguments } => {
+            Self::ActionCall { identifier, arguments, .. } => {
                 write!(f, "action {identifier}(")?;
                 match arguments.as_ref() {
                     [] => {}
@@ -568,7 +571,20 @@ impl std::fmt::Display for ActionExpression {
 }
 
 #[derive(Clone, Debug)]
-pub struct ParameterList(pub Box<[(Rc<str>, TypeExpression)]>);
+pub struct Parameter {
+    pub identifier: Rc<str>,
+    pub identifier_span: crate::Span,
+    pub parameter_type: TypeExpression,
+}
+
+impl std::fmt::Display for Parameter {
+    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+        write!(f, "{}: {}", self.identifier, self.parameter_type)
+    }
+}
+
+#[derive(Clone, Debug)]
+pub struct ParameterList(pub Box<[Parameter]>);
 
 impl std::fmt::Display for ParameterList {
     fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
@@ -576,10 +592,10 @@ impl std::fmt::Display for ParameterList {
             [] => {
                 write!(f, "()")
             }
-            [(identifier, param_type), rest @ ..] => {
-                write!(f, "({identifier}: {param_type}")?;
-                for (identifier, param_type) in rest {
-                    write!(f, ", {identifier}: {param_type}")?;
+            [first, rest @ ..] => {
+                write!(f, "({first}")?;
+                for parameter in rest {
+                    write!(f, ", {parameter}")?;
                 }
                 write!(f, ")")
             }
@@ -624,6 +640,7 @@ pub enum ValueDefinition {
 #[derive(Clone, Debug)]
 pub struct EnumerationVariant {
     pub identifier: Rc<str>,
+    pub identifier_span: crate::Span,
 }
 
 impl std::fmt::Display for EnumerationVariant {
@@ -787,8 +804,8 @@ impl std::fmt::Display for DisplayAttributeValue {
 #[derive(Clone, Debug)]
 pub struct DisplayAttribute {
     pub key: Rc<str>,
+    pub key_span: crate::Span,
     pub value: DisplayAttributeValue,
-    pub span: crate::Span,
 }
 
 impl std::fmt::Display for DisplayAttribute {

@@ -42,7 +42,7 @@ impl Span {
 
     pub fn load_context(&self, path: impl AsRef<Path>) -> std::io::Result<SpanContext> {
         let mut reader = BufReader::new(File::open(path)?);
-        let mut line_number = 0;
+        let mut line_number = 1;
         let mut column_number = 0;
         let mut line_start_index = 0;
         let mut content = String::new();
@@ -76,7 +76,8 @@ impl Span {
                     else {
                         content.extend(std::iter::repeat_n(
                             '~',
-                            line_end_index.min(self.start_index + self.length)
+                            (line_start_index + line_trim.len())
+                                .min(self.start_index + self.length)
                                 .saturating_sub(line_start_index.max(self.start_index))
                         ));
                     }
@@ -86,8 +87,10 @@ impl Span {
                     break;
                 }
             }
+            else {
+                line_number += 1;
+            }
 
-            line_number += 1;
             line_start_index = line_end_index;
             line.clear();
         }
@@ -100,9 +103,15 @@ impl Span {
     }
 }
 
+pub trait TargetError : std::error::Error {
+    fn span(&self) -> Option<Span> {
+        None
+    }
+}
+
 #[derive(Debug)]
 pub enum ErrorKind {
-    Target(Box<dyn std::error::Error>),
+    Target(Box<dyn TargetError>),
     SourceFileOpen {
         cause: std::io::Error,
     },

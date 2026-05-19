@@ -1,18 +1,18 @@
 use crate::ast::{DefinitionKind, RangeKind, TypeDefinition};
 use crate::sema::context::GlobalContext;
 use crate::sema::types::Type;
-use crate::sema::values::{MathematicalConstant, Value};
+use crate::sema::values::{MathematicalConstant, Value, ValueKind};
 
 #[derive(Clone, Debug)]
 pub struct IntrinsicFunction {
     identifier: &'static str,
     min_arity: usize,
     max_arity: Option<usize>,
-    interpret_call: fn(context: &GlobalContext, arguments: Box<[Value]>) -> crate::Result<Value>,
+    interpret_call: fn(context: &GlobalContext, arguments: Box<[Value]>) -> crate::Result<ValueKind>,
 }
 
 impl IntrinsicFunction {
-    pub fn interpret_call(&self, context: &GlobalContext, arguments: Box<[Value]>) -> crate::Result<Value> {
+    pub fn interpret_call(&self, context: &GlobalContext, arguments: Box<[Value]>) -> crate::Result<ValueKind> {
         self.check_arity(arguments.len())?;
 
         (self.interpret_call)(context, arguments)
@@ -118,6 +118,15 @@ pub enum IntrinsicParameterizedReducerKind {
     Tscore,
 }
 
+#[derive(Copy, Clone, PartialEq, Debug)]
+pub enum IntrinsicColorKind {
+    Rgb,
+    Hsv,
+    Okhsv,
+    Oklab,
+    Oklch,
+}
+
 #[derive(Clone, PartialEq, Debug)]
 pub enum IntrinsicValue {
     Unary {
@@ -153,6 +162,24 @@ pub enum IntrinsicValue {
         parameter: Value,
         result_type: Type,
     },
+    Color {
+        kind: IntrinsicColorKind,
+        value_1: Value,
+        value_2: Value,
+        value_3: Value,
+        is_list: bool,
+    },
+    Segment {
+        point_1: Value,
+        point_2: Value,
+        is_list: bool,
+    },
+    Rotate {
+        object: Value,
+        point: Value,
+        angle: Value,
+        result_type: Type,
+    },
     Join {
         arguments: Box<[Value]>,
         result_type: Type,
@@ -172,6 +199,9 @@ impl IntrinsicValue {
             Self::ArgumentsReducer { result_type, .. } => result_type.clone(),
             Self::DoubleReducer { result_type, .. } => result_type.clone(),
             Self::ParameterizedReducer { result_type, .. } => result_type.clone(),
+            Self::Color { is_list, .. } => Type::Color.unflatten_list(*is_list),
+            Self::Segment { is_list, .. } => Type::Segment.unflatten_list(*is_list),
+            Self::Rotate { result_type, .. } => result_type.clone(),
             Self::Join { result_type, .. } => result_type.clone(),
             Self::Width |
             Self::Height |
@@ -181,29 +211,29 @@ impl IntrinsicValue {
     }
 }
 
-impl From<IntrinsicValue> for Value {
+impl From<IntrinsicValue> for ValueKind {
     fn from(value: IntrinsicValue) -> Self {
         Self::Intrinsic(Box::new(value))
     }
 }
 
 // TODO: per target
-pub fn get_core_intrinsics() -> impl Iterator<Item = (&'static str, Value)> {
+pub fn get_core_intrinsics() -> impl Iterator<Item = (&'static str, ValueKind)> {
     CORE_INTRINSIC_FUNCTIONS
         .iter()
         .map(|&function| {
-            (function.identifier, Value::IntrinsicFunction(function))
+            (function.identifier, ValueKind::IntrinsicFunction(function))
         })
         .chain([
-            ("PI", Value::Mathematical {
+            ("PI", ValueKind::Mathematical {
                 kind: MathematicalConstant::Pi,
                 coefficient: 1.0,
             }),
-            ("TAU", Value::Mathematical {
+            ("TAU", ValueKind::Mathematical {
                 kind: MathematicalConstant::Tau,
                 coefficient: 1.0,
             }),
-            ("E", Value::Mathematical {
+            ("E", ValueKind::Mathematical {
                 kind: MathematicalConstant::E,
                 coefficient: 1.0,
             }),
@@ -287,7 +317,7 @@ pub const CORE_INTRINSIC_FUNCTIONS: &[&IntrinsicFunction] = &[
     // Geometry
     // &MIDPOINT,
     // &INTERSECTION,
-    // &SEGMENT,
+    &SEGMENT,
     // &LINE,
     // &RAY,
     // &VECTOR,
@@ -318,15 +348,15 @@ pub const CORE_INTRINSIC_FUNCTIONS: &[&IntrinsicFunction] = &[
     // &END,
     // Transformations
     // &DILATE,
-    // &ROTATE,
+    &ROTATE,
     // &REFLECT,
     // &TRANSLATE,
-    // &Color,
-    // &RGB,
-    // &HSV,
-    // &OKHSV,
-    // &OKLAB,
-    // &OKLCH,
+    // Color
+    &RGB,
+    &HSV,
+    &OKHSV,
+    &OKLAB,
+    &OKLCH,
     // Sound
     // &TONE,
     // Number Theory
@@ -354,7 +384,7 @@ pub const CORE_INTRINSIC_FUNCTIONS: &[&IntrinsicFunction] = &[
 pub fn interpret_trig_call(
     kind: IntrinsicUnaryKind,
     arguments: Box<[Value]>,
-) -> crate::Result<Value> {
+) -> crate::Result<ValueKind> {
     let argument = arguments.into_iter().next().unwrap();
     let is_list = argument.get_type().is_list();
 
@@ -383,7 +413,7 @@ pub fn interpret_reducer_call(
     argument_check: Option<fn(&Type) -> crate::Result<()>>,
     result_override: Option<Type>,
     arguments: Box<[Value]>,
-) -> crate::Result<Value> {
+) -> crate::Result<ValueKind> {
     if let Some(argument_check) = argument_check {
         for argument in &arguments {
             argument_check(argument.get_type().flatten_list().1)?;
@@ -410,7 +440,9 @@ pub fn interpret_reducer_call(
         }
     }
     else {
-        let result_type = Type::broadcast(result_override, arguments.iter().map(Value::get_type))?;
+        let result_type = Type::broadcast(result_override, arguments
+            .iter()
+            .map(|value| (value.get_type(), value.span)))?;
 
         Ok(IntrinsicValue::ArgumentsReducer {
             kind,
@@ -428,6 +460,43 @@ macro_rules! reducer_intrinsic {
             max_arity: None,
             interpret_call: |_, arguments| {
                 interpret_reducer_call(IntrinsicReducerKind::$kind, $chk, $res, arguments)
+            },
+        }
+    };
+}
+
+pub fn interpret_color_call(
+    kind: IntrinsicColorKind,
+    arguments: Box<[Value]>,
+) -> crate::Result<ValueKind> {
+    let mut arguments = arguments.into_iter();
+    let value_1 = arguments.next().unwrap()
+        .coerce_to(&Type::Real, true)?;
+    let value_2 = arguments.next().unwrap()
+        .coerce_to(&Type::Real, true)?;
+    let value_3 = arguments.next().unwrap()
+        .coerce_to(&Type::Real, true)?;
+    let is_list = value_1.get_type().is_list() ||
+        value_2.get_type().is_list() ||
+        value_3.get_type().is_list();
+
+    Ok(IntrinsicValue::Color {
+        kind,
+        value_1,
+        value_2,
+        value_3,
+        is_list,
+    }.into())
+}
+
+macro_rules! color_intrinsic {
+    ($id:expr => $kind:ident) => {
+        IntrinsicFunction {
+            identifier: $id,
+            min_arity: 3,
+            max_arity: Some(3),
+            interpret_call: |_, arguments| {
+                interpret_color_call(IntrinsicColorKind::$kind, arguments)
             },
         }
     };
@@ -495,7 +564,7 @@ pub static JOIN: IntrinsicFunction = IntrinsicFunction {
         let item_type = arguments[1..].iter().try_fold(
             arguments[0].get_type().into_flatten_list().1,
             |current_type, argument| {
-                current_type.merge(argument.get_type().flatten_list().1)
+                current_type.merge(argument.get_type().flatten_list().1, argument.span)
             },
         )?;
 
@@ -549,7 +618,25 @@ pub static JOIN: IntrinsicFunction = IntrinsicFunction {
 
 // MIDPOINT
 // INTERSECTION
-// SEGMENT
+pub static SEGMENT: IntrinsicFunction = IntrinsicFunction {
+    identifier: "segment",
+    min_arity: 2,
+    max_arity: Some(2),
+    interpret_call: |_, arguments| {
+        // TODO: check types
+        let mut arguments = arguments.into_iter();
+        let point_1 = arguments.next().unwrap();
+        let point_2 = arguments.next().unwrap();
+        let is_list = point_1.get_type().is_list() ||
+            point_2.get_type().is_list();
+
+        Ok(IntrinsicValue::Segment {
+            point_1,
+            point_2,
+            is_list,
+        }.into())
+    },
+};
 // LINE
 // RAY
 // VECTOR
@@ -586,17 +673,44 @@ pub static POLYGON: IntrinsicFunction = reducer_intrinsic!(
 // ------ Transformations ------
 
 // DILATE
-// ROTATE
+pub static ROTATE: IntrinsicFunction = IntrinsicFunction {
+    identifier: "rotate",
+    min_arity: 3,
+    max_arity: Some(3),
+    interpret_call: |_, arguments| {
+        // TODO: check types better
+        let mut arguments = arguments.into_iter();
+        let object = arguments.next().unwrap();
+        let point = arguments.next().unwrap()
+            .coerce_to(&Type::Point2 {
+                x_type: Box::new(Type::Real),
+                y_type: Box::new(Type::Real),
+            }, true)?;
+        let angle = arguments.next().unwrap()
+            .coerce_to(&Type::Real, true)?;
+        let result_type = object.get_type();
+        let is_list = object.get_type().is_list() ||
+            point.get_type().is_list() ||
+            angle.get_type().is_list();
+
+        Ok(IntrinsicValue::Rotate {
+            object,
+            point,
+            angle,
+            result_type: result_type.unflatten_list(is_list),
+        }.into())
+    },
+};
 // REFLECT
 // TRANSLATE
 
 // ------ Color ------
 
-// RGB
-// HSV
-// OKHSV
-// OKLAB
-// OKLCH
+pub static RGB: IntrinsicFunction = color_intrinsic!("rgb" => Rgb);
+pub static HSV: IntrinsicFunction = color_intrinsic!("hsv" => Hsv);
+pub static OKHSV: IntrinsicFunction = color_intrinsic!("okhsv" => Okhsv);
+pub static OKLAB: IntrinsicFunction = color_intrinsic!("oklab" => Oklab);
+pub static OKLCH: IntrinsicFunction = color_intrinsic!("oklch" => Oklch);
 
 // ------ Sound ------
 
@@ -646,17 +760,17 @@ pub static ENUM_VARIANTS: IntrinsicFunction = IntrinsicFunction {
             }));
         };
 
-        Ok(Value::ListRange {
+        Ok(ValueKind::ListRange {
             kind: RangeKind::Exclusive,
-            start: Box::new(Value::EnumVariant {
+            start: Box::new(ValueKind::EnumVariant {
                 type_identifier: identifier.clone(),
                 variant_ordinal: 0,
-            }),
-            end: Box::new(Value::EnumVariant {
+            }.into()),
+            end: Box::new(ValueKind::EnumVariant {
                 type_identifier: identifier.clone(),
                 variant_ordinal: variants.len() as i64,
-            }),
-            step: Box::new(Value::Int(1)),
+            }.into()),
+            step: Box::new(ValueKind::Int(1).into()),
             item_type: Type::UserValue {
                 type_identifier: identifier,
             },

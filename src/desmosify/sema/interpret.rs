@@ -4,7 +4,7 @@ use crate::sema::{Program, ProgramAction, ProgramDisplay, ProgramDisplayAttribut
 use crate::sema::context::{GlobalContext, LocalContext};
 use crate::sema::intrinsic::IntrinsicValue;
 use crate::sema::types::Type;
-use crate::sema::values::{ActionValue, GlobalReference, LocalReference, Value, ValueIndexOperation, ValueListMapLoop};
+use crate::sema::values::{ActionValue, ActionValueKind, GlobalReference, LocalReference, Value, ValueIndexOperation, ValueKind, ValueListMapLoop};
 use crate::token::Literal;
 
 pub fn interpret_program(context: &GlobalContext) -> crate::Result<Program> {
@@ -149,8 +149,8 @@ pub fn process_parameters(
     parameter_types: &[Type],
 ) -> Box<[LocalReference]> {
     std::iter::zip(&parameters.0, parameter_types)
-        .map(|((identifier, _), parameter_type)| {
-            local_context.add_local_variable(identifier.clone(), next_local_id, parameter_type.clone())
+        .map(|(parameter, parameter_type)| {
+            local_context.add_local_variable(parameter.identifier.clone(), next_local_id, parameter_type.clone())
         })
         .collect()
 }
@@ -159,13 +159,15 @@ pub fn interpret_ticker_declarations(
     context: &GlobalContext,
     next_local_id: &mut u64,
 ) -> crate::Result<Option<ProgramTicker>> {
-    let (interval_ms, tick_action) = context
+    let mut tick_actions = Vec::with_capacity(context.ticker_declarations().len());
+
+    let interval_ms = context
         .ticker_declarations()
         .iter()
         .enumerate()
         .try_fold::<_, _, crate::Result<_>>(
-            (None, ActionValue::empty()),
-            |(mut interval_ms, mut tick_action), (index, declaration)| {
+            None,
+            |interval_ms, (index, declaration)| {
                 let mut local_context = LocalContext::new();
 
                 let new_interval_ms = match declaration.interval_ms.as_ref() {
@@ -178,16 +180,23 @@ pub fn interpret_ticker_declarations(
                         span: Some(declaration.span),
                     }));
                 }
-                interval_ms = new_interval_ms;
 
                 local_context.add_scoped_intrinsic("dt", IntrinsicValue::Dt.into());
 
                 let new_tick_action = interpret_action_expression(context, next_local_id, &local_context, &declaration.tick_action)?;
-                tick_action = tick_action.merge(new_tick_action);
+                tick_actions.push(new_tick_action);
 
-                Ok((interval_ms, tick_action))
+                Ok(new_interval_ms)
             },
         )?;
+
+    let tick_action = match tick_actions.len() {
+        0 => return Ok(None),
+        1 => tick_actions.into_iter().next().unwrap(),
+        2.. => ActionValueKind::Compound {
+            actions: tick_actions.into_boxed_slice(),
+        }.into()
+    };
 
     if tick_action.is_empty() {
         Ok(None)
@@ -289,17 +298,19 @@ pub fn interpret_action_expression(
     local_context: &LocalContext,
     action: &ActionExpression,
 ) -> crate::Result<ActionValue> {
-    match &action.kind {
+    let kind = match &action.kind {
         ActionExpressionKind::Disable => {
-            Ok(ActionValue::Disable)
+            ActionValueKind::Disable
         }
         ActionExpressionKind::Compound { actions } => {
-            Ok(ActionValue::Compound {
+            ActionValueKind::Compound {
                 actions: actions
                     .iter()
-                    .map(|action| interpret_action_expression(context, next_local_id, local_context, action))
+                    .map(|action| {
+                        interpret_action_expression(context, next_local_id, local_context, action)
+                    })
                     .collect::<crate::Result<_>>()?,
-            })
+            }
         }
         ActionExpressionKind::Update { variable, value } => {
             let invalid_update_lhs_error = || Box::new(crate::Error {
@@ -308,7 +319,8 @@ pub fn interpret_action_expression(
             });
 
             let variable = interpret_expression(context, next_local_id, &local_context, variable)?;
-            let Value::Global(variable) = variable else {
+            let variable_span = variable.span;
+            let ValueKind::Global(variable) = variable.kind else {
                 return Err(invalid_update_lhs_error());
             };
             let DefinitionKind::Value(ValueDefinition::Variable { .. }) = context.find_definition(&variable.identifier).unwrap().definition.kind else {
@@ -318,12 +330,13 @@ pub fn interpret_action_expression(
             let value = interpret_expression(context, next_local_id, &local_context, value)?
                 .coerce_to(&variable.value_type, false)?;
 
-            Ok(ActionValue::Update {
+            ActionValueKind::Update {
                 variable,
+                variable_span,
                 value: Box::new(value),
-            })
+            }
         }
-        ActionExpressionKind::ActionCall { identifier, arguments } => {
+        ActionExpressionKind::ActionCall { identifier, identifier_span, arguments } => {
             let Some(definition) = context.find_action_definition(identifier) else {
                 return Err(Box::new(crate::Error {
                     kind: crate::ErrorKind::UndefinedAction {
@@ -346,18 +359,19 @@ pub fn interpret_action_expression(
                 }))
             }
 
-            Ok(ActionValue::ActionCall {
+            ActionValueKind::ActionCall {
                 identifier: identifier.clone(),
+                identifier_span: Some(*identifier_span),
                 arguments: std::iter::zip(arguments, parameter_types)
                     .map(|(argument, parameter_type)| {
                         interpret_expression(context, next_local_id, local_context, argument)?
                             .coerce_to(parameter_type, false)
                     })
                     .collect::<crate::Result<_>>()?,
-            })
+            }
         }
         ActionExpressionKind::Conditional { condition_consequents, alternative } => {
-            Ok(ActionValue::Conditional {
+            ActionValueKind::Conditional {
                 condition_consequents: condition_consequents
                     .iter()
                     .map(|(condition, consequent)| {
@@ -369,12 +383,21 @@ pub fn interpret_action_expression(
                     })
                     .collect::<crate::Result<_>>()?,
                 alternative: match alternative {
-                    Some(alternative) => Box::new(interpret_action_expression(context, next_local_id, local_context, alternative)?),
-                    None => Box::new(ActionValue::empty()),
+                    Some(alternative) => {
+                        Box::new(interpret_action_expression(context, next_local_id, local_context, alternative)?)
+                    }
+                    None => {
+                        Box::new(ActionValueKind::empty().into())
+                    }
                 },
-            })
+            }
         }
-    }
+    };
+
+    Ok(ActionValue {
+        kind,
+        span: Some(action.span),
+    })
 }
 
 pub fn interpret_expression(
@@ -383,28 +406,28 @@ pub fn interpret_expression(
     local_context: &LocalContext,
     expression: &Expression,
 ) -> crate::Result<Value> {
-    match &expression.kind {
+    let kind = match &expression.kind {
         ExpressionKind::Literal(Literal::Identifier(identifier)) => {
-            if let Some(value) = local_context.find_local(identifier) {
-                Ok(value.clone())
+            if let Some(local) = local_context.find_local(identifier) {
+                local.clone()
             }
             else if let Some(definition) = context.find_definition(identifier) {
-                Ok(Value::Global(GlobalReference {
+                ValueKind::Global(GlobalReference {
                     identifier: identifier.clone(),
                     value_type: definition.value_type.clone(),
-                }))
+                })
             }
             else {
-                Err(Box::new(crate::Error {
+                return Err(Box::new(crate::Error {
                     kind: crate::ErrorKind::UndefinedIdentifier {
                         identifier: identifier.as_ref().into(),
                     },
                     span: Some(expression.span),
-                }))
+                }));
             }
         }
         ExpressionKind::Literal(Literal::Real(value)) => {
-            Ok(Value::Real(*value))
+            ValueKind::Real(*value)
         }
         ExpressionKind::Literal(Literal::Integer(value)) => {
             let value = i64::try_from(*value).map_err(|_| Box::new(crate::Error {
@@ -412,38 +435,38 @@ pub fn interpret_expression(
                 span: Some(expression.span),
             }))?;
 
-            Ok(Value::Int(value))
+            ValueKind::Int(value)
         }
         ExpressionKind::Literal(Literal::Boolean(value)) => {
-            Ok(Value::Bool(*value))
+            ValueKind::Bool(*value)
         }
         ExpressionKind::Literal(Literal::String(value)) => {
-            Ok(Value::Str(value.clone()))
+            ValueKind::Str(value.clone())
         }
         ExpressionKind::Intrinsic(identifier) => {
             if let Some(intrinsic) = local_context.find_scoped_intrinsic(identifier) {
-                Ok(intrinsic.clone())
+                intrinsic.clone()
             }
             else if let Some(intrinsic) = context.find_intrinsic(identifier) {
-                Ok(intrinsic.clone())
+                intrinsic.clone()
             }
             else {
-                Err(Box::new(crate::Error {
+                return Err(Box::new(crate::Error {
                     kind: crate::ErrorKind::UndefinedIntrinsic {
                         identifier: identifier.as_ref().into(),
                     },
                     span: Some(expression.span),
-                }))
+                }));
             }
         }
         ExpressionKind::Grouping { expression } => {
-            interpret_expression(context, next_local_id, local_context, expression)
+            interpret_expression(context, next_local_id, local_context, expression)?.kind
         }
         ExpressionKind::Unary { operation, operand } => {
-            interpret_unary_operation(context, next_local_id, local_context, *operation, operand)
+            interpret_unary_operation(context, next_local_id, local_context, *operation, operand)?
         }
         ExpressionKind::Binary { operation, lhs, rhs } => {
-            interpret_binary_operation(context, next_local_id, local_context, *operation, lhs, rhs)
+            interpret_binary_operation(context, next_local_id, local_context, *operation, lhs, rhs)?
         }
         ExpressionKind::Point2 { x, y } => {
             let x = interpret_expression(context, next_local_id, local_context, x)?;
@@ -452,14 +475,14 @@ pub fn interpret_expression(
             let (x_is_list, x_type) = x.get_type().into_flatten_list();
             let (y_is_list, y_type) = y.get_type().into_flatten_list();
 
-            Ok(Value::Point2 {
+            ValueKind::Point2 {
                 x: Box::new(x),
                 y: Box::new(y),
                 point_type: Type::Point2 {
                     x_type: Box::new(x_type),
                     y_type: Box::new(y_type),
                 }.unflatten_list(x_is_list || y_is_list),
-            })
+            }
         }
         ExpressionKind::Point3 { x, y, z } => {
             let x = interpret_expression(context, next_local_id, local_context, x)?;
@@ -470,7 +493,7 @@ pub fn interpret_expression(
             let (y_is_list, y_type) = y.get_type().into_flatten_list();
             let (z_is_list, z_type) = z.get_type().into_flatten_list();
 
-            Ok(Value::Point3 {
+            ValueKind::Point3 {
                 x: Box::new(x),
                 y: Box::new(y),
                 z: Box::new(z),
@@ -479,7 +502,7 @@ pub fn interpret_expression(
                     y_type: Box::new(y_type),
                     z_type: Box::new(z_type),
                 }.unflatten_list(x_is_list || y_is_list || z_is_list),
-            })
+            }
         }
         ExpressionKind::List { items } => {
             let items: Vec<_> = items
@@ -489,45 +512,47 @@ pub fn interpret_expression(
 
             let item_type = items
                 .iter()
-                .try_fold(Type::Any, |current_type, item| current_type.merge(&item.get_type()))?;
+                .try_fold(Type::Any, |current_type, item| {
+                    current_type.merge(&item.get_type(), item.span)
+                })?;
 
-            Ok(Value::List {
+            ValueKind::List {
                 items: items
                     .into_iter()
                     .map(|item| item.coerce_to(&item_type, false))
                     .collect::<crate::Result<_>>()?,
                 item_type,
-            })
+            }
         }
         ExpressionKind::ListRange { kind, start, end, step } => {
             let start = interpret_expression(context, next_local_id, local_context, start)?;
             let end = interpret_expression(context, next_local_id, local_context, end)?;
             let step = match step {
                 Some(step) => interpret_expression(context, next_local_id, local_context, step)?,
-                None => Value::Int(1),
+                None => ValueKind::Int(1).into(),
             };
 
             let item_type = start.get_type()
-                .merge(&end.get_type())?
-                .merge(&step.get_type())?;
+                .merge(&end.get_type(), end.span)?
+                .merge(&step.get_type(), step.span)?;
 
-            Ok(Value::ListRange {
+            ValueKind::ListRange {
                 kind: *kind,
                 start: Box::new(start.coerce_to(&item_type, false)?),
                 end: Box::new(end.coerce_to(&item_type, false)?),
                 step: Box::new(step.coerce_to(&item_type, false)?),
                 item_type,
-            })
+            }
         }
         ExpressionKind::ListFill { value, count } => {
             let value = interpret_expression(context, next_local_id, local_context, value)?;
             let count = interpret_expression(context, next_local_id, local_context, count)?
                 .coerce_to(&Type::Int, false)?;
 
-            Ok(Value::ListFill {
+            ValueKind::ListFill {
                 value: Box::new(value),
                 count: Box::new(count),
-            })
+            }
         }
         ExpressionKind::ListMap { loops, expression: map_expression } => {
             let mut map_context = local_context.new_inner();
@@ -540,6 +565,7 @@ pub fn interpret_expression(
 
                     Ok(ValueListMapLoop {
                         local: map_context.add_local_variable(map_loop.identifier.clone(), next_local_id, item_type),
+                        local_span: Some(map_loop.identifier_span),
                         list,
                     })
                 })
@@ -547,10 +573,10 @@ pub fn interpret_expression(
 
             let value = interpret_expression(context, next_local_id, &map_context, map_expression)?;
 
-            Ok(Value::ListMap {
+            ValueKind::ListMap {
                 loops,
                 value: Box::new(value),
-            })
+            }
         }
         ExpressionKind::ListFilter { list, condition } => {
             let list = interpret_expression(context, next_local_id, local_context, list)?;
@@ -559,11 +585,11 @@ pub fn interpret_expression(
             let condition = interpret_expression(context, next_local_id, local_context, condition)?
                 .coerce_to(&Type::Bool, true)?;
 
-            Ok(Value::ListFilter {
+            ValueKind::ListFilter {
                 list: Box::new(list),
                 condition: Box::new(condition),
                 item_type,
-            })
+            }
         }
         ExpressionKind::Index { list, operation } => {
             let list = interpret_expression(context, next_local_id, local_context, list)?;
@@ -571,11 +597,11 @@ pub fn interpret_expression(
 
             let operation = interpret_index_operation(context, next_local_id, local_context, operation)?;
 
-            Ok(Value::Index {
+            ValueKind::Index {
                 list: Box::new(list),
                 operation,
                 item_type,
-            })
+            }
         }
         ExpressionKind::FunctionCall { function, arguments } => {
             let function_value = interpret_expression(context, next_local_id, local_context, function)?;
@@ -586,7 +612,7 @@ pub fn interpret_expression(
 
             match function_value.get_type() {
                 Type::IntrinsicFunction(function) => {
-                    function.interpret_call(context, arguments)
+                    function.interpret_call(context, arguments)?
                 }
                 Type::UserFunction { signature } => {
                     if arguments.len() != signature.parameter_types.len() {
@@ -604,24 +630,23 @@ pub fn interpret_expression(
                         .map(|(argument, parameter_type)| argument.coerce_to(parameter_type, true))
                         .collect::<crate::Result<_>>()?;
 
-                    Ok(Value::UserFunctionCall {
+                    ValueKind::UserFunctionCall {
                         function: Box::new(function_value),
                         arguments,
                         return_type: signature.return_type,
-                    })
+                    }
                 }
                 got_type => {
-                    Err(Box::new(crate::Error {
+                    return Err(Box::new(crate::Error {
                         kind: crate::ErrorKind::ExpectedFunctionType {
                             got_type: got_type.to_string(),
                         },
                         span: Some(function.span),
-                    }))
+                    }));
                 }
             }
         }
         ExpressionKind::Conditional { condition_consequents, alternative } => {
-            let mut result_is_list = false;
             let mut result_type = Type::Any;
 
             let condition_consequents: Box<[_]> = condition_consequents
@@ -629,10 +654,12 @@ pub fn interpret_expression(
                 .map(|(condition, consequent)| {
                     let condition = interpret_expression(context, next_local_id, local_context, condition)?
                         .coerce_to(&Type::Bool, true)?;
+                    if condition.get_type().is_list() && !result_type.is_list() {
+                        result_type = result_type.clone().into_list();
+                    }
+
                     let consequent = interpret_expression(context, next_local_id, local_context, consequent)?;
-                    let (consequent_is_list, consequent_type) = consequent.get_type().into_flatten_list();
-                    result_is_list |= condition.get_type().is_list() || consequent_is_list;
-                    result_type = result_type.merge(&consequent_type)?;
+                    result_type = result_type.merge(&consequent.get_type(), consequent.span)?;
 
                     Ok((condition, consequent))
                 })
@@ -640,29 +667,28 @@ pub fn interpret_expression(
 
             let alternative = alternative
                 .as_ref()
-                .map_or(Ok(Value::Undefined(result_type.clone())), |alternative| {
+                .map_or(Ok(ValueKind::Undefined(result_type.clone()).into()), |alternative| {
                     let alternative = interpret_expression(context, next_local_id, local_context, alternative)?;
-                    let (alternative_is_list, alternative_type) = alternative.get_type().into_flatten_list();
-                    result_is_list |= alternative_is_list;
-                    result_type = result_type.merge(&alternative_type)?;
+                    result_type = result_type.merge(&alternative.get_type(), alternative.span)?;
 
                     alternative.coerce_to(&result_type, true)
                 })?;
 
+            let result_inner_type = result_type.flatten_list().1;
             let condition_consequents = condition_consequents
                 .into_iter()
                 .map(|(condition, consequent)| {
-                    Ok((condition, consequent.coerce_to(&result_type, true)?))
+                    Ok((condition, consequent.coerce_to(result_inner_type, true)?))
                 })
                 .collect::<crate::Result<_>>()?;
 
-            Ok(Value::Conditional {
+            ValueKind::Conditional {
                 condition_consequents,
                 alternative: Box::new(alternative),
-                result_type: result_type.unflatten_list(result_is_list),
-            })
+                result_type,
+            }
         }
-        ExpressionKind::Let { identifier, value_type, value, expression } => {
+        ExpressionKind::Let { identifier, identifier_span, value_type, value, expression } => {
             let mut value = interpret_expression(context, next_local_id, local_context, value)?;
 
             let value_type = match value_type {
@@ -679,21 +705,27 @@ pub fn interpret_expression(
             let mut inner_context = local_context.new_inner();
             let local = inner_context.add_local_variable(identifier.clone(), next_local_id, value_type);
 
-            let inner = interpret_expression(context, next_local_id, local_context, expression)?;
+            let inner = interpret_expression(context, next_local_id, &inner_context, expression)?;
 
-            Ok(Value::Let {
+            ValueKind::Let {
                 local,
+                local_span: Some(*identifier_span),
                 value: Box::new(value),
                 inner: Box::new(inner),
-            })
+            }
         }
         _ => {
-            Err(Box::new(crate::Error {
+            return Err(Box::new(crate::Error {
                 kind: crate::ErrorKind::UnexpectedExpressionKind,
                 span: Some(expression.span),
-            }))
+            }));
         }
-    }
+    };
+
+    Ok(Value {
+        kind,
+        span: Some(expression.span),
+    })
 }
 
 pub fn interpret_unary_operation(
@@ -702,7 +734,7 @@ pub fn interpret_unary_operation(
     local_context: &LocalContext,
     operation: UnaryOperation,
     operand: &Expression,
-) -> crate::Result<Value> {
+) -> crate::Result<ValueKind> {
     let mut operand = interpret_expression(context, next_local_id, local_context, operand)?;
     let (is_list, mut operand_type) = operand.get_type().into_flatten_list();
 
@@ -717,7 +749,7 @@ pub fn interpret_unary_operation(
         }
     }
 
-    Ok(Value::Unary {
+    Ok(ValueKind::Unary {
         operation,
         operand: Box::new(operand),
         result_type: operand_type.unflatten_list(is_list),
@@ -731,7 +763,7 @@ pub fn interpret_binary_operation(
     operation: BinaryOperation,
     lhs: &Expression,
     rhs: &Expression,
-) -> crate::Result<Value> {
+) -> crate::Result<ValueKind> {
     if let BinaryOperation::MemberAccess = operation {
         return interpret_access_operation(context, next_local_id, local_context, lhs, rhs);
     }
@@ -751,7 +783,7 @@ pub fn interpret_binary_operation(
             // The result must be arithmetic and cannot be a point
             (lhs, lhs_type) = lhs.coerce_to_arithmetic(Type::require_numeric)?;
             (rhs, rhs_type) = rhs.coerce_to_arithmetic(Type::require_numeric)?;
-            Type::merge(&lhs_type, &rhs_type)?
+            Type::merge(&lhs_type, &rhs_type, rhs.span)?
         }
         BinaryOperation::Multiply => {
             // The result must be arithmetic, but at most one operand may be a point
@@ -760,13 +792,13 @@ pub fn interpret_binary_operation(
                 (rhs, rhs_type) = rhs.coerce_to_arithmetic(Type::require_numeric)?;
                 match &lhs_type {
                     Type::Point2 { x_type, y_type } => Type::Point2 {
-                        x_type: Box::new(x_type.merge(&rhs_type)?),
-                        y_type: Box::new(y_type.merge(&rhs_type)?),
+                        x_type: Box::new(x_type.merge(&rhs_type, rhs.span)?),
+                        y_type: Box::new(y_type.merge(&rhs_type, rhs.span)?),
                     },
                     Type::Point3 { x_type, y_type, z_type } => Type::Point3 {
-                        x_type: Box::new(x_type.merge(&rhs_type)?),
-                        y_type: Box::new(y_type.merge(&rhs_type)?),
-                        z_type: Box::new(z_type.merge(&rhs_type)?),
+                        x_type: Box::new(x_type.merge(&rhs_type, rhs.span)?),
+                        y_type: Box::new(y_type.merge(&rhs_type, rhs.span)?),
+                        z_type: Box::new(z_type.merge(&rhs_type, rhs.span)?),
                     },
                     _ => unreachable!()
                 }
@@ -775,21 +807,21 @@ pub fn interpret_binary_operation(
                 (rhs, rhs_type) = rhs.coerce_to_arithmetic(Type::require_numeric_or_point)?;
                 match &rhs_type {
                     Type::Point2 { x_type, y_type } => Type::Point2 {
-                        x_type: Box::new(x_type.merge(&lhs_type)?),
-                        y_type: Box::new(y_type.merge(&lhs_type)?),
+                        x_type: Box::new(x_type.merge(&lhs_type, lhs.span)?),
+                        y_type: Box::new(y_type.merge(&lhs_type, lhs.span)?),
                     },
                     Type::Point3 { x_type, y_type, z_type } => Type::Point3 {
-                        x_type: Box::new(x_type.merge(&lhs_type)?),
-                        y_type: Box::new(y_type.merge(&lhs_type)?),
-                        z_type: Box::new(z_type.merge(&lhs_type)?),
+                        x_type: Box::new(x_type.merge(&lhs_type, lhs.span)?),
+                        y_type: Box::new(y_type.merge(&lhs_type, lhs.span)?),
+                        z_type: Box::new(z_type.merge(&lhs_type, lhs.span)?),
                     },
-                    _ => Type::merge(&lhs_type, &rhs_type)?
+                    _ => Type::merge(&lhs_type, &rhs_type, rhs.span)?
                 }
             }
         }
         BinaryOperation::Divide => {
             // The result is always assumed to be real, but lhs may be a point
-            let result_type = match &lhs_type {
+            let result_type = match lhs_type.flatten_list().1 {
                 Type::Point2 { .. } => Type::Point2 {
                     x_type: Box::new(Type::Real),
                     y_type: Box::new(Type::Real),
@@ -810,20 +842,20 @@ pub fn interpret_binary_operation(
             // The result must be arithmetic, but may be a point
             (lhs, lhs_type) = lhs.coerce_to_arithmetic(Type::require_numeric_or_point)?;
             (rhs, rhs_type) = rhs.coerce_to_arithmetic(Type::require_numeric_or_point)?;
-            Type::merge(&lhs_type, &rhs_type)?
+            Type::merge(&lhs_type, &rhs_type, rhs.span)?
         }
         BinaryOperation::LessThan |
         BinaryOperation::LessEqual |
         BinaryOperation::GreaterThan |
         BinaryOperation::GreaterEqual => {
             // The operands must merge into a numeric type, but the result is always a bool
-            Type::merge(&lhs_type, &rhs_type)?.require_numeric()?;
+            Type::merge(&lhs_type, &rhs_type, rhs.span)?.require_numeric()?;
             Type::Bool
         }
         BinaryOperation::Equal |
         BinaryOperation::NotEqual => {
             // The operands must merge into a numeric or point type, but the result is always a bool
-            Type::merge(&lhs_type, &rhs_type)?.require_numeric_or_point()?;
+            Type::merge(&lhs_type, &rhs_type, rhs.span)?.require_numeric_or_point()?;
             Type::Bool
         }
         BinaryOperation::LogicalAnd |
@@ -834,7 +866,7 @@ pub fn interpret_binary_operation(
         }
     };
 
-    Ok(Value::Binary {
+    Ok(ValueKind::Binary {
         operation,
         lhs: Box::new(lhs),
         rhs: Box::new(rhs),
@@ -848,7 +880,7 @@ fn interpret_access_operation(
     local_context: &LocalContext,
     lhs: &Expression,
     rhs: &Expression,
-) -> crate::Result<Value> {
+) -> crate::Result<ValueKind> {
     let lhs = interpret_expression(context, next_local_id, local_context, lhs)?;
     let (lhs_is_list, lhs_type) = lhs.get_type().into_flatten_list();
 
@@ -890,7 +922,7 @@ fn interpret_access_operation(
                             span: Some(rhs.span),
                         }))?;
 
-                    Ok(Value::EnumVariant {
+                    Ok(ValueKind::EnumVariant {
                         type_identifier: identifier.clone(),
                         variant_ordinal: ordinal as i64,
                     })
@@ -899,11 +931,11 @@ fn interpret_access_operation(
         }
         Type::Point2 { x_type, y_type } => {
             match member_identifier.as_ref() {
-                "x" => Ok(Value::GetX {
+                "x" => Ok(ValueKind::GetX {
                     point: Box::new(lhs),
                     x_type: x_type.as_ref().clone().unflatten_list(lhs_is_list),
                 }),
-                "y" => Ok(Value::GetY {
+                "y" => Ok(ValueKind::GetY {
                     point: Box::new(lhs),
                     y_type: y_type.as_ref().clone().unflatten_list(lhs_is_list),
                 }),
@@ -912,15 +944,15 @@ fn interpret_access_operation(
         }
         Type::Point3 { x_type, y_type, z_type } => {
             match member_identifier.as_ref() {
-                "x" => Ok(Value::GetX {
+                "x" => Ok(ValueKind::GetX {
                     point: Box::new(lhs),
                     x_type: x_type.as_ref().clone().unflatten_list(lhs_is_list),
                 }),
-                "y" => Ok(Value::GetY {
+                "y" => Ok(ValueKind::GetY {
                     point: Box::new(lhs),
                     y_type: y_type.as_ref().clone().unflatten_list(lhs_is_list),
                 }),
-                "z" => Ok(Value::GetZ {
+                "z" => Ok(ValueKind::GetZ {
                     point: Box::new(lhs),
                     z_type: z_type.as_ref().clone().unflatten_list(lhs_is_list),
                 }),
@@ -954,7 +986,7 @@ pub fn interpret_index_operation(
             let step = match step {
                 Some(step) => interpret_expression(context, next_local_id, local_context, step)?
                     .coerce_to(&Type::Int, false)?,
-                None => Value::Int(1),
+                None => ValueKind::Int(1).into(),
             };
 
             Ok(ValueIndexOperation::Range {
@@ -970,7 +1002,7 @@ pub fn interpret_index_operation(
             let step = match step {
                 Some(step) => interpret_expression(context, next_local_id, local_context, step)?
                     .coerce_to(&Type::Int, false)?,
-                None => Value::Int(1),
+                None => ValueKind::Int(1).into(),
             };
 
             Ok(ValueIndexOperation::RangeFrom {

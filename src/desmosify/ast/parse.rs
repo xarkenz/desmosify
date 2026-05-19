@@ -67,10 +67,10 @@ impl<'a, T: BufRead> Parser<'a, T> {
             }))
     }
 
-    pub fn expect_identifier(&self) -> crate::Result<Rc<str>> {
+    pub fn expect_identifier(&self) -> crate::Result<(Rc<str>, crate::Span)> {
         let token = self.get_token()?;
         match &token.kind {
-            TokenKind::Literal(Literal::Identifier(identifier)) => Ok(identifier.clone()),
+            TokenKind::Literal(Literal::Identifier(identifier)) => Ok((identifier.clone(), token.span)),
             _ => Err(Box::new(crate::Error {
                 kind: crate::ErrorKind::ExpectedIdentifier,
                 span: Some(token.span),
@@ -78,12 +78,12 @@ impl<'a, T: BufRead> Parser<'a, T> {
         }
     }
 
-    pub fn expect_identifier_or_keyword(&self) -> crate::Result<Rc<str>> {
+    pub fn expect_identifier_or_keyword(&self) -> crate::Result<(Rc<str>, crate::Span)> {
         let token = self.get_token()?;
         match &token.kind {
-            TokenKind::Literal(Literal::Identifier(identifier)) => Ok(identifier.clone()),
+            TokenKind::Literal(Literal::Identifier(identifier)) => Ok((identifier.clone(), token.span)),
             _ => match token.kind.get_keyword_literal() {
-                Some(literal) => Ok(literal.into()),
+                Some(literal) => Ok((literal.into(), token.span)),
                 None => Err(Box::new(crate::Error {
                     kind: crate::ErrorKind::ExpectedIdentifier,
                     span: Some(token.span),
@@ -92,10 +92,10 @@ impl<'a, T: BufRead> Parser<'a, T> {
         }
     }
 
-    pub fn expect_string(&self) -> crate::Result<&Rc<str>> {
+    pub fn expect_string(&self) -> crate::Result<(Rc<str>, crate::Span)> {
         let token = self.get_token()?;
         match &token.kind {
-            TokenKind::Literal(Literal::String(string)) => Ok(string),
+            TokenKind::Literal(Literal::String(string)) => Ok((string.clone(), token.span)),
             _ => Err(Box::new(crate::Error {
                 kind: crate::ErrorKind::ExpectedString,
                 span: Some(token.span),
@@ -212,7 +212,7 @@ impl<'a, T: BufRead> Parser<'a, T> {
                 }
                 TokenKind::AtSign => {
                     self.consume_token()?; // AtSign
-                    let identifier = self.expect_identifier_or_keyword()?;
+                    let (identifier, _) = self.expect_identifier_or_keyword()?;
 
                     ExpressionKind::Intrinsic(identifier)
                 }
@@ -337,7 +337,7 @@ impl<'a, T: BufRead> Parser<'a, T> {
 
                                 while !matches!(self.current_token_kind(), Some(TokenKind::SquareRight)) {
                                     self.consume_token()?; // For
-                                    let identifier = self.expect_identifier()?;
+                                    let (identifier, identifier_span) = self.expect_identifier()?;
                                     self.consume_token()?; // Literal(Identifier)
                                     self.expect_token_from(&[TokenKind::In])?;
                                     self.consume_token()?; // In
@@ -345,6 +345,7 @@ impl<'a, T: BufRead> Parser<'a, T> {
 
                                     loops.push(ExpressionListMapLoop {
                                         identifier,
+                                        identifier_span,
                                         list,
                                     });
                                 }
@@ -406,7 +407,7 @@ impl<'a, T: BufRead> Parser<'a, T> {
                 TokenKind::Let => {
                     // Let expression
                     self.consume_token()?; // Let
-                    let identifier = self.expect_identifier()?;
+                    let (identifier, identifier_span) = self.expect_identifier()?;
                     self.consume_token()?; // Literal(Identifier)
                     let token = self.expect_token_from(&[TokenKind::Colon, TokenKind::Equal])?;
 
@@ -426,6 +427,7 @@ impl<'a, T: BufRead> Parser<'a, T> {
                         span: start_span.expand_to(expression.span),
                         kind: ExpressionKind::Let {
                             identifier,
+                            identifier_span,
                             value_type: value_type.map(Box::new),
                             value: Box::new(value),
                             expression: Box::new(expression),
@@ -675,7 +677,7 @@ impl<'a, T: BufRead> Parser<'a, T> {
             }
             TokenKind::Action => {
                 self.consume_token()?; // Action
-                let identifier = self.expect_identifier()?;
+                let (identifier, identifier_span) = self.expect_identifier()?;
                 self.consume_token()?; // Literal(Identifier)
                 self.expect_token_from(&[TokenKind::ParenLeft])?;
                 self.consume_token()?; // ParenLeft
@@ -683,6 +685,7 @@ impl<'a, T: BufRead> Parser<'a, T> {
 
                 ActionExpressionKind::ActionCall {
                     identifier,
+                    identifier_span,
                     arguments,
                 }
             }
@@ -772,12 +775,16 @@ impl<'a, T: BufRead> Parser<'a, T> {
         let mut parameters = Vec::new();
 
         while !matches!(self.current_token_kind(), Some(TokenKind::ParenRight)) {
-            let identifier = self.expect_identifier()?;
+            let (identifier, identifier_span) = self.expect_identifier()?;
             self.consume_token()?; // Literal(Identifier)
             self.expect_token_from(&[TokenKind::Colon])?;
             self.consume_token()?; // Colon
-            let param_type = self.parse_type(&[TokenKind::Comma, TokenKind::ParenRight])?;
-            parameters.push((identifier, param_type));
+            let parameter_type = self.parse_type(&[TokenKind::Comma, TokenKind::ParenRight])?;
+            parameters.push(Parameter {
+                identifier,
+                identifier_span,
+                parameter_type,
+            });
 
             if let Some(TokenKind::Comma) = self.current_token_kind() {
                 self.consume_token()?; // Comma
@@ -807,8 +814,7 @@ impl<'a, T: BufRead> Parser<'a, T> {
             TokenKind::Let => {
                 self.consume_token()?; // Let
 
-                let identifier = self.expect_identifier()?;
-                let span = start_span.expand_to(self.current_span());
+                let (identifier, identifier_span) = self.expect_identifier()?;
                 self.consume_token()?; // Literal(Identifier)
 
                 let mut parameters = None;
@@ -832,7 +838,7 @@ impl<'a, T: BufRead> Parser<'a, T> {
                         value_type: Box::new(value_type),
                         value: Box::new(value),
                     }),
-                    span,
+                    span: start_span.expand_to(identifier_span),
                 })))
             }
             TokenKind::Var => {
@@ -847,8 +853,7 @@ impl<'a, T: BufRead> Parser<'a, T> {
                     }
                 };
 
-                let identifier = self.expect_identifier()?;
-                let span = start_span.expand_to(self.current_span());
+                let (identifier, identifier_span) = self.expect_identifier()?;
                 self.consume_token()?; // Literal(Identifier)
 
                 self.expect_token_from(&[TokenKind::Colon])?;
@@ -865,14 +870,13 @@ impl<'a, T: BufRead> Parser<'a, T> {
                         value_type: Box::new(value_type),
                         value: Box::new(value),
                     }),
-                    span,
+                    span: start_span.expand_to(identifier_span),
                 })))
             }
             TokenKind::Action => {
                 self.consume_token()?; // Action
 
-                let identifier = self.expect_identifier()?;
-                let span = start_span.expand_to(self.current_span());
+                let (identifier, identifier_span) = self.expect_identifier()?;
                 self.consume_token()?; // Literal(Identifier)
 
                 self.expect_token_from(&[TokenKind::ParenLeft])?;
@@ -889,13 +893,13 @@ impl<'a, T: BufRead> Parser<'a, T> {
                         parameters,
                         action: Box::new(action),
                     }),
-                    span,
+                    span: start_span.expand_to(identifier_span),
                 })))
             }
             TokenKind::Enum => {
                 self.consume_token()?; // Enum
 
-                let identifier = self.expect_identifier()?;
+                let (identifier, identifier_span) = self.expect_identifier()?;
                 let span = start_span.expand_to(self.current_span());
                 self.consume_token()?; // Literal(Identifier)
 
@@ -904,11 +908,12 @@ impl<'a, T: BufRead> Parser<'a, T> {
                 let mut variants = Vec::new();
 
                 while !matches!(self.current_token_kind(), Some(TokenKind::CurlyRight)) {
-                    let identifier = self.expect_identifier()?;
+                    let (identifier, identifier_span) = self.expect_identifier()?;
                     self.consume_token()?; // Literal(Identifier)
                     let token = self.expect_token_from(&[TokenKind::Comma, TokenKind::CurlyRight])?;
                     variants.push(EnumerationVariant {
                         identifier,
+                        identifier_span,
                     });
 
                     if let TokenKind::Comma = token.kind {
@@ -1007,8 +1012,7 @@ impl<'a, T: BufRead> Parser<'a, T> {
                         self.consume_token()?; // Colon
 
                         while !matches!(self.current_token_kind(), Some(TokenKind::Semicolon | TokenKind::CurlyRight)) {
-                            let attribute_key = self.expect_identifier()?;
-                            let attribute_span = self.current_span();
+                            let (attribute_key, attribute_key_span) = self.expect_identifier()?;
                             self.consume_token()?; // Literal(Identifier)
 
                             let token = self.expect_token_from(&[TokenKind::ParenLeft, TokenKind::CurlyLeft])?;
@@ -1037,8 +1041,8 @@ impl<'a, T: BufRead> Parser<'a, T> {
 
                             attributes.push(DisplayAttribute {
                                 key: attribute_key,
+                                key_span: attribute_key_span,
                                 value: attribute_value,
-                                span: attribute_span,
                             })
                         }
                     }

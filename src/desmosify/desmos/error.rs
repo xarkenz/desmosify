@@ -16,6 +16,7 @@ impl std::fmt::Display for DesmosErrorKind {
 #[derive(Debug)]
 pub struct DesmosError {
     pub kind: DesmosErrorKind,
+    pub span: Option<crate::Span>,
 }
 
 pub type DesmosResult<T> = Result<T, Box<DesmosError>>;
@@ -27,3 +28,9 @@ impl std::fmt::Display for DesmosError {
 }
 
 impl std::error::Error for DesmosError {}
+
+impl crate::TargetError for DesmosError {
+    fn span(&self) -> Option<crate::Span> {
+        self.span
+    }
+}

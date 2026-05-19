@@ -3,9 +3,9 @@ use crate::desmos::{GraphBinaryKind, GraphExpressionEntry, GraphFolderEntry, Gra
 use crate::desmos::error::{DesmosError, DesmosErrorKind, DesmosResult};
 use crate::desmos::symbol::SymbolTable;
 use crate::sema::{Program, ProgramAction, ProgramDisplayElement, ProgramLet, ProgramPublicLine, ProgramTicker, ProgramVariable};
-use crate::sema::intrinsic::{IntrinsicBinaryKind, IntrinsicDoubleReducerKind, IntrinsicParameterizedReducerKind, IntrinsicReducerKind, IntrinsicUnaryKind, IntrinsicValue};
+use crate::sema::intrinsic::{IntrinsicBinaryKind, IntrinsicColorKind, IntrinsicDoubleReducerKind, IntrinsicParameterizedReducerKind, IntrinsicReducerKind, IntrinsicUnaryKind, IntrinsicValue};
 use crate::sema::types::Type;
-use crate::sema::values::{ActionValue, MathematicalConstant, Value, ValueIndexOperation};
+use crate::sema::values::{ActionValue, ActionValueKind, MathematicalConstant, Value, ValueIndexOperation, ValueKind};
 
 mod geometry;
 mod graphing;
@@ -349,8 +349,13 @@ impl GraphExpressionListBuilder {
     }
 
     pub fn translate_value(&mut self, value: &Value) -> DesmosResult<GraphExpression> {
-        match value {
-            Value::Undefined(value_type) => {
+        let unsupported_error = || Box::new(DesmosError {
+            kind: DesmosErrorKind::UnsupportedValue,
+            span: value.span,
+        });
+
+        match &value.kind {
+            ValueKind::Undefined(value_type) => {
                 let undefined_scalar = GraphExpression::Binary {
                     kind: GraphBinaryKind::Fraction,
                     lhs: Box::new(GraphExpression::Integer(0)),
@@ -379,10 +384,10 @@ impl GraphExpressionListBuilder {
                     _ => Ok(undefined_scalar)
                 }
             }
-            Value::Real(value) => {
+            ValueKind::Real(value) => {
                 Ok(GraphExpression::Decimal(*value))
             }
-            Value::Mathematical { kind, coefficient } => {
+            ValueKind::Mathematical { kind, coefficient } => {
                 Ok(GraphExpression::Binary {
                     kind: GraphBinaryKind::ImplicitMultiply,
                     lhs: Box::new(GraphExpression::Decimal(*coefficient)),
@@ -393,31 +398,31 @@ impl GraphExpressionListBuilder {
                     }),
                 })
             }
-            Value::Int(value) => {
+            ValueKind::Int(value) => {
                 Ok(GraphExpression::Integer(*value))
             }
-            Value::Bool(value) => {
+            ValueKind::Bool(value) => {
                 Ok(GraphExpression::Integer(*value as i64))
             }
-            Value::EnumVariant { variant_ordinal, .. } => {
+            ValueKind::EnumVariant { variant_ordinal, .. } => {
                 Ok(GraphExpression::Integer(*variant_ordinal))
             }
-            Value::Intrinsic(value) => {
+            ValueKind::Intrinsic(value) => {
                 self.translate_intrinsic_value(value)
             }
-            Value::Global(reference) => {
+            ValueKind::Global(reference) => {
                 Ok(self.get_global_symbol(&reference.identifier))
             }
-            Value::Local(reference) => {
+            ValueKind::Local(reference) => {
                 Ok(self.get_local_symbol(reference.id))
             }
-            Value::Unary { operation, operand, .. } => {
+            ValueKind::Unary { operation, operand, .. } => {
                 self.translate_unary(*operation, operand)
             }
-            Value::Binary { operation, lhs, rhs, .. } => {
-                self.translate_binary(*operation, lhs, rhs)
+            ValueKind::Binary { operation, lhs, rhs, .. } => {
+                self.translate_binary(*operation, lhs, rhs, unsupported_error)
             }
-            Value::Point2 { x, y, .. } => {
+            ValueKind::Point2 { x, y, .. } => {
                 Ok(GraphExpression::Unary {
                     kind: GraphUnaryKind::Parentheses,
                     inner: Box::new(GraphExpression::Sequence {
@@ -428,7 +433,7 @@ impl GraphExpressionListBuilder {
                     }),
                 })
             }
-            Value::Point3 { x, y, z, .. } => {
+            ValueKind::Point3 { x, y, z, .. } => {
                 Ok(GraphExpression::Unary {
                     kind: GraphUnaryKind::Parentheses,
                     inner: Box::new(GraphExpression::Sequence {
@@ -440,28 +445,28 @@ impl GraphExpressionListBuilder {
                     }),
                 })
             }
-            Value::GetX { point, .. } => {
+            ValueKind::GetX { point, .. } => {
                 Ok(GraphExpression::Binary {
                     kind: GraphBinaryKind::Dot,
                     lhs: Box::new(self.translate_value(point)?),
                     rhs: Box::new(GraphExpression::Letter('x')),
                 })
             }
-            Value::GetY { point, .. } => {
+            ValueKind::GetY { point, .. } => {
                 Ok(GraphExpression::Binary {
                     kind: GraphBinaryKind::Dot,
                     lhs: Box::new(self.translate_value(point)?),
                     rhs: Box::new(GraphExpression::Letter('y')),
                 })
             }
-            Value::GetZ { point, .. } => {
+            ValueKind::GetZ { point, .. } => {
                 Ok(GraphExpression::Binary {
                     kind: GraphBinaryKind::Dot,
                     lhs: Box::new(self.translate_value(point)?),
                     rhs: Box::new(GraphExpression::Letter('z')),
                 })
             }
-            Value::List { items, .. } => {
+            ValueKind::List { items, .. } => {
                 Ok(GraphExpression::Unary {
                     kind: GraphUnaryKind::List,
                     inner: Box::new(GraphExpression::Sequence {
@@ -472,7 +477,7 @@ impl GraphExpressionListBuilder {
                     }),
                 })
             }
-            Value::ListRange { kind, start, end, step, .. } => {
+            ValueKind::ListRange { kind, start, end, step, .. } => {
                 Ok(GraphExpression::Binary {
                     kind: GraphBinaryKind::Call,
                     lhs: Box::new(match kind {
@@ -488,7 +493,7 @@ impl GraphExpressionListBuilder {
                     }),
                 })
             }
-            Value::ListFill { value, count } => {
+            ValueKind::ListFill { value, count } => {
                 Ok(GraphExpression::Binary {
                     kind: GraphBinaryKind::Call,
                     lhs: Box::new(GraphExpression::OperatorName("repeat".into())),
@@ -500,7 +505,7 @@ impl GraphExpressionListBuilder {
                     }),
                 })
             }
-            Value::ListMap { loops, value } => {
+            ValueKind::ListMap { loops, value } => {
                 Ok(GraphExpression::Unary {
                     kind: GraphUnaryKind::List,
                     inner: Box::new(GraphExpression::Binary {
@@ -520,14 +525,14 @@ impl GraphExpressionListBuilder {
                     }),
                 })
             }
-            Value::ListFilter { list, condition, .. } => {
+            ValueKind::ListFilter { list, condition, .. } => {
                 Ok(GraphExpression::Binary {
                     kind: GraphBinaryKind::Index,
                     lhs: Box::new(self.translate_value(list)?),
                     rhs: Box::new(self.translate_value(condition)?),
                 })
             }
-            Value::Index { list, operation, .. } => match operation {
+            ValueKind::Index { list, operation, .. } => match operation {
                 ValueIndexOperation::Single { index } => {
                     Ok(GraphExpression::Binary {
                         kind: GraphBinaryKind::Index,
@@ -545,7 +550,7 @@ impl GraphExpressionListBuilder {
                     todo!()
                 }
             }
-            Value::Conditional { condition_consequents, alternative, .. } => {
+            ValueKind::Conditional { condition_consequents, alternative, .. } => {
                 Ok(GraphExpression::Unary {
                     kind: GraphUnaryKind::Piecewise,
                     inner: Box::new(GraphExpression::Sequence {
@@ -566,7 +571,7 @@ impl GraphExpressionListBuilder {
                     }),
                 })
             }
-            Value::UserFunctionCall { function, arguments, .. } => {
+            ValueKind::UserFunctionCall { function, arguments, .. } => {
                 Ok(GraphExpression::Binary {
                     kind: GraphBinaryKind::Call,
                     lhs: Box::new(self.translate_value(function)?),
@@ -578,7 +583,7 @@ impl GraphExpressionListBuilder {
                     }),
                 })
             }
-            Value::Let { local, value, inner } => {
+            ValueKind::Let { local, value, inner, .. } => {
                 Ok(GraphExpression::Binary {
                     kind: GraphBinaryKind::With,
                     lhs: Box::new(self.translate_value(inner)?),
@@ -590,9 +595,7 @@ impl GraphExpressionListBuilder {
                 })
             }
             _ => {
-                Err(Box::new(DesmosError {
-                    kind: DesmosErrorKind::UnsupportedValue,
-                }))
+                Err(unsupported_error())
             }
         }
     }
@@ -635,7 +638,13 @@ impl GraphExpressionListBuilder {
         }
     }
 
-    pub fn translate_binary(&mut self, operation: BinaryOperation, lhs: &Value, rhs: &Value) -> DesmosResult<GraphExpression> {
+    pub fn translate_binary(
+        &mut self,
+        operation: BinaryOperation,
+        lhs: &Value,
+        rhs: &Value,
+        unsupported_error: impl Fn() -> Box<DesmosError>,
+    ) -> DesmosResult<GraphExpression> {
         match operation {
             BinaryOperation::Exponent => {
                 Ok(GraphExpression::Unary {
@@ -824,23 +833,21 @@ impl GraphExpressionListBuilder {
                 })
             }
             _ => {
-                Err(Box::new(DesmosError {
-                    kind: DesmosErrorKind::UnsupportedValue,
-                }))
+                Err(unsupported_error())
             }
         }
     }
 
     pub fn translate_condition(&mut self, value: &Value) -> DesmosResult<GraphExpression> {
-        match value {
-            Value::Binary { operation: BinaryOperation::Equal, lhs, rhs, .. } => {
+        match &value.kind {
+            ValueKind::Binary { operation: BinaryOperation::Equal, lhs, rhs, .. } => {
                 Ok(GraphExpression::Binary {
                     kind: GraphBinaryKind::Equal,
                     lhs: Box::new(self.translate_value(lhs)?),
                     rhs: Box::new(self.translate_value(rhs)?),
                 })
             }
-            Value::Binary { operation: BinaryOperation::NotEqual, lhs, rhs, .. } => {
+            ValueKind::Binary { operation: BinaryOperation::NotEqual, lhs, rhs, .. } => {
                 // If only Desmos had an operator for this... substitute with {lhs = rhs, 0} = 0
                 Ok(GraphExpression::Binary {
                     kind: GraphBinaryKind::Equal,
@@ -860,7 +867,7 @@ impl GraphExpressionListBuilder {
                     rhs: Box::new(GraphExpression::Integer(0)),
                 })
             }
-            Value::Binary { operation: BinaryOperation::LessThan, lhs, rhs, .. } => {
+            ValueKind::Binary { operation: BinaryOperation::LessThan, lhs, rhs, .. } => {
                 Ok(GraphExpression::InequalityChain {
                     first_kind: GraphInequalityKind::LessThan,
                     lhs: Box::new(self.translate_value(lhs)?),
@@ -868,7 +875,7 @@ impl GraphExpressionListBuilder {
                     chain: Vec::new(),
                 })
             }
-            Value::Binary { operation: BinaryOperation::GreaterThan, lhs, rhs, .. } => {
+            ValueKind::Binary { operation: BinaryOperation::GreaterThan, lhs, rhs, .. } => {
                 Ok(GraphExpression::InequalityChain {
                     first_kind: GraphInequalityKind::GreaterThan,
                     lhs: Box::new(self.translate_value(lhs)?),
@@ -876,7 +883,7 @@ impl GraphExpressionListBuilder {
                     chain: Vec::new(),
                 })
             }
-            Value::Binary { operation: BinaryOperation::LessEqual, lhs, rhs, .. } => {
+            ValueKind::Binary { operation: BinaryOperation::LessEqual, lhs, rhs, .. } => {
                 Ok(GraphExpression::InequalityChain {
                     first_kind: GraphInequalityKind::LessEqual,
                     lhs: Box::new(self.translate_value(lhs)?),
@@ -884,7 +891,7 @@ impl GraphExpressionListBuilder {
                     chain: Vec::new(),
                 })
             }
-            Value::Binary { operation: BinaryOperation::GreaterEqual, lhs, rhs, .. } => {
+            ValueKind::Binary { operation: BinaryOperation::GreaterEqual, lhs, rhs, .. } => {
                 Ok(GraphExpression::InequalityChain {
                     first_kind: GraphInequalityKind::GreaterEqual,
                     lhs: Box::new(self.translate_value(lhs)?),
@@ -964,6 +971,15 @@ impl GraphExpressionListBuilder {
                 IntrinsicParameterizedReducerKind::Quartile => "quartile",
                 IntrinsicParameterizedReducerKind::Quantile => "quantile",
                 IntrinsicParameterizedReducerKind::Tscore => "tscore",
+            }
+        }
+        fn get_color_name(kind: &IntrinsicColorKind) -> &'static str {
+            match kind {
+                IntrinsicColorKind::Rgb => "rgb",
+                IntrinsicColorKind::Hsv => "hsv",
+                IntrinsicColorKind::Okhsv => "okhsv",
+                IntrinsicColorKind::Oklab => "oklab",
+                IntrinsicColorKind::Oklch => "oklch",
             }
         }
 
@@ -1052,6 +1068,46 @@ impl GraphExpressionListBuilder {
                     }),
                 })
             }
+            IntrinsicValue::Color { kind, value_1, value_2, value_3, .. } => {
+                let name = get_color_name(kind);
+
+                Ok(GraphExpression::Binary {
+                    kind: GraphBinaryKind::Call,
+                    lhs: Box::new(GraphExpression::OperatorName(name.into())),
+                    rhs: Box::new(GraphExpression::Sequence {
+                        elements: Vec::from([
+                            self.translate_value(value_1)?,
+                            self.translate_value(value_2)?,
+                            self.translate_value(value_3)?,
+                        ]),
+                    }),
+                })
+            }
+            IntrinsicValue::Segment { point_1, point_2, .. } => {
+                Ok(GraphExpression::Binary {
+                    kind: GraphBinaryKind::Call,
+                    lhs: Box::new(GraphExpression::OperatorName("segment".into())),
+                    rhs: Box::new(GraphExpression::Sequence {
+                        elements: Vec::from([
+                            self.translate_value(point_1)?,
+                            self.translate_value(point_2)?,
+                        ]),
+                    }),
+                })
+            }
+            IntrinsicValue::Rotate { object, point, angle, .. } => {
+                Ok(GraphExpression::Binary {
+                    kind: GraphBinaryKind::Call,
+                    lhs: Box::new(GraphExpression::OperatorName("rotate".into())),
+                    rhs: Box::new(GraphExpression::Sequence {
+                        elements: Vec::from([
+                            self.translate_value(object)?,
+                            self.translate_value(point)?,
+                            self.translate_value(angle)?,
+                        ]),
+                    }),
+                })
+            }
             IntrinsicValue::Join { arguments, .. } => {
                 Ok(GraphExpression::Binary {
                     kind: GraphBinaryKind::Call,
@@ -1090,8 +1146,8 @@ impl GraphExpressionListBuilder {
             });
         }
 
-        match action {
-            ActionValue::Disable => {
+        match &action.kind {
+            ActionValueKind::Disable => {
                 // Generate an expression like {0 = 1: unreachable -> 0} since the missing
                 // conditional default case is what causes the "disable" behavior.
                 Ok(GraphExpression::Unary {
@@ -1111,7 +1167,7 @@ impl GraphExpressionListBuilder {
                     }),
                 })
             }
-            ActionValue::Compound { actions } => match actions.as_ref() {
+            ActionValueKind::Compound { actions } => match actions.as_ref() {
                 [] => {
                     // This case was already handled above with the is_empty() check
                     unreachable!()
@@ -1131,14 +1187,14 @@ impl GraphExpressionListBuilder {
                     })
                 }
             }
-            ActionValue::Update { variable, value } => {
+            ActionValueKind::Update { variable, value, .. } => {
                 Ok(GraphExpression::Binary {
                     kind: GraphBinaryKind::RightArrow,
                     lhs: Box::new(self.get_global_symbol(&variable.identifier)),
                     rhs: Box::new(self.translate_value(value)?),
                 })
             }
-            ActionValue::ActionCall { identifier, arguments } => {
+            ActionValueKind::ActionCall { identifier, arguments, .. } => {
                 Ok(GraphExpression::Binary {
                     kind: GraphBinaryKind::Call,
                     lhs: Box::new(self.get_action_symbol(identifier)),
@@ -1150,7 +1206,7 @@ impl GraphExpressionListBuilder {
                     }),
                 })
             }
-            ActionValue::Conditional { condition_consequents, alternative } => {
+            ActionValueKind::Conditional { condition_consequents, alternative } => {
                 Ok(GraphExpression::Unary {
                     kind: GraphUnaryKind::Piecewise,
                     inner: Box::new(GraphExpression::Sequence {

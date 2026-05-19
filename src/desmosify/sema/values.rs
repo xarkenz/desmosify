@@ -55,11 +55,12 @@ impl ValueIndexOperation {
 #[derive(Clone, PartialEq, Debug)]
 pub struct ValueListMapLoop {
     pub local: LocalReference,
+    pub local_span: Option<crate::Span>,
     pub list: Value,
 }
 
 #[derive(Clone, PartialEq, Debug)]
-pub enum Value {
+pub enum ValueKind {
     Type {
         identifier: Rc<str>,
     },
@@ -155,12 +156,13 @@ pub enum Value {
     },
     Let {
         local: LocalReference,
+        local_span: Option<crate::Span>,
         value: Box<Value>,
         inner: Box<Value>,
     },
 }
 
-impl Value {
+impl ValueKind {
     pub fn get_type(&self) -> Type {
         match self {
             Self::Type { identifier } => {
@@ -278,7 +280,7 @@ impl Value {
         }
     }
 
-    pub fn coerce_to(self, target_type: &Type, allow_broadcast: bool) -> crate::Result<Self> {
+    pub fn coerce_to(self, target_type: &Type, allow_broadcast: bool, span: Option<crate::Span>) -> crate::Result<Self> {
         let self_type = self.get_type();
         let (self_is_list, self_type) = self_type.flatten_list();
         let (target_is_list, target_type) = target_type.flatten_list();
@@ -288,7 +290,7 @@ impl Value {
                 expected: target_type.clone().unflatten_list(target_is_list).to_string(),
                 got: self_type.clone().unflatten_list(self_is_list).to_string(),
             },
-            span: None,
+            span,
         });
 
         if self_is_list != target_is_list && !(allow_broadcast && self_is_list) {
@@ -327,14 +329,14 @@ impl Value {
         }
     }
 
-    pub fn coerce_to_arithmetic(mut self, constraint: fn(&Type) -> crate::Result<()>) -> crate::Result<(Self, Type)> {
+    pub fn coerce_to_arithmetic(mut self, constraint: fn(&Type) -> crate::Result<()>, span: Option<crate::Span>) -> crate::Result<(Self, Type)> {
         let (self_is_list, mut self_type) = self.get_type().into_flatten_list();
 
         constraint(&self_type)?;
 
         match &self_type {
             Type::Bool => {
-                self = self.coerce_to(&Type::Int, false)?;
+                self = self.coerce_to(&Type::Int, false, span)?;
                 self_type = Type::Int;
             }
             _ => {}
@@ -345,17 +347,69 @@ impl Value {
 }
 
 #[derive(Clone, Debug)]
-pub enum ActionValue {
+pub struct Value {
+    pub kind: ValueKind,
+    pub span: Option<crate::Span>,
+}
+
+impl Value {
+    pub fn get_type(&self) -> Type {
+        self.kind.get_type()
+    }
+
+    pub fn is_zero(&self) -> bool {
+        self.kind.is_zero()
+    }
+
+    pub fn is_one(&self) -> bool {
+        self.kind.is_one()
+    }
+
+    pub fn is_undefined(&self) -> bool {
+        self.kind.is_undefined()
+    }
+
+    pub fn coerce_to(mut self, target_type: &Type, allow_broadcast: bool) -> crate::Result<Self> {
+        self.kind = self.kind.coerce_to(target_type, allow_broadcast, self.span)?;
+        Ok(self)
+    }
+
+    pub fn coerce_to_arithmetic(mut self, constraint: fn(&Type) -> crate::Result<()>) -> crate::Result<(Self, Type)> {
+        let result_type;
+        (self.kind, result_type) = self.kind.coerce_to_arithmetic(constraint, self.span)?;
+        Ok((self, result_type))
+    }
+}
+
+impl PartialEq for Value {
+    fn eq(&self, other: &Self) -> bool {
+        self.kind == other.kind
+    }
+}
+
+impl From<ValueKind> for Value {
+    fn from(kind: ValueKind) -> Self {
+        Self {
+            kind,
+            span: None,
+        }
+    }
+}
+
+#[derive(Clone, Debug)]
+pub enum ActionValueKind {
     Disable,
     Compound {
         actions: Box<[ActionValue]>,
     },
     Update {
         variable: GlobalReference,
+        variable_span: Option<crate::Span>,
         value: Box<Value>,
     },
     ActionCall {
         identifier: Rc<str>,
+        identifier_span: Option<crate::Span>,
         arguments: Box<[Value]>,
     },
     Conditional {
@@ -364,7 +418,7 @@ pub enum ActionValue {
     },
 }
 
-impl ActionValue {
+impl ActionValueKind {
     pub fn empty() -> Self {
         Self::Compound {
             actions: Box::new([]),
@@ -373,27 +427,45 @@ impl ActionValue {
 
     pub fn is_empty(&self) -> bool {
         match self {
-            Self::Compound { actions } => actions.iter().all(Self::is_empty),
+            Self::Compound { actions } => actions.iter().all(ActionValue::is_empty),
             _ => false
         }
     }
 
+    pub fn with_span(self, span: Option<crate::Span>) -> ActionValue {
+        ActionValue {
+            kind: self,
+            span,
+        }
+    }
+}
+
+#[derive(Clone, Debug)]
+pub struct ActionValue {
+    pub kind: ActionValueKind,
+    pub span: Option<crate::Span>,
+}
+
+impl ActionValue {
+    pub fn is_empty(&self) -> bool {
+        self.kind.is_empty()
+    }
+
     pub fn merge(self, other: Self) -> Self {
-        Self::Compound {
-            actions: match (self, other) {
-                (Self::Compound { actions: self_actions }, Self::Compound { actions: other_actions }) => {
-                    self_actions.into_iter().chain(other_actions).collect()
-                }
-                (Self::Compound { actions }, other) => {
-                    actions.into_iter().chain(std::iter::once(other)).collect()
-                }
-                (self_, Self::Compound { actions }) => {
-                    std::iter::once(self_).chain(actions).collect()
-                }
-                (self_, other) => {
-                    Box::new([self_, other])
-                }
+        Self {
+            kind: ActionValueKind::Compound {
+                actions: Box::new([self, other]),
             },
+            span: None,
+        }
+    }
+}
+
+impl From<ActionValueKind> for ActionValue {
+    fn from(kind: ActionValueKind) -> Self {
+        Self {
+            kind,
+            span: None,
         }
     }
 }

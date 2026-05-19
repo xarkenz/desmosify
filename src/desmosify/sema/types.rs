@@ -202,7 +202,20 @@ impl Type {
         }
     }
 
-    pub fn merge(&self, other: &Self) -> crate::Result<Self> {
+    pub fn merge(&self, other: &Self, span: Option<crate::Span>) -> crate::Result<Self> {
+        let (self_is_list, self_inner) = self.flatten_list();
+        let (other_is_list, other_inner) = other.flatten_list();
+
+        let merged_inner = Self::merge_inner(self_inner, other_inner, span)?;
+
+        Ok(merged_inner.unflatten_list(self_is_list || other_is_list))
+    }
+
+    pub fn merge_inner(&self, other: &Self, span: Option<crate::Span>) -> crate::Result<Self> {
+        if self == other {
+            return Ok(self.clone());
+        }
+
         match (self, other) {
             (Self::Any, _) => Ok(other.clone()),
             (_, Self::Any) => Ok(self.clone()),
@@ -210,16 +223,16 @@ impl Type {
                 Self::Point2 { x_type: self_x, y_type: self_y },
                 Self::Point2 { x_type: other_x, y_type: other_y },
             ) => Ok(Self::Point2 {
-                x_type: Box::new(Self::merge(self_x, other_x)?),
-                y_type: Box::new(Self::merge(self_y, other_y)?),
+                x_type: Box::new(Self::merge(self_x, other_x, span)?),
+                y_type: Box::new(Self::merge(self_y, other_y, span)?),
             }),
             (
                 Self::Point3 { x_type: self_x, y_type: self_y, z_type: self_z },
                 Self::Point3 { x_type: other_x, y_type: other_y, z_type: other_z },
             ) => Ok(Self::Point3 {
-                x_type: Box::new(Self::merge(self_x, other_x)?),
-                y_type: Box::new(Self::merge(self_y, other_y)?),
-                z_type: Box::new(Self::merge(self_z, other_z)?),
+                x_type: Box::new(Self::merge(self_x, other_x, span)?),
+                y_type: Box::new(Self::merge(self_y, other_y, span)?),
+                z_type: Box::new(Self::merge(self_z, other_z, span)?),
             }),
             _ => {
                 if self.can_coerce_to(&Self::Int) && other.can_coerce_to(&Self::Int) {
@@ -240,7 +253,7 @@ impl Type {
                             type_1: self.to_string(),
                             type_2: other.to_string(),
                         },
-                        span: None,
+                        span,
                     }))
                 }
             }
@@ -249,24 +262,23 @@ impl Type {
 
     pub fn broadcast(
         result_override: Option<Self>,
-        arguments: impl IntoIterator<Item = Self>,
+        arguments: impl IntoIterator<Item = (Self, Option<crate::Span>)>,
     ) -> crate::Result<Self> {
         let mut arguments = arguments.into_iter();
-        let first_argument = arguments.next().unwrap().into_flatten_list();
+        let first_argument = arguments.next().unwrap().0;
 
-        let (is_list, mut result_type) = arguments.try_fold(
+        let mut result_type = arguments.try_fold(
             first_argument,
-            |(current_is_list, current), next| {
-                let (next_is_list, next) = next.into_flatten_list();
-                crate::Result::Ok((current_is_list || next_is_list, current.merge(&next)?))
+            |current_type, (next_type, span)| {
+                current_type.merge(&next_type, span)
             },
         )?;
 
         if let Some(result_override) = result_override {
-            result_type = result_override;
+            result_type = result_override.unflatten_list(result_type.is_list());
         }
 
-        Ok(result_type.unflatten_list(is_list))
+        Ok(result_type)
     }
 }
 

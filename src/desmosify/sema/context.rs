@@ -3,7 +3,7 @@ use std::rc::Rc;
 use crate::ast::{Declaration, Definition, DefinitionKind, DisplayDeclaration, PublicDeclaration, TickerDeclaration, TypeExpression, TypeExpressionKind, ValueDefinition};
 use crate::sema::intrinsic::get_core_intrinsics;
 use crate::sema::types::{Type, FunctionSignature};
-use crate::sema::values::{LocalReference, Value};
+use crate::sema::values::{LocalReference, ValueKind};
 
 #[derive(Clone, Debug)]
 pub struct TypedDefinition {
@@ -17,7 +17,7 @@ pub struct GlobalContext {
     definitions_order: Vec<Rc<str>>,
     action_definitions: HashMap<Rc<str>, TypedDefinition>,
     action_definitions_order: Vec<Rc<str>>,
-    intrinsics: HashMap<&'static str, Value>,
+    intrinsics: HashMap<&'static str, ValueKind>,
     ticker_declarations: Vec<TickerDeclaration>,
     public_declarations: Vec<PublicDeclaration>,
     display_declarations: Vec<DisplayDeclaration>,
@@ -74,7 +74,7 @@ impl GlobalContext {
                                 signature: Box::new(FunctionSignature {
                                     parameter_types: parameters.0
                                         .iter()
-                                        .map(|(_, parameter_type)| context.resolve_type(parameter_type))
+                                        .map(|parameter| context.resolve_type(&parameter.parameter_type))
                                         .collect::<crate::Result<_>>()?,
                                     return_type: value_type,
                                 }),
@@ -98,7 +98,7 @@ impl GlobalContext {
                         let value_type = Type::Action {
                             parameter_types: parameters.0
                                 .iter()
-                                .map(|(_, parameter_type)| context.resolve_type(parameter_type))
+                                .map(|parameter| context.resolve_type(&parameter.parameter_type))
                                 .collect::<crate::Result<_>>()?,
                         };
 
@@ -187,11 +187,11 @@ impl GlobalContext {
         self.action_definitions.get(identifier)
     }
 
-    pub fn intrinsics(&self) -> impl Iterator<Item = &Value> {
+    pub fn intrinsics(&self) -> impl Iterator<Item = &ValueKind> {
         self.intrinsics.values()
     }
 
-    pub fn find_intrinsic(&self, identifier: &str) -> Option<&Value> {
+    pub fn find_intrinsic(&self, identifier: &str) -> Option<&ValueKind> {
         self.intrinsics.get(identifier)
     }
 
@@ -285,8 +285,8 @@ impl GlobalContext {
 #[derive(Debug)]
 pub struct LocalContext<'a> {
     outer_context: Option<&'a Self>,
-    locals: HashMap<Rc<str>, Value>,
-    scoped_intrinsics: HashMap<&'static str, Value>,
+    locals: HashMap<Rc<str>, ValueKind>,
+    scoped_intrinsics: HashMap<&'static str, ValueKind>,
 }
 
 impl<'a> LocalContext<'a> {
@@ -306,7 +306,7 @@ impl<'a> LocalContext<'a> {
         }
     }
 
-    pub fn add_local(&mut self, identifier: Rc<str>, value: Value) {
+    pub fn add_local(&mut self, identifier: Rc<str>, value: ValueKind) {
         // TODO: prevent duplicate names?
         self.locals.insert(identifier, value);
     }
@@ -316,23 +316,23 @@ impl<'a> LocalContext<'a> {
             id: *next_local_id,
             value_type,
         };
-        self.add_local(identifier, Value::Local(local_reference.clone()));
+        self.add_local(identifier, ValueKind::Local(local_reference.clone()));
         *next_local_id += 1;
 
         local_reference
     }
 
-    pub fn find_local(&self, identifier: &str) -> Option<&Value> {
+    pub fn find_local(&self, identifier: &str) -> Option<&ValueKind> {
         self.locals.get(identifier).or_else(|| {
             self.outer_context.and_then(|context| context.find_local(identifier))
         })
     }
 
-    pub fn add_scoped_intrinsic(&mut self, identifier: &'static str, value: Value) {
+    pub fn add_scoped_intrinsic(&mut self, identifier: &'static str, value: ValueKind) {
         self.scoped_intrinsics.insert(identifier, value);
     }
 
-    pub fn find_scoped_intrinsic(&self, identifier: &str) -> Option<&Value> {
+    pub fn find_scoped_intrinsic(&self, identifier: &str) -> Option<&ValueKind> {
         self.scoped_intrinsics.get(identifier).or_else(|| {
             self.outer_context.and_then(|context| context.find_scoped_intrinsic(identifier))
         })

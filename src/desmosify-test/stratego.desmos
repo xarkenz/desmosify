@@ -137,13 +137,15 @@ let player_of(piece: Piece): Player = {
 
 let piece_type_of(piece: Piece): PieceType = {
     piece == Piece.NONE: PieceType.NONE,
-    (piece - 1) % 12 + 1
+    // FIXME: "as" for casting?
+    // (piece - 1) % 12 + 1
 };
 
 let is_piece_fixed(piece: Piece): bool = (
     piece == Piece.RED_FLAG || piece == Piece.RED_BOMB || piece == Piece.BLUE_FLAG || piece == Piece.BLUE_BOMB
 );
 
+// FIXME: specify in some way that this is broadcastable
 let offset_point_index(from_index: int, offset: (int, int)): int = {
     !is_point_outside(grid[from_index] + offset): from_index + GRID_SIZE * offset.y + offset.x,
     0
@@ -272,7 +274,7 @@ let grass_color: color = @hsv(70.0, 0.6, 0.8);
 let highlight_color: color = @hsv(50.0, 0.6, 1.0);
 let grid_color: color = @hsv(80.0, 0.6, 0.7);
 
-let board_color: color = [{
+let board_color: [color] = [{
     indices(grid) == selected_index: highlight_color,
     grass_color
 } where !is_point_outside(grid)];
@@ -322,6 +324,7 @@ let board_size: real = @min(width_units, height_units) - 2 * border_size;
 let space_size: real = board_size / GRID_SIZE;
 let piece_size_pixels: real = to_pixels(piece_size * space_size);
 
+// FIXME: specify in some way that this is broadcastable
 let transform(p: (real, real)): (real, real) = @rotate(
     board_size * ((p + (0.5, 0.5)) / GRID_SIZE - (0.5, 0.5)),
     (0, 0),
@@ -519,7 +522,7 @@ display {
     {mode == Mode.PLAY && player == Player.RED: (0, 0)}: color(red_color), label("Red's Turn", next_turn_message_opacity, 2.5);
     {mode == Mode.PLAY && player == Player.BLUE: (0, 0)}: color(blue_color), label("Blue's Turn", next_turn_message_opacity, 2.5);
     // TODO: template strings
-    {mode == Mode.SETUP: (0, 0)}: color(text_color), label("Run `A_{endTurn}` when finished.", turn_info_message_opacity, 2);
-    {mode == Mode.PLAY: (0, 0)}: color(text_color), label("Run `A_{startTurn}` to start your turn.", before_turn_message_opacity, 2);
-    {mode == Mode.PLAY: (0, 0)}: color(text_color), label("Run `A_{endTurn}` to end your turn.", turn_info_message_opacity, 2);
+    {mode == Mode.SETUP: (0, 0)}: color(text_color), label("Run `A_{EndTurn}` when finished.", turn_info_message_opacity, 2);
+    {mode == Mode.PLAY: (0, 0)}: color(text_color), label("Run `A_{StartTurn}` to start your turn.", before_turn_message_opacity, 2);
+    {mode == Mode.PLAY: (0, 0)}: color(text_color), label("Run `A_{EndTurn}` to end your turn.", turn_info_message_opacity, 2);
 }
