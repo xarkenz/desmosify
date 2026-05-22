@@ -1,24 +1,24 @@
 use crate::ast::{DefinitionKind, RangeKind, TypeDefinition};
 use crate::sema::context::GlobalContext;
-use crate::sema::types::Type;
+use crate::sema::types::{ListState, Type};
 use crate::sema::values::{MathematicalConstant, Value, ValueKind};
 
-#[derive(Clone, Debug)]
+#[derive(Clone)]
 pub struct IntrinsicFunction {
-    identifier: &'static str,
-    min_arity: usize,
-    max_arity: Option<usize>,
-    interpret_call: fn(context: &GlobalContext, arguments: Box<[Value]>) -> crate::Result<ValueKind>,
+    pub identifier: &'static str,
+    pub min_arity: usize,
+    pub max_arity: Option<usize>,
+    pub interpret_call: fn(context: &GlobalContext, arguments: Box<[Value]>) -> crate::Result<ValueKind>,
 }
 
 impl IntrinsicFunction {
-    pub fn interpret_call(&self, context: &GlobalContext, arguments: Box<[Value]>) -> crate::Result<ValueKind> {
-        self.check_arity(arguments.len())?;
+    pub fn interpret_call(&self, context: &GlobalContext, span: Option<crate::Span>, arguments: Box<[Value]>) -> crate::Result<ValueKind> {
+        self.check_arity(arguments.len(), span)?;
 
         (self.interpret_call)(context, arguments)
     }
 
-    pub fn check_arity(&self, argument_count: usize) -> crate::Result<()> {
+    pub fn check_arity(&self, argument_count: usize, span: Option<crate::Span>) -> crate::Result<()> {
         if let Some(max_arity) = self.max_arity {
             if (self.min_arity ..= max_arity).contains(&argument_count) {
                 Ok(())
@@ -31,7 +31,7 @@ impl IntrinsicFunction {
                         max: max_arity,
                         got: argument_count,
                     },
-                    span: None,
+                    span,
                 }))
             }
         }
@@ -45,7 +45,7 @@ impl IntrinsicFunction {
                     min: self.min_arity,
                     got: argument_count,
                 },
-                span: None,
+                span,
             }))
         }
     }
@@ -54,6 +54,12 @@ impl IntrinsicFunction {
 impl PartialEq for IntrinsicFunction {
     fn eq(&self, other: &Self) -> bool {
         self.identifier == other.identifier
+    }
+}
+
+impl std::fmt::Debug for IntrinsicFunction {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "IntrinsicFunction(@{})", self.identifier)
     }
 }
 
@@ -127,7 +133,7 @@ pub enum IntrinsicColorKind {
     Oklch,
 }
 
-#[derive(Clone, PartialEq, Debug)]
+#[derive(Clone, PartialEq)]
 pub enum IntrinsicValue {
     Unary {
         kind: IntrinsicUnaryKind,
@@ -167,12 +173,12 @@ pub enum IntrinsicValue {
         value_1: Value,
         value_2: Value,
         value_3: Value,
-        is_list: bool,
+        list_state: Option<ListState>,
     },
     Segment {
         point_1: Value,
         point_2: Value,
-        is_list: bool,
+        list_state: Option<ListState>,
     },
     Rotate {
         object: Value,
@@ -199,8 +205,8 @@ impl IntrinsicValue {
             Self::ArgumentsReducer { result_type, .. } => result_type.clone(),
             Self::DoubleReducer { result_type, .. } => result_type.clone(),
             Self::ParameterizedReducer { result_type, .. } => result_type.clone(),
-            Self::Color { is_list, .. } => Type::Color.unflatten_list(*is_list),
-            Self::Segment { is_list, .. } => Type::Segment.unflatten_list(*is_list),
+            Self::Color { list_state, .. } => Type::Color.unflatten_list(*list_state),
+            Self::Segment { list_state, .. } => Type::Segment.unflatten_list(*list_state),
             Self::Rotate { result_type, .. } => result_type.clone(),
             Self::Join { result_type, .. } => result_type.clone(),
             Self::Width |
@@ -214,6 +220,71 @@ impl IntrinsicValue {
 impl From<IntrinsicValue> for ValueKind {
     fn from(value: IntrinsicValue) -> Self {
         Self::Intrinsic(Box::new(value))
+    }
+}
+
+impl std::fmt::Debug for IntrinsicValue {
+    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+        match self {
+            IntrinsicValue::Unary { kind, argument, result_type } => {
+                write!(f, "{kind:?}<{result_type}>")?;
+                f.debug_tuple("").field(argument).finish()
+            }
+            IntrinsicValue::Binary { kind, lhs, rhs, result_type } => {
+                write!(f, "{kind:?}<{result_type}>")?;
+                f.debug_tuple("").field(lhs).field(rhs).finish()
+            }
+            IntrinsicValue::Reducer { kind, list, result_type } => {
+                write!(f, "{kind:?}<{result_type}>")?;
+                f.debug_tuple("").field(list).finish()
+            }
+            IntrinsicValue::ArgumentsReducer { kind, arguments, result_type } => {
+                write!(f, "{kind:?}<{result_type}>")?;
+                f.debug_tuple("").field(arguments).finish()
+            }
+            IntrinsicValue::DoubleReducer { kind, list_1, list_2, result_type } => {
+                write!(f, "{kind:?}<{result_type}>")?;
+                f.debug_tuple("").field(list_1).field(list_2).finish()
+            }
+            IntrinsicValue::ParameterizedReducer { kind, list, parameter, result_type } => {
+                write!(f, "{kind:?}<{result_type}>")?;
+                f.debug_tuple("").field(list).field(parameter).finish()
+            }
+            IntrinsicValue::Color { kind, value_1, value_2, value_3, list_state } => {
+                write!(f, "{kind:?}<{}>", Type::Color.unflatten_list(*list_state))?;
+                f.debug_tuple("").field(value_1).field(value_2).field(value_3).finish()
+            }
+            IntrinsicValue::Segment { point_1, point_2, list_state } => {
+                write!(f, "Segment<{}>", Type::Segment.unflatten_list(*list_state))?;
+                f.debug_tuple("").field(point_1).field(point_2).finish()
+            }
+            IntrinsicValue::Rotate { object, point, angle, result_type } => {
+                write!(f, "Rotate<{result_type}>")?;
+                f.debug_tuple("").field(object).field(point).field(angle).finish()
+            }
+            IntrinsicValue::Join { arguments, result_type } => {
+                write!(f, "Join<{result_type}>")?;
+                arguments
+                    .iter()
+                    .fold(
+                        &mut f.debug_tuple(""),
+                        |tuple, argument| tuple.field(argument),
+                    )
+                    .finish()
+            }
+            IntrinsicValue::Width => {
+                write!(f, "Width")
+            }
+            IntrinsicValue::Height => {
+                write!(f, "Height")
+            }
+            IntrinsicValue::Dt => {
+                write!(f, "Dt")
+            }
+            IntrinsicValue::Index => {
+                write!(f, "Index")
+            }
+        }
     }
 }
 
@@ -378,7 +449,8 @@ pub const CORE_INTRINSIC_FUNCTIONS: &[&IntrinsicFunction] = &[
     // &CONJ,
     // &ARG,
     // Desmosify
-    &ENUM_VARIANTS,
+    &ENUM_VALUES,
+    &ENUM_VALUE,
 ];
 
 pub fn interpret_trig_call(
@@ -386,7 +458,7 @@ pub fn interpret_trig_call(
     arguments: Box<[Value]>,
 ) -> crate::Result<ValueKind> {
     let argument = arguments.into_iter().next().unwrap();
-    let is_list = argument.get_type().is_list();
+    let is_list = argument.get_type().list_state();
 
     Ok(IntrinsicValue::Unary {
         kind,
@@ -416,15 +488,17 @@ pub fn interpret_reducer_call(
 ) -> crate::Result<ValueKind> {
     if let Some(argument_check) = argument_check {
         for argument in &arguments {
-            argument_check(argument.get_type().flatten_list().1)?;
+            argument_check(argument.get_type().flatten_list().1)
+                .map_err(|error| error.with_span(argument.span))?;
         }
     }
 
     if let [argument] = arguments.as_ref() {
-        let (is_list, argument_type) = argument.get_type().into_flatten_list();
+        let (list_state, argument_type) = argument.get_type().into_flatten_list();
         let result_type = result_override.unwrap_or(argument_type);
 
-        if is_list {
+        if list_state.is_some() {
+            // This should also work for any MaybeList
             Ok(IntrinsicValue::Reducer {
                 kind,
                 list: arguments.into_iter().next().unwrap(),
@@ -476,16 +550,20 @@ pub fn interpret_color_call(
         .coerce_to(&Type::Real, true)?;
     let value_3 = arguments.next().unwrap()
         .coerce_to(&Type::Real, true)?;
-    let is_list = value_1.get_type().is_list() ||
-        value_2.get_type().is_list() ||
-        value_3.get_type().is_list();
+    let list_state = ListState::merge(
+        ListState::merge(
+            value_1.get_type().list_state(),
+            value_2.get_type().list_state(),
+        ),
+        value_3.get_type().list_state(),
+    );
 
     Ok(IntrinsicValue::Color {
         kind,
         value_1,
         value_2,
         value_3,
-        is_list,
+        list_state,
     }.into())
 }
 
@@ -564,13 +642,14 @@ pub static JOIN: IntrinsicFunction = IntrinsicFunction {
         let item_type = arguments[1..].iter().try_fold(
             arguments[0].get_type().into_flatten_list().1,
             |current_type, argument| {
-                current_type.merge(argument.get_type().flatten_list().1, argument.span)
+                current_type.merge(argument.get_type().flatten_list().1)
+                    .map_err(|error| error.with_span(argument.span))
             },
         )?;
 
         Ok(IntrinsicValue::Join {
             arguments,
-            result_type: item_type.into_list(),
+            result_type: item_type.into_list(ListState::IsList),
         }.into())
     },
 };
@@ -627,13 +706,15 @@ pub static SEGMENT: IntrinsicFunction = IntrinsicFunction {
         let mut arguments = arguments.into_iter();
         let point_1 = arguments.next().unwrap();
         let point_2 = arguments.next().unwrap();
-        let is_list = point_1.get_type().is_list() ||
-            point_2.get_type().is_list();
+        let list_state = ListState::merge(
+            point_1.get_type().list_state(),
+            point_2.get_type().list_state(),
+        );
 
         Ok(IntrinsicValue::Segment {
             point_1,
             point_2,
-            is_list,
+            list_state,
         }.into())
     },
 };
@@ -688,16 +769,20 @@ pub static ROTATE: IntrinsicFunction = IntrinsicFunction {
             }, true)?;
         let angle = arguments.next().unwrap()
             .coerce_to(&Type::Real, true)?;
-        let result_type = object.get_type();
-        let is_list = object.get_type().is_list() ||
-            point.get_type().is_list() ||
-            angle.get_type().is_list();
+        let result_type = object.get_type().into_flatten_list().1;
+        let list_state = ListState::merge(
+            ListState::merge(
+                object.get_type().list_state(),
+                point.get_type().list_state(),
+            ),
+            angle.get_type().list_state(),
+        );
 
         Ok(IntrinsicValue::Rotate {
             object,
             point,
             angle,
-            result_type: result_type.unflatten_list(is_list),
+            result_type: result_type.unflatten_list(list_state),
         }.into())
     },
 };
@@ -740,23 +825,24 @@ pub static OKLCH: IntrinsicFunction = color_intrinsic!("oklch" => Oklch);
 
 // ------ Desmosify ------
 
-pub static ENUM_VARIANTS: IntrinsicFunction = IntrinsicFunction {
-    identifier: "enum_variants",
+pub static ENUM_VALUES: IntrinsicFunction = IntrinsicFunction {
+    identifier: "enum_values",
     min_arity: 1,
     max_arity: Some(1),
     interpret_call: |context, arguments| {
-        let Type::Meta { identifier } = arguments.into_iter().next().unwrap().get_type() else {
+        let enum_type = arguments.into_iter().next().unwrap();
+        let Type::Meta { identifier } = enum_type.get_type() else {
             return Err(Box::new(crate::Error {
-                kind: crate::ErrorKind::ExpectedTypeArgument,
-                span: None,
+                kind: crate::ErrorKind::ExpectedEnumTypeValue,
+                span: enum_type.span,
             }));
         };
 
         let definition = context.find_definition(&identifier).unwrap();
         let DefinitionKind::Type(TypeDefinition::Enumeration { variants }) = &definition.definition.kind else {
             return Err(Box::new(crate::Error {
-                kind: crate::ErrorKind::ExpectedEnumType,
-                span: None,
+                kind: crate::ErrorKind::ExpectedEnumTypeValue,
+                span: enum_type.span,
             }));
         };
 
@@ -775,5 +861,42 @@ pub static ENUM_VARIANTS: IntrinsicFunction = IntrinsicFunction {
                 type_identifier: identifier,
             },
         })
+    },
+};
+pub static ENUM_VALUE: IntrinsicFunction = IntrinsicFunction {
+    identifier: "enum_value",
+    min_arity: 2,
+    max_arity: Some(2),
+    interpret_call: |context, arguments| {
+        let mut arguments = arguments.into_iter();
+
+        let enum_type = arguments.next().unwrap();
+        let Type::Meta { identifier } = enum_type.get_type() else {
+            return Err(Box::new(crate::Error {
+                kind: crate::ErrorKind::ExpectedEnumTypeValue,
+                span: enum_type.span,
+            }));
+        };
+
+        let definition = context.find_definition(&identifier).unwrap();
+        let DefinitionKind::Type(TypeDefinition::Enumeration { .. }) = &definition.definition.kind else {
+            return Err(Box::new(crate::Error {
+                kind: crate::ErrorKind::ExpectedEnumTypeValue,
+                span: enum_type.span,
+            }));
+        };
+
+        let variant_ordinal = arguments.next().unwrap()
+            .coerce_to(&Type::Int, true)?;
+        let list_state = variant_ordinal.get_type().list_state();
+
+        let result_type = Type::UserValue {
+            type_identifier: identifier,
+        };
+
+        Ok(ValueKind::AssumeType(
+            Box::new(variant_ordinal),
+            result_type.unflatten_list(list_state),
+        ))
     },
 };

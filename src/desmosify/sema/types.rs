@@ -7,6 +7,32 @@ pub struct FunctionSignature {
     pub return_type: Type,
 }
 
+#[derive(Copy, Clone, PartialEq, Debug)]
+pub enum ListState {
+    IsList,
+    MaybeList,
+}
+
+impl ListState {
+    pub fn can_coerce(from_state: Option<Self>, to_state: Option<Self>, allow_broadcast: bool) -> bool {
+        from_state == to_state || match (from_state, to_state) {
+            (Some(Self::IsList) | None, Some(Self::MaybeList)) => true,
+            (Some(Self::IsList | Self::MaybeList), None) => allow_broadcast,
+            _ => false
+        }
+    }
+
+    pub fn merge(state_1: Option<Self>, state_2: Option<Self>) -> Option<Self> {
+        match (state_1, state_2) {
+            (Some(Self::IsList), _) => Some(Self::IsList),
+            (_, Some(Self::IsList)) => Some(Self::IsList),
+            (Some(Self::MaybeList), _) => Some(Self::MaybeList),
+            (_, Some(Self::MaybeList)) => Some(Self::MaybeList),
+            (None, None) => None,
+        }
+    }
+}
+
 #[derive(Clone, PartialEq, Debug)]
 pub enum Type {
     Meta {
@@ -20,9 +46,6 @@ pub enum Type {
     Polygon,
     Segment,
     Str,
-    List {
-        item_type: Box<Type>,
-    },
     Point2 {
         x_type: Box<Type>,
         y_type: Box<Type>,
@@ -42,6 +65,10 @@ pub enum Type {
     Action {
         parameter_types: Box<[Type]>,
     },
+    List {
+        state: ListState,
+        item_type: Box<Type>,
+    },
 }
 
 impl Type {
@@ -58,48 +85,51 @@ impl Type {
         }
     }
 
-    pub fn into_list(self) -> Self {
+    pub fn into_list(self, state: ListState) -> Self {
         Self::List {
+            state,
             item_type: Box::new(self),
         }
     }
 
-    pub fn is_list(&self) -> bool {
-        matches!(self, Self::List { .. })
-    }
-
-    pub fn flatten_list(&self) -> (bool, &Self) {
+    pub fn list_state(&self) -> Option<ListState> {
         match self {
-            Self::List { item_type } => (true, item_type),
-            _ => (false, self)
+            Self::List { state, .. } => Some(*state),
+            _ => None
         }
     }
 
-    pub fn into_flatten_list(self) -> (bool, Self) {
+    pub fn flatten_list(&self) -> (Option<ListState>, &Self) {
         match self {
-            Self::List { item_type } => (true, *item_type),
-            _ => (false, self)
+            Self::List { state, item_type } => (Some(*state), item_type),
+            _ => (None, self)
         }
     }
 
-    pub fn require_flatten_list(self, span: Option<crate::Span>) -> crate::Result<Self> {
+    pub fn into_flatten_list(self) -> (Option<ListState>, Self) {
         match self {
-            Self::List { item_type } => Ok(*item_type),
+            Self::List { state, item_type } => (Some(state), *item_type),
+            _ => (None, self)
+        }
+    }
+
+    pub fn require_flatten_list(self) -> crate::Result<Self> {
+        match self {
+            // TODO: require state to be IsList?
+            Self::List { item_type, .. } => Ok(*item_type),
             other_type => Err(Box::new(crate::Error {
                 kind: crate::ErrorKind::ExpectedListType {
                     got_type: other_type.to_string(),
                 },
-                span,
+                span: None,
             }))
         }
     }
 
-    pub fn unflatten_list(self, is_list: bool) -> Self {
-        if is_list {
-            self.into_list()
-        }
-        else {
-            self
+    pub fn unflatten_list(self, state: Option<ListState>) -> Self {
+        match state {
+            Some(state) => self.into_list(state),
+            None => self,
         }
     }
 
@@ -202,16 +232,16 @@ impl Type {
         }
     }
 
-    pub fn merge(&self, other: &Self, span: Option<crate::Span>) -> crate::Result<Self> {
-        let (self_is_list, self_inner) = self.flatten_list();
-        let (other_is_list, other_inner) = other.flatten_list();
+    pub fn merge(&self, other: &Self) -> crate::Result<Self> {
+        let (self_list, self_inner) = self.flatten_list();
+        let (other_list, other_inner) = other.flatten_list();
 
-        let merged_inner = Self::merge_inner(self_inner, other_inner, span)?;
+        let merged_inner = Self::merge_inner(self_inner, other_inner)?;
 
-        Ok(merged_inner.unflatten_list(self_is_list || other_is_list))
+        Ok(merged_inner.unflatten_list(ListState::merge(self_list, other_list)))
     }
 
-    pub fn merge_inner(&self, other: &Self, span: Option<crate::Span>) -> crate::Result<Self> {
+    pub fn merge_inner(&self, other: &Self) -> crate::Result<Self> {
         if self == other {
             return Ok(self.clone());
         }
@@ -223,16 +253,16 @@ impl Type {
                 Self::Point2 { x_type: self_x, y_type: self_y },
                 Self::Point2 { x_type: other_x, y_type: other_y },
             ) => Ok(Self::Point2 {
-                x_type: Box::new(Self::merge(self_x, other_x, span)?),
-                y_type: Box::new(Self::merge(self_y, other_y, span)?),
+                x_type: Box::new(Self::merge(self_x, other_x)?),
+                y_type: Box::new(Self::merge(self_y, other_y)?),
             }),
             (
                 Self::Point3 { x_type: self_x, y_type: self_y, z_type: self_z },
                 Self::Point3 { x_type: other_x, y_type: other_y, z_type: other_z },
             ) => Ok(Self::Point3 {
-                x_type: Box::new(Self::merge(self_x, other_x, span)?),
-                y_type: Box::new(Self::merge(self_y, other_y, span)?),
-                z_type: Box::new(Self::merge(self_z, other_z, span)?),
+                x_type: Box::new(Self::merge(self_x, other_x)?),
+                y_type: Box::new(Self::merge(self_y, other_y)?),
+                z_type: Box::new(Self::merge(self_z, other_z)?),
             }),
             _ => {
                 if self.can_coerce_to(&Self::Int) && other.can_coerce_to(&Self::Int) {
@@ -253,7 +283,7 @@ impl Type {
                             type_1: self.to_string(),
                             type_2: other.to_string(),
                         },
-                        span,
+                        span: None,
                     }))
                 }
             }
@@ -270,12 +300,13 @@ impl Type {
         let mut result_type = arguments.try_fold(
             first_argument,
             |current_type, (next_type, span)| {
-                current_type.merge(&next_type, span)
+                current_type.merge(&next_type)
+                    .map_err(|error| error.with_span(span))
             },
         )?;
 
         if let Some(result_override) = result_override {
-            result_type = result_override.unflatten_list(result_type.is_list());
+            result_type = result_override.unflatten_list(result_type.list_state());
         }
 
         Ok(result_type)
@@ -294,8 +325,9 @@ impl std::fmt::Display for Type {
             Self::Polygon => write!(f, "polygon"),
             Self::Segment => write!(f, "segment"),
             Self::Str => write!(f, "str"),
-            Self::List { item_type } => {
-                write!(f, "[{item_type}]")
+            Self::List { state, item_type } => match state {
+                ListState::IsList => write!(f, "[{item_type}]"),
+                ListState::MaybeList => write!(f, "{item_type}+"),
             }
             Self::Point2 { x_type, y_type } => {
                 write!(f, "({x_type}, {y_type})")

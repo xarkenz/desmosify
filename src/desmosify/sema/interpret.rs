@@ -3,7 +3,7 @@ use crate::ast::{ActionExpression, ActionExpressionKind, BinaryOperation, Defini
 use crate::sema::{Program, ProgramAction, ProgramDisplay, ProgramDisplayAttribute, ProgramDisplayAttributeValue, ProgramDisplayElement, ProgramLet, ProgramPublic, ProgramPublicLine, ProgramTicker, ProgramVariable, ProgramVariableKind};
 use crate::sema::context::{GlobalContext, LocalContext};
 use crate::sema::intrinsic::IntrinsicValue;
-use crate::sema::types::Type;
+use crate::sema::types::{ListState, Type};
 use crate::sema::values::{ActionValue, ActionValueKind, GlobalReference, LocalReference, Value, ValueIndexOperation, ValueKind, ValueListMapLoop};
 use crate::token::Literal;
 
@@ -272,7 +272,7 @@ pub fn interpret_display_declarations(
                                 // TODO: figure out how to do this better
                                 // TODO: only available when list?
                                 action_context.add_scoped_intrinsic("index", IntrinsicValue::Index.into());
-                                ProgramDisplayAttributeValue::Action(interpret_action_expression(context, next_local_id, &local_context, action)?)
+                                ProgramDisplayAttributeValue::Action(interpret_action_expression(context, next_local_id, &action_context, action)?)
                             }
                         },
                     }))
@@ -466,14 +466,14 @@ pub fn interpret_expression(
             interpret_unary_operation(context, next_local_id, local_context, *operation, operand)?
         }
         ExpressionKind::Binary { operation, lhs, rhs } => {
-            interpret_binary_operation(context, next_local_id, local_context, *operation, lhs, rhs)?
+            interpret_binary_operation(context, next_local_id, local_context, *operation, lhs, rhs, Some(expression.span))?
         }
         ExpressionKind::Point2 { x, y } => {
             let x = interpret_expression(context, next_local_id, local_context, x)?;
             let y = interpret_expression(context, next_local_id, local_context, y)?;
 
-            let (x_is_list, x_type) = x.get_type().into_flatten_list();
-            let (y_is_list, y_type) = y.get_type().into_flatten_list();
+            let (x_list, x_type) = x.get_type().into_flatten_list();
+            let (y_list, y_type) = y.get_type().into_flatten_list();
 
             ValueKind::Point2 {
                 x: Box::new(x),
@@ -481,7 +481,7 @@ pub fn interpret_expression(
                 point_type: Type::Point2 {
                     x_type: Box::new(x_type),
                     y_type: Box::new(y_type),
-                }.unflatten_list(x_is_list || y_is_list),
+                }.unflatten_list(ListState::merge(x_list, y_list)),
             }
         }
         ExpressionKind::Point3 { x, y, z } => {
@@ -489,9 +489,9 @@ pub fn interpret_expression(
             let y = interpret_expression(context, next_local_id, local_context, y)?;
             let z = interpret_expression(context, next_local_id, local_context, z)?;
 
-            let (x_is_list, x_type) = x.get_type().into_flatten_list();
-            let (y_is_list, y_type) = y.get_type().into_flatten_list();
-            let (z_is_list, z_type) = z.get_type().into_flatten_list();
+            let (x_list, x_type) = x.get_type().into_flatten_list();
+            let (y_list, y_type) = y.get_type().into_flatten_list();
+            let (z_list, z_type) = z.get_type().into_flatten_list();
 
             ValueKind::Point3 {
                 x: Box::new(x),
@@ -501,7 +501,7 @@ pub fn interpret_expression(
                     x_type: Box::new(x_type),
                     y_type: Box::new(y_type),
                     z_type: Box::new(z_type),
-                }.unflatten_list(x_is_list || y_is_list || z_is_list),
+                }.unflatten_list(ListState::merge(ListState::merge(x_list, y_list), z_list)),
             }
         }
         ExpressionKind::List { items } => {
@@ -513,7 +513,8 @@ pub fn interpret_expression(
             let item_type = items
                 .iter()
                 .try_fold(Type::Any, |current_type, item| {
-                    current_type.merge(&item.get_type(), item.span)
+                    current_type.merge(&item.get_type())
+                        .map_err(|error| error.with_span(item.span))
                 })?;
 
             ValueKind::List {
@@ -533,8 +534,10 @@ pub fn interpret_expression(
             };
 
             let item_type = start.get_type()
-                .merge(&end.get_type(), end.span)?
-                .merge(&step.get_type(), step.span)?;
+                .merge(&end.get_type())
+                .map_err(|error| error.with_span(end.span))?
+                .merge(&step.get_type())
+                .map_err(|error| error.with_span(step.span))?;
 
             ValueKind::ListRange {
                 kind: *kind,
@@ -561,7 +564,8 @@ pub fn interpret_expression(
                 .iter()
                 .map(|map_loop| {
                     let list = interpret_expression(context, next_local_id, local_context, &map_loop.list)?;
-                    let item_type = list.get_type().require_flatten_list(Some(expression.span))?;
+                    let item_type = list.get_type().require_flatten_list()
+                        .map_err(|error| error.with_span(Some(expression.span)))?;
 
                     Ok(ValueListMapLoop {
                         local: map_context.add_local_variable(map_loop.identifier.clone(), next_local_id, item_type),
@@ -580,7 +584,8 @@ pub fn interpret_expression(
         }
         ExpressionKind::ListFilter { list, condition } => {
             let list = interpret_expression(context, next_local_id, local_context, list)?;
-            let item_type = list.get_type().require_flatten_list(Some(expression.span))?;
+            let item_type = list.get_type().require_flatten_list()
+                .map_err(|error| error.with_span(Some(expression.span)))?;
 
             let condition = interpret_expression(context, next_local_id, local_context, condition)?
                 .coerce_to(&Type::Bool, true)?;
@@ -593,7 +598,8 @@ pub fn interpret_expression(
         }
         ExpressionKind::Index { list, operation } => {
             let list = interpret_expression(context, next_local_id, local_context, list)?;
-            let item_type = list.get_type().require_flatten_list(Some(expression.span))?;
+            let item_type = list.get_type().require_flatten_list()
+                .map_err(|error| error.with_span(Some(expression.span)))?;
 
             let operation = interpret_index_operation(context, next_local_id, local_context, operation)?;
 
@@ -604,15 +610,15 @@ pub fn interpret_expression(
             }
         }
         ExpressionKind::FunctionCall { function, arguments } => {
-            let function_value = interpret_expression(context, next_local_id, local_context, function)?;
+            let function = interpret_expression(context, next_local_id, local_context, function)?;
             let arguments: Box<[_]> = arguments
                 .iter()
                 .map(|argument| interpret_expression(context, next_local_id, local_context, argument))
                 .collect::<crate::Result<_>>()?;
 
-            match function_value.get_type() {
-                Type::IntrinsicFunction(function) => {
-                    function.interpret_call(context, arguments)?
+            match function.get_type() {
+                Type::IntrinsicFunction(intrinsic_function) => {
+                    intrinsic_function.interpret_call(context, function.span, arguments)?
                 }
                 Type::UserFunction { signature } => {
                     if arguments.len() != signature.parameter_types.len() {
@@ -621,19 +627,31 @@ pub fn interpret_expression(
                                 expected: signature.parameter_types.len(),
                                 got: arguments.len(),
                             },
-                            span: Some(expression.span),
+                            span: function.span,
                         }));
                     }
 
-                    // FIXME: this is not type-safe in terms of broadcasting
+                    let mut result_list_state = None;
                     let arguments = std::iter::zip(arguments, &signature.parameter_types)
-                        .map(|(argument, parameter_type)| argument.coerce_to(parameter_type, true))
+                        .map(|(argument, parameter_type)| {
+                            if let Type::List { state: ListState::MaybeList, .. } = parameter_type {
+                                result_list_state = ListState::merge(result_list_state, argument.get_type().list_state())
+                            }
+                            argument.coerce_to(parameter_type, false)
+                        })
                         .collect::<crate::Result<_>>()?;
 
+                    let return_type = match signature.return_type {
+                        Type::List { state: ListState::MaybeList, item_type } => {
+                            item_type.unflatten_list(result_list_state)
+                        }
+                        other => other
+                    };
+
                     ValueKind::UserFunctionCall {
-                        function: Box::new(function_value),
+                        function: Box::new(function),
                         arguments,
-                        return_type: signature.return_type,
+                        return_type,
                     }
                 }
                 got_type => {
@@ -641,7 +659,7 @@ pub fn interpret_expression(
                         kind: crate::ErrorKind::ExpectedFunctionType {
                             got_type: got_type.to_string(),
                         },
-                        span: Some(function.span),
+                        span: function.span,
                     }));
                 }
             }
@@ -654,12 +672,13 @@ pub fn interpret_expression(
                 .map(|(condition, consequent)| {
                     let condition = interpret_expression(context, next_local_id, local_context, condition)?
                         .coerce_to(&Type::Bool, true)?;
-                    if condition.get_type().is_list() && !result_type.is_list() {
-                        result_type = result_type.clone().into_list();
-                    }
+                    // A list condition should cause the whole expression to broadcast
+                    let (result_list, inner_type) = result_type.flatten_list();
+                    result_type = inner_type.clone().unflatten_list(ListState::merge(result_list, condition.get_type().list_state()));
 
                     let consequent = interpret_expression(context, next_local_id, local_context, consequent)?;
-                    result_type = result_type.merge(&consequent.get_type(), consequent.span)?;
+                    result_type = result_type.merge(&consequent.get_type())
+                        .map_err(|error| error.with_span(consequent.span))?;
 
                     Ok((condition, consequent))
                 })
@@ -669,9 +688,10 @@ pub fn interpret_expression(
                 .as_ref()
                 .map_or(Ok(ValueKind::Undefined(result_type.clone()).into()), |alternative| {
                     let alternative = interpret_expression(context, next_local_id, local_context, alternative)?;
-                    result_type = result_type.merge(&alternative.get_type(), alternative.span)?;
+                    result_type = result_type.merge(&alternative.get_type())
+                        .map_err(|error| error.with_span(alternative.span))?;
 
-                    alternative.coerce_to(&result_type, true)
+                    alternative.coerce_to(result_type.flatten_list().1, true)
                 })?;
 
             let result_inner_type = result_type.flatten_list().1;
@@ -693,7 +713,7 @@ pub fn interpret_expression(
 
             let value_type = match value_type {
                 Some(type_expression) => {
-                    let value_type = context.resolve_type(type_expression)?;
+                    let value_type = context.resolve_type(type_expression, true)?;
                     value = value.coerce_to(&value_type, false)?;
                     value_type
                 }
@@ -736,23 +756,24 @@ pub fn interpret_unary_operation(
     operand: &Expression,
 ) -> crate::Result<ValueKind> {
     let mut operand = interpret_expression(context, next_local_id, local_context, operand)?;
-    let (is_list, mut operand_type) = operand.get_type().into_flatten_list();
+    let (operand_list, mut operand_type) = operand.get_type().into_flatten_list();
 
-    match operation {
+    let result_type = match operation {
         UnaryOperation::Positive | UnaryOperation::Negative => {
             // The result must be arithmetic
             (operand, operand_type) = operand.coerce_to_arithmetic(Type::require_numeric_or_point)?;
+            operand_type
         }
         UnaryOperation::LogicalNot => {
             operand = operand.coerce_to(&Type::Bool, true)?;
-            operand_type = Type::Bool;
+            Type::Bool.unflatten_list(operand_list)
         }
-    }
+    };
 
     Ok(ValueKind::Unary {
         operation,
         operand: Box::new(operand),
-        result_type: operand_type.unflatten_list(is_list),
+        result_type,
     })
 }
 
@@ -763,6 +784,7 @@ pub fn interpret_binary_operation(
     operation: BinaryOperation,
     lhs: &Expression,
     rhs: &Expression,
+    span: Option<crate::Span>,
 ) -> crate::Result<ValueKind> {
     if let BinaryOperation::MemberAccess = operation {
         return interpret_access_operation(context, next_local_id, local_context, lhs, rhs);
@@ -770,8 +792,8 @@ pub fn interpret_binary_operation(
 
     let mut lhs = interpret_expression(context, next_local_id, local_context, lhs)?;
     let mut rhs = interpret_expression(context, next_local_id, local_context, rhs)?;
-    let (lhs_is_list, mut lhs_type) = lhs.get_type().into_flatten_list();
-    let (rhs_is_list, mut rhs_type) = rhs.get_type().into_flatten_list();
+    let (lhs_list, mut lhs_type) = lhs.get_type().into_flatten_list();
+    let (rhs_list, mut rhs_type) = rhs.get_type().into_flatten_list();
 
     let result_type = match operation {
         BinaryOperation::MemberAccess => {
@@ -783,40 +805,55 @@ pub fn interpret_binary_operation(
             // The result must be arithmetic and cannot be a point
             (lhs, lhs_type) = lhs.coerce_to_arithmetic(Type::require_numeric)?;
             (rhs, rhs_type) = rhs.coerce_to_arithmetic(Type::require_numeric)?;
-            Type::merge(&lhs_type, &rhs_type, rhs.span)?
+            Type::merge(&lhs_type, &rhs_type)
+                .map_err(|error| error.with_span(span))?
         }
         BinaryOperation::Multiply => {
             // The result must be arithmetic, but at most one operand may be a point
             (lhs, lhs_type) = lhs.coerce_to_arithmetic(Type::require_numeric_or_point)?;
+            let lhs_type = lhs_type.into_flatten_list().1;
             if matches!(lhs_type, Type::Point2 { .. } | Type::Point3 { .. }) {
                 (rhs, rhs_type) = rhs.coerce_to_arithmetic(Type::require_numeric)?;
+                let rhs_type = rhs_type.into_flatten_list().1;
                 match &lhs_type {
                     Type::Point2 { x_type, y_type } => Type::Point2 {
-                        x_type: Box::new(x_type.merge(&rhs_type, rhs.span)?),
-                        y_type: Box::new(y_type.merge(&rhs_type, rhs.span)?),
+                        x_type: Box::new(x_type.merge(&rhs_type)
+                            .map_err(|error| error.with_span(span))?),
+                        y_type: Box::new(y_type.merge(&rhs_type)
+                            .map_err(|error| error.with_span(span))?),
                     },
                     Type::Point3 { x_type, y_type, z_type } => Type::Point3 {
-                        x_type: Box::new(x_type.merge(&rhs_type, rhs.span)?),
-                        y_type: Box::new(y_type.merge(&rhs_type, rhs.span)?),
-                        z_type: Box::new(z_type.merge(&rhs_type, rhs.span)?),
+                        x_type: Box::new(x_type.merge(&rhs_type)
+                            .map_err(|error| error.with_span(span))?),
+                        y_type: Box::new(y_type.merge(&rhs_type)
+                            .map_err(|error| error.with_span(span))?),
+                        z_type: Box::new(z_type.merge(&rhs_type)
+                            .map_err(|error| error.with_span(span))?),
                     },
                     _ => unreachable!()
-                }
+                }.unflatten_list(ListState::merge(lhs_list, rhs_list))
             }
             else {
                 (rhs, rhs_type) = rhs.coerce_to_arithmetic(Type::require_numeric_or_point)?;
+                let rhs_type = rhs_type.into_flatten_list().1;
                 match &rhs_type {
                     Type::Point2 { x_type, y_type } => Type::Point2 {
-                        x_type: Box::new(x_type.merge(&lhs_type, lhs.span)?),
-                        y_type: Box::new(y_type.merge(&lhs_type, lhs.span)?),
+                        x_type: Box::new(x_type.merge(&lhs_type)
+                            .map_err(|error| error.with_span(span))?),
+                        y_type: Box::new(y_type.merge(&lhs_type)
+                            .map_err(|error| error.with_span(span))?),
                     },
                     Type::Point3 { x_type, y_type, z_type } => Type::Point3 {
-                        x_type: Box::new(x_type.merge(&lhs_type, lhs.span)?),
-                        y_type: Box::new(y_type.merge(&lhs_type, lhs.span)?),
-                        z_type: Box::new(z_type.merge(&lhs_type, lhs.span)?),
+                        x_type: Box::new(x_type.merge(&lhs_type)
+                            .map_err(|error| error.with_span(span))?),
+                        y_type: Box::new(y_type.merge(&lhs_type)
+                            .map_err(|error| error.with_span(span))?),
+                        z_type: Box::new(z_type.merge(&lhs_type)
+                            .map_err(|error| error.with_span(span))?),
                     },
-                    _ => Type::merge(&lhs_type, &rhs_type, rhs.span)?
-                }
+                    _ => Type::merge(&lhs_type, &rhs_type)
+                        .map_err(|error| error.with_span(span))?
+                }.unflatten_list(ListState::merge(lhs_list, rhs_list))
             }
         }
         BinaryOperation::Divide => {
@@ -835,34 +872,39 @@ pub fn interpret_binary_operation(
             };
             lhs = lhs.coerce_to(&result_type, true)?;
             rhs = rhs.coerce_to(&Type::Real, true)?;
-            result_type
+            result_type.unflatten_list(ListState::merge(lhs_list, rhs_list))
         }
         BinaryOperation::Add |
         BinaryOperation::Subtract => {
             // The result must be arithmetic, but may be a point
             (lhs, lhs_type) = lhs.coerce_to_arithmetic(Type::require_numeric_or_point)?;
             (rhs, rhs_type) = rhs.coerce_to_arithmetic(Type::require_numeric_or_point)?;
-            Type::merge(&lhs_type, &rhs_type, rhs.span)?
+            Type::merge(&lhs_type, &rhs_type)
+                .map_err(|error| error.with_span(span))?
         }
         BinaryOperation::LessThan |
         BinaryOperation::LessEqual |
         BinaryOperation::GreaterThan |
         BinaryOperation::GreaterEqual => {
             // The operands must merge into a numeric type, but the result is always a bool
-            Type::merge(&lhs_type, &rhs_type, rhs.span)?.require_numeric()?;
-            Type::Bool
+            Type::merge(&lhs_type, &rhs_type)
+                .map_err(|error| error.with_span(span))?
+                .require_numeric()?;
+            Type::Bool.unflatten_list(ListState::merge(lhs_list, rhs_list))
         }
         BinaryOperation::Equal |
         BinaryOperation::NotEqual => {
             // The operands must merge into a numeric or point type, but the result is always a bool
-            Type::merge(&lhs_type, &rhs_type, rhs.span)?.require_numeric_or_point()?;
-            Type::Bool
+            Type::merge(&lhs_type, &rhs_type)
+                .map_err(|error| error.with_span(span))?
+                .require_numeric_or_point()?;
+            Type::Bool.unflatten_list(ListState::merge(lhs_list, rhs_list))
         }
         BinaryOperation::LogicalAnd |
         BinaryOperation::LogicalOr => {
             lhs = lhs.coerce_to(&Type::Bool, true)?;
             rhs = rhs.coerce_to(&Type::Bool, true)?;
-            Type::Bool
+            Type::Bool.unflatten_list(ListState::merge(lhs_list, rhs_list))
         }
     };
 
@@ -870,7 +912,7 @@ pub fn interpret_binary_operation(
         operation,
         lhs: Box::new(lhs),
         rhs: Box::new(rhs),
-        result_type: result_type.unflatten_list(lhs_is_list || rhs_is_list),
+        result_type,
     })
 }
 
@@ -882,7 +924,7 @@ fn interpret_access_operation(
     rhs: &Expression,
 ) -> crate::Result<ValueKind> {
     let lhs = interpret_expression(context, next_local_id, local_context, lhs)?;
-    let (lhs_is_list, lhs_type) = lhs.get_type().into_flatten_list();
+    let (lhs_list, lhs_type) = lhs.get_type().into_flatten_list();
 
     let ExpressionKind::Literal(Literal::Identifier(member_identifier)) = &rhs.kind else {
         return Err(Box::new(crate::Error {
@@ -933,11 +975,11 @@ fn interpret_access_operation(
             match member_identifier.as_ref() {
                 "x" => Ok(ValueKind::GetX {
                     point: Box::new(lhs),
-                    x_type: x_type.as_ref().clone().unflatten_list(lhs_is_list),
+                    x_type: x_type.as_ref().clone().unflatten_list(lhs_list),
                 }),
                 "y" => Ok(ValueKind::GetY {
                     point: Box::new(lhs),
-                    y_type: y_type.as_ref().clone().unflatten_list(lhs_is_list),
+                    y_type: y_type.as_ref().clone().unflatten_list(lhs_list),
                 }),
                 _ => Err(invalid_access_error())
             }
@@ -946,15 +988,15 @@ fn interpret_access_operation(
             match member_identifier.as_ref() {
                 "x" => Ok(ValueKind::GetX {
                     point: Box::new(lhs),
-                    x_type: x_type.as_ref().clone().unflatten_list(lhs_is_list),
+                    x_type: x_type.as_ref().clone().unflatten_list(lhs_list),
                 }),
                 "y" => Ok(ValueKind::GetY {
                     point: Box::new(lhs),
-                    y_type: y_type.as_ref().clone().unflatten_list(lhs_is_list),
+                    y_type: y_type.as_ref().clone().unflatten_list(lhs_list),
                 }),
                 "z" => Ok(ValueKind::GetZ {
                     point: Box::new(lhs),
-                    z_type: z_type.as_ref().clone().unflatten_list(lhs_is_list),
+                    z_type: z_type.as_ref().clone().unflatten_list(lhs_list),
                 }),
                 _ => Err(invalid_access_error())
             }

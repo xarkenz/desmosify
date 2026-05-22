@@ -107,7 +107,7 @@ impl<'a, T: BufRead> Parser<'a, T> {
         let start_token = self.get_token()?;
         let start_span = start_token.span;
 
-        let expression_kind = match &start_token.kind {
+        let mut expression_kind = match &start_token.kind {
             TokenKind::Question => {
                 TypeExpressionKind::Any
             }
@@ -177,8 +177,20 @@ impl<'a, T: BufRead> Parser<'a, T> {
             }
         };
 
-        let span = start_span.expand_to(self.current_span());
+        let mut span = start_span.expand_to(self.current_span());
         self.consume_token()?; // Whatever the last token of the expression was
+
+        while let Some(TokenKind::Plus) = self.current_token_kind() {
+            expression_kind = TypeExpressionKind::Broadcastable {
+                item_type: Box::new(TypeExpression {
+                    span,
+                    kind: expression_kind,
+                })
+            };
+
+            span = start_span.expand_to(self.current_span());
+            self.consume_token()?; // Plus
+        }
 
         // Check that we have arrived at one of the allowed ending tokens.
         self.expect_token_from(allowed_ends)?;
@@ -900,7 +912,6 @@ impl<'a, T: BufRead> Parser<'a, T> {
                 self.consume_token()?; // Enum
 
                 let (identifier, identifier_span) = self.expect_identifier()?;
-                let span = start_span.expand_to(self.current_span());
                 self.consume_token()?; // Literal(Identifier)
 
                 self.expect_token_from(&[TokenKind::CurlyLeft])?;
@@ -927,7 +938,7 @@ impl<'a, T: BufRead> Parser<'a, T> {
                     kind: DefinitionKind::Type(TypeDefinition::Enumeration {
                         variants: variants.into_boxed_slice(),
                     }),
-                    span,
+                    span: start_span.expand_to(identifier_span),
                 })))
             }
             TokenKind::Ticker => {

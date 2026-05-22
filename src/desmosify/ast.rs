@@ -13,6 +13,9 @@ pub enum TypeExpressionKind {
     List {
         item_type: Box<TypeExpression>,
     },
+    Broadcastable {
+        item_type: Box<TypeExpression>,
+    },
     Point2 {
         x_type: Box<TypeExpression>,
         y_type: Box<TypeExpression>,
@@ -38,6 +41,9 @@ impl std::fmt::Display for TypeExpressionKind {
             }
             Self::List { item_type } => {
                 write!(f, "[{item_type}]")
+            }
+            Self::Broadcastable { item_type } => {
+                write!(f, "{item_type}+")
             }
             Self::Point2 { x_type, y_type } => {
                 write!(f, "({x_type}, {y_type})")

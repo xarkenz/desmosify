@@ -2,7 +2,7 @@ use std::collections::HashMap;
 use std::rc::Rc;
 use crate::ast::{Declaration, Definition, DefinitionKind, DisplayDeclaration, PublicDeclaration, TickerDeclaration, TypeExpression, TypeExpressionKind, ValueDefinition};
 use crate::sema::intrinsic::get_core_intrinsics;
-use crate::sema::types::{Type, FunctionSignature};
+use crate::sema::types::{Type, FunctionSignature, ListState};
 use crate::sema::values::{LocalReference, ValueKind};
 
 #[derive(Clone, Debug)]
@@ -67,14 +67,14 @@ impl GlobalContext {
                         unreachable!()
                     },
                     DefinitionKind::Value(ValueDefinition::Let { parameters, value_type, .. }) => {
-                        let mut value_type = context.resolve_type(value_type)?;
+                        let mut value_type = context.resolve_type(value_type, parameters.is_some())?;
 
                         if let Some(parameters) = parameters {
                             value_type = Type::UserFunction {
                                 signature: Box::new(FunctionSignature {
                                     parameter_types: parameters.0
                                         .iter()
-                                        .map(|parameter| context.resolve_type(&parameter.parameter_type))
+                                        .map(|parameter| context.resolve_type(&parameter.parameter_type, true))
                                         .collect::<crate::Result<_>>()?,
                                     return_type: value_type,
                                 }),
@@ -87,7 +87,7 @@ impl GlobalContext {
                         })?;
                     }
                     DefinitionKind::Value(ValueDefinition::Variable { value_type, .. }) => {
-                        let value_type = context.resolve_type(value_type)?;
+                        let value_type = context.resolve_type(value_type, false)?;
 
                         context.add_definition(TypedDefinition {
                             definition,
@@ -98,7 +98,7 @@ impl GlobalContext {
                         let value_type = Type::Action {
                             parameter_types: parameters.0
                                 .iter()
-                                .map(|parameter| context.resolve_type(&parameter.parameter_type))
+                                .map(|parameter| context.resolve_type(&parameter.parameter_type, true))
                                 .collect::<crate::Result<_>>()?,
                         };
 
@@ -207,7 +207,7 @@ impl GlobalContext {
         &self.display_declarations
     }
 
-    pub fn resolve_type(&self, type_expression: &TypeExpression) -> crate::Result<Type> {
+    pub fn resolve_type(&self, type_expression: &TypeExpression, allow_broadcastable: bool) -> crate::Result<Type> {
         let check_point_component = |component_type: Type| {
             if !component_type.is_numeric() {
                 Err(Box::new(crate::Error {
@@ -248,12 +248,13 @@ impl GlobalContext {
                 }
             }
             TypeExpressionKind::Grouping { expression } => {
-                self.resolve_type(expression)
+                self.resolve_type(expression, allow_broadcastable)
             }
             TypeExpressionKind::List { item_type } => {
-                let item_type = self.resolve_type(item_type)?;
+                // Allow broadcastable for the purposes of giving a nicer error message
+                let item_type = self.resolve_type(item_type, true)?;
 
-                if item_type.is_list() {
+                if item_type.list_state().is_some() {
                     Err(Box::new(crate::Error {
                         kind: crate::ErrorKind::InvalidListItemType {
                             item_type: item_type.to_string(),
@@ -262,20 +263,45 @@ impl GlobalContext {
                     }))
                 }
                 else {
-                    Ok(item_type.into_list())
+                    Ok(item_type.into_list(ListState::IsList))
+                }
+            }
+            TypeExpressionKind::Broadcastable { item_type } => {
+                if !allow_broadcastable {
+                    return Err(Box::new(crate::Error {
+                        kind: crate::ErrorKind::BroadcastableTypeNotAllowed,
+                        span: Some(type_expression.span),
+                    }));
+                }
+
+                // Allow broadcastable for the purposes of giving a nicer error message
+                let item_type = self.resolve_type(item_type, true)?;
+
+                if item_type.list_state().is_some() {
+                    Err(Box::new(crate::Error {
+                        kind: crate::ErrorKind::InvalidBroadcastableItemType {
+                            item_type: item_type.to_string(),
+                        },
+                        span: Some(type_expression.span),
+                    }))
+                }
+                else {
+                    Ok(item_type.into_list(ListState::MaybeList))
                 }
             }
             TypeExpressionKind::Point2 { x_type, y_type } => {
+                // Allow broadcastable components for the purposes of giving a nicer error message
                 Ok(Type::Point2 {
-                    x_type: Box::new(check_point_component(self.resolve_type(x_type)?)?),
-                    y_type: Box::new(check_point_component(self.resolve_type(y_type)?)?),
+                    x_type: Box::new(check_point_component(self.resolve_type(x_type, true)?)?),
+                    y_type: Box::new(check_point_component(self.resolve_type(y_type, true)?)?),
                 })
             }
             TypeExpressionKind::Point3 { x_type, y_type, z_type } => {
+                // Allow broadcastable components for the purposes of giving a nicer error message
                 Ok(Type::Point3 {
-                    x_type: Box::new(check_point_component(self.resolve_type(x_type)?)?),
-                    y_type: Box::new(check_point_component(self.resolve_type(y_type)?)?),
-                    z_type: Box::new(check_point_component(self.resolve_type(z_type)?)?),
+                    x_type: Box::new(check_point_component(self.resolve_type(x_type, true)?)?),
+                    y_type: Box::new(check_point_component(self.resolve_type(y_type, true)?)?),
+                    z_type: Box::new(check_point_component(self.resolve_type(z_type, true)?)?),
                 })
             }
         }

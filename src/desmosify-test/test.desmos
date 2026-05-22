@@ -38,4 +38,4 @@ enum TestEnum {
     C,
 }
 
-let test_enum_variants: [TestEnum] = @enum_variants(TestEnum);
+let test_enum_variants: [TestEnum] = @enum_values(TestEnum);

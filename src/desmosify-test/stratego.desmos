@@ -97,10 +97,14 @@ let next_player: Player = {
 };
 
 let piece_counts: [int] = [
-    @count([pieces where pieces == piece]) for piece in @enum_variants(Piece)
+    @count([pieces where pieces == piece])
+    for piece in @enum_values(Piece)
 ];
 
-let cyclable_pieces: [Piece] = [@enum_variants(Piece) where piece_counts < MAX_PIECE_COUNTS && player_of(@enum_variants(Piece)) == player];
+let cyclable_pieces: [Piece] = [
+    @enum_values(Piece)
+    where piece_counts < MAX_PIECE_COUNTS && player_of(@enum_values(Piece)) == player
+];
 
 let turn_is_over: bool = {
     mode == Mode.SETUP: @count(cyclable_pieces) == 0,
@@ -130,23 +134,21 @@ let poke(l: [?], i: int, x: ?): [?] = {
     l
 };
 
-let player_of(piece: Piece): Player = {
+let player_of(piece: Piece+): Player+ = {
     Piece.RED_FLAG <= piece <= Piece.RED_MARSHAL: Player.RED,
     Piece.BLUE_FLAG <= piece <= Piece.BLUE_MARSHAL: Player.BLUE,
 };
 
-let piece_type_of(piece: Piece): PieceType = {
+let piece_type_of(piece: Piece+): PieceType+ = {
     piece == Piece.NONE: PieceType.NONE,
-    // FIXME: "as" for casting?
-    // (piece - 1) % 12 + 1
+    @enum_value(PieceType, (piece - 1) % 12 + 1)
 };
 
 let is_piece_fixed(piece: Piece): bool = (
     piece == Piece.RED_FLAG || piece == Piece.RED_BOMB || piece == Piece.BLUE_FLAG || piece == Piece.BLUE_BOMB
 );
 
-// FIXME: specify in some way that this is broadcastable
-let offset_point_index(from_index: int, offset: (int, int)): int = {
+let offset_point_index(from_index: int, offset: (int, int)+): int+ = {
     !is_point_outside(grid[from_index] + offset): from_index + GRID_SIZE * offset.y + offset.x,
     0
 };
@@ -215,16 +217,16 @@ let get_captured_piece(attacker_index: int, defender_index: int): Piece =
         outcome == Outcome.GETS_EXPLODED: pieces[attacker_index],
     };
 
-let is_point_outside(p: (int, int)): bool = (
+let is_point_outside(p: (int, int)+): bool+ = (
     p.x < 0 || p.x >= GRID_SIZE || p.y < 0 || p.y >= GRID_SIZE
         || ((p.x == 2 || p.x == 3 || p.x == 6 || p.x == 7) && (p.y == 4 || p.y == 5))
 );
 
 let MESSAGE_HOLD_SECONDS: real = 5.0;
 
-var timer turn_seconds: real = 1.0;
-var timer seconds_since_reveal: real = 1.0;
-var timer seconds_since_message: real = 1.0 + MESSAGE_HOLD_SECONDS;
+var timer turn_seconds: real = 1;
+var timer seconds_since_reveal: real = 1;
+var timer seconds_since_message: real = 1 + MESSAGE_HOLD_SECONDS;
 
 let ease_linear(t: real): real = {
     t <= 0: 0,
@@ -238,33 +240,33 @@ let ease_out(t: real): real = {
     1
 };
 
-let board_angle: real = @PI * (player + 1 - ease_out(turn_seconds));
+let board_angle: real = @PI * ((player + 1) - ease_out(turn_seconds));
 
 let label_opacity: [real] = @join(
     {
-        revealed_spaces: 1.0,
+        revealed_spaces: 1,
         player_of(pieces) == player: {
-            turn_stage == TurnStage.BEFORE: 0.0,
+            turn_stage == TurnStage.BEFORE: 0,
             ease_linear(seconds_since_reveal)
         },
-        1.0 - ease_linear(turn_seconds)
+        1 - ease_linear(turn_seconds)
     },
     0.6,
 );
 
 let message_opacity(t: real): real = {
-    t <= 0.0: 0,
+    t <= 0: 0,
     t <= 0.5: 2*t,
     t <= 0.5 + MESSAGE_HOLD_SECONDS: 1,
-    t <= 1.0 + MESSAGE_HOLD_SECONDS: 12 - 2*t,
+    t <= 1 + MESSAGE_HOLD_SECONDS: 12 - 2*t,
     0
 };
 
-let next_turn_message_opacity: real = message_opacity(turn_seconds - 1.0);
+let next_turn_message_opacity: real = message_opacity(turn_seconds - 1);
 
-let before_turn_message_opacity: real = ease_linear(2 * (turn_seconds - MESSAGE_HOLD_SECONDS - 3.0)) * {
+let before_turn_message_opacity: real = ease_linear(2 * (turn_seconds - MESSAGE_HOLD_SECONDS - 3)) * {
     turn_stage == TurnStage.BEFORE: 1,
-    ease_linear(1.0 - 2*turn_seconds)
+    ease_linear(1 - 2 * turn_seconds)
 };
 
 let turn_info_message_opacity: real = message_opacity(seconds_since_message);
@@ -274,10 +276,13 @@ let grass_color: color = @hsv(70.0, 0.6, 0.8);
 let highlight_color: color = @hsv(50.0, 0.6, 1.0);
 let grid_color: color = @hsv(80.0, 0.6, 0.7);
 
-let board_color: [color] = [{
-    indices(grid) == selected_index: highlight_color,
-    grass_color
-} where !is_point_outside(grid)];
+let board_color: [color] = [
+    {
+        indices(grid) == selected_index: highlight_color,
+        grass_color
+    }
+    where !is_point_outside(grid)
+];
 
 let red_color: color = @hsv(10.0, 0.8, 0.8); // RGB: (204, 68, 41)
 let blue_color: color = @hsv(200.0, 0.8, 0.6); // RGB: (31, 112, 153)
@@ -288,17 +293,17 @@ let player_color: color = {
     player == Player.RED: {
         turn_seconds >= 1: red_color,
         @rgb(
-            31*(1-turn_seconds) + 204*turn_seconds,
-            112*(1-turn_seconds) + 68*turn_seconds,
-            153*(1-turn_seconds) + 41*turn_seconds,
+            31  * (1 - turn_seconds) + 204 * turn_seconds,
+            112 * (1 - turn_seconds) + 68  * turn_seconds,
+            153 * (1 - turn_seconds) + 41  * turn_seconds,
         )
     },
     player == Player.BLUE: {
         turn_seconds >= 1: blue_color,
         @rgb(
-            204*(1-turn_seconds) + 31*turn_seconds,
-            68*(1-turn_seconds) + 112*turn_seconds,
-            41*(1-turn_seconds) + 153*turn_seconds,
+            204 * (1 - turn_seconds) + 31  * turn_seconds,
+            68  * (1 - turn_seconds) + 112 * turn_seconds,
+            41  * (1 - turn_seconds) + 153 * turn_seconds,
         )
     },
 };
@@ -316,7 +321,7 @@ let last_move_color: color = {
 
 let width_units: real = 20.0;
 let height_units: real = width_units * (@height_pixels / @width_pixels);
-let to_pixels(units: real): real = units * (@width_pixels / width_units);
+let to_pixels(units: real+): real+ = units * (@width_pixels / width_units);
 
 let border_size: real = 1.0;
 let piece_size: real = 0.75;
@@ -324,8 +329,7 @@ let board_size: real = @min(width_units, height_units) - 2 * border_size;
 let space_size: real = board_size / GRID_SIZE;
 let piece_size_pixels: real = to_pixels(piece_size * space_size);
 
-// FIXME: specify in some way that this is broadcastable
-let transform(p: (real, real)): (real, real) = @rotate(
+let transform(p: (real, real)+): (real, real)+ = @rotate(
     board_size * ((p + (0.5, 0.5)) / GRID_SIZE - (0.5, 0.5)),
     (0, 0),
     board_angle,
@@ -367,7 +371,7 @@ let setup_blank_spaces: [(real, real)] = {
 
 let possible_move_spaces: [(real, real)] = view_grid[possible_moves];
 
-let piece_labels(piece: Piece): (real, real) = @join(
+let piece_labels(piece: Piece): [(real, real)] = @join(
     {pieces == piece: view_grid},
     {last_captured == piece: 0.5 * (view_grid[last_move_begin_index] + view_grid[last_move_end_index])},
 );
@@ -407,7 +411,7 @@ action end_turn() {
         else disable,
         turn_seconds := 0,
         seconds_since_reveal := 1,
-        seconds_since_message := max(seconds_since_message, 5.5),
+        seconds_since_message := @max(seconds_since_message, 5.5),
     }
     else disable,
 }
@@ -417,7 +421,7 @@ action cycle_piece(index: int) {
         @max(@join(cyclable_pieces, pieces[index])) == pieces[index]: Piece.NONE,
         @min([cyclable_pieces where cyclable_pieces > pieces[index]])
     }),
-    if pieces[index] == Piece.NONE && @total([piece_counts where player_of(@enum_variants(Piece)) == player]) == 39 then {
+    if pieces[index] == Piece.NONE && @total([piece_counts where player_of(@enum_values(Piece)) == player]) == 39 then {
         seconds_since_message := 0,
     }
     else disable,

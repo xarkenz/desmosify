@@ -416,6 +416,9 @@ impl GraphExpressionListBuilder {
             ValueKind::Local(reference) => {
                 Ok(self.get_local_symbol(reference.id))
             }
+            ValueKind::AssumeType(value, _) => {
+                self.translate_value(value)
+            }
             ValueKind::Unary { operation, operand, .. } => {
                 self.translate_unary(*operation, operand)
             }

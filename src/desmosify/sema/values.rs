@@ -1,7 +1,7 @@
 use std::rc::Rc;
 use crate::ast::{BinaryOperation, RangeKind, UnaryOperation};
 use crate::sema::intrinsic::{IntrinsicFunction, IntrinsicValue};
-use crate::sema::types::Type;
+use crate::sema::types::{ListState, Type};
 
 #[derive(Copy, Clone, PartialEq, Debug)]
 pub enum MathematicalConstant {
@@ -10,19 +10,31 @@ pub enum MathematicalConstant {
     E,
 }
 
-#[derive(Clone, PartialEq, Debug)]
+#[derive(Clone, PartialEq)]
 pub struct GlobalReference {
     pub identifier: Rc<str>,
     pub value_type: Type,
 }
 
-#[derive(Clone, PartialEq, Debug)]
+impl std::fmt::Debug for GlobalReference {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "GlobalReference<{}>({})", self.value_type, self.identifier)
+    }
+}
+
+#[derive(Clone, PartialEq)]
 pub struct LocalReference {
     pub id: u64,
     pub value_type: Type,
 }
 
-#[derive(Clone, PartialEq, Debug)]
+impl std::fmt::Debug for LocalReference {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "LocalReference<{}>({})", self.value_type, self.id)
+    }
+}
+
+#[derive(Clone, PartialEq)]
 pub enum ValueIndexOperation {
     Single {
         index: Box<Value>,
@@ -44,22 +56,51 @@ pub enum ValueIndexOperation {
 }
 
 impl ValueIndexOperation {
-    pub fn generates_list(&self) -> bool {
+    pub fn list_state(&self) -> Option<ListState> {
         match self {
-            Self::Single { index } => index.get_type().is_list(),
-            Self::Range { .. } | Self::RangeFrom { .. } | Self::RangeTo { .. } => true,
+            Self::Single { index } => index.get_type().list_state(),
+            Self::Range { .. } |
+            Self::RangeFrom { .. } |
+            Self::RangeTo { .. } => Some(ListState::IsList),
         }
     }
 }
 
-#[derive(Clone, PartialEq, Debug)]
+impl std::fmt::Debug for ValueIndexOperation {
+    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+        match self {
+            ValueIndexOperation::Single { index } => {
+                f.debug_tuple("Single").field(index).finish()
+            }
+            ValueIndexOperation::Range { kind, from_index, to_index, step } => {
+                write!(f, "Range{kind:?}")?;
+                f.debug_tuple("").field(from_index).field(to_index).field(step).finish()
+            }
+            ValueIndexOperation::RangeFrom { from_index, step } => {
+                f.debug_tuple("RangeFrom").field(from_index).field(step).finish()
+            }
+            ValueIndexOperation::RangeTo { kind, to_index } => {
+                write!(f, "RangeTo{kind:?}")?;
+                f.debug_tuple("").field(to_index).finish()
+            }
+        }
+    }
+}
+
+#[derive(Clone, PartialEq)]
 pub struct ValueListMapLoop {
     pub local: LocalReference,
     pub local_span: Option<crate::Span>,
     pub list: Value,
 }
 
-#[derive(Clone, PartialEq, Debug)]
+impl std::fmt::Debug for ValueListMapLoop {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_tuple("MapLoop").field(&self.local).field(&self.list).finish()
+    }
+}
+
+#[derive(Clone, PartialEq)]
 pub enum ValueKind {
     Type {
         identifier: Rc<str>,
@@ -81,6 +122,7 @@ pub enum ValueKind {
     IntrinsicFunction(&'static IntrinsicFunction),
     Global(GlobalReference),
     Local(LocalReference),
+    AssumeType(Box<Value>, Type),
     Unary {
         operation: UnaryOperation,
         operand: Box<Value>,
@@ -202,6 +244,9 @@ impl ValueKind {
             Self::Local(reference) => {
                 reference.value_type.clone()
             }
+            Self::AssumeType(_, result_type) => {
+                result_type.clone()
+            }
             Self::Unary { result_type, .. } => {
                 result_type.clone()
             }
@@ -224,22 +269,22 @@ impl ValueKind {
                 z_type.clone()
             }
             Self::List { item_type, .. } => {
-                item_type.clone().into_list()
+                item_type.clone().into_list(ListState::IsList)
             }
             Self::ListRange { item_type, .. } => {
-                item_type.clone().into_list()
+                item_type.clone().into_list(ListState::IsList)
             }
             Self::ListFill { value, .. } => {
-                value.get_type().into_list()
+                value.get_type().into_list(ListState::IsList)
             }
             Self::ListMap { value, .. } => {
-                value.get_type().into_list()
+                value.get_type().into_list(ListState::IsList)
             }
             Self::ListFilter { item_type, .. } => {
-                item_type.clone().into_list()
+                item_type.clone().into_list(ListState::IsList)
             }
             Self::Index { operation, item_type, .. } => {
-                item_type.clone().unflatten_list(operation.generates_list())
+                item_type.clone().unflatten_list(operation.list_state())
             }
             Self::Conditional { result_type, .. } => {
                 result_type.clone()
@@ -282,18 +327,18 @@ impl ValueKind {
 
     pub fn coerce_to(self, target_type: &Type, allow_broadcast: bool, span: Option<crate::Span>) -> crate::Result<Self> {
         let self_type = self.get_type();
-        let (self_is_list, self_type) = self_type.flatten_list();
-        let (target_is_list, target_type) = target_type.flatten_list();
+        let (self_list, self_type) = self_type.flatten_list();
+        let (target_list, target_type) = target_type.flatten_list();
 
         let mismatched_types_error = || Box::new(crate::Error {
             kind: crate::ErrorKind::MismatchedTypes {
-                expected: target_type.clone().unflatten_list(target_is_list).to_string(),
-                got: self_type.clone().unflatten_list(self_is_list).to_string(),
+                expected: target_type.clone().unflatten_list(target_list).to_string(),
+                got: self_type.clone().unflatten_list(self_list).to_string(),
             },
             span,
         });
 
-        if self_is_list != target_is_list && !(allow_broadcast && self_is_list) {
+        if !ListState::can_coerce(self_list, target_list, allow_broadcast) {
             Err(mismatched_types_error())
         }
         else if self_type == target_type || matches!(self_type, Type::Any) || matches!(target_type, Type::Any) {
@@ -330,9 +375,9 @@ impl ValueKind {
     }
 
     pub fn coerce_to_arithmetic(mut self, constraint: fn(&Type) -> crate::Result<()>, span: Option<crate::Span>) -> crate::Result<(Self, Type)> {
-        let (self_is_list, mut self_type) = self.get_type().into_flatten_list();
+        let (self_list, mut self_type) = self.get_type().into_flatten_list();
 
-        constraint(&self_type)?;
+        constraint(&self_type).map_err(|error| error.with_span(span))?;
 
         match &self_type {
             Type::Bool => {
@@ -342,11 +387,137 @@ impl ValueKind {
             _ => {}
         }
 
-        Ok((self, self_type.unflatten_list(self_is_list)))
+        Ok((self, self_type.unflatten_list(self_list)))
     }
 }
 
-#[derive(Clone, Debug)]
+impl std::fmt::Debug for ValueKind {
+    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+        let self_type = self.get_type();
+        match self {
+            ValueKind::Type { identifier } => {
+                write!(f, "Type({identifier})")
+            }
+            ValueKind::Undefined(..) => {
+                write!(f, "Undefined<{self_type}>")
+            }
+            ValueKind::Real(value) => {
+                f.debug_tuple("Real").field(value).finish()
+            }
+            ValueKind::Mathematical { kind, coefficient } => {
+                f.debug_tuple("Mathematical").field(kind).field(coefficient).finish()
+            }
+            ValueKind::Int(value) => {
+                f.debug_tuple("Int").field(value).finish()
+            }
+            ValueKind::Bool(value) => {
+                f.debug_tuple("Bool").field(value).finish()
+            }
+            ValueKind::EnumVariant { variant_ordinal, .. } => {
+                write!(f, "EnumVariant<{self_type}>")?;
+                f.debug_tuple("").field(variant_ordinal).finish()
+            }
+            ValueKind::Str(value) => {
+                f.debug_tuple("Str").field(value).finish()
+            }
+            ValueKind::Intrinsic(value) => {
+                value.fmt(f)
+            }
+            ValueKind::IntrinsicFunction(function) => {
+                function.fmt(f)
+            }
+            ValueKind::Global(global) => {
+                global.fmt(f)
+            }
+            ValueKind::Local(local) => {
+                local.fmt(f)
+            }
+            ValueKind::AssumeType(value, _) => {
+                write!(f, "AssumeType<{self_type}>")?;
+                f.debug_tuple("").field(value).finish()
+            }
+            ValueKind::Unary { operation, operand, .. } => {
+                write!(f, "{operation:?}<{self_type}>")?;
+                f.debug_tuple("").field(operand).finish()
+            }
+            ValueKind::Binary { operation, lhs, rhs, .. } => {
+                write!(f, "{operation:?}<{self_type}>")?;
+                f.debug_tuple("").field(lhs).field(rhs).finish()
+            }
+            ValueKind::Point2 { x, y, .. } => {
+                write!(f, "Point2<{self_type}>")?;
+                f.debug_tuple("").field(x).field(y).finish()
+            }
+            ValueKind::Point3 { x, y, z, .. } => {
+                write!(f, "Point3<{self_type}>")?;
+                f.debug_tuple("").field(x).field(y).field(z).finish()
+            }
+            ValueKind::GetX { point, .. } => {
+                write!(f, "GetX<{self_type}>")?;
+                f.debug_tuple("").field(point).finish()
+            }
+            ValueKind::GetY { point, .. } => {
+                write!(f, "GetY<{self_type}>")?;
+                f.debug_tuple("").field(point).finish()
+            }
+            ValueKind::GetZ { point, .. } => {
+                write!(f, "GetZ<{self_type}>")?;
+                f.debug_tuple("").field(point).finish()
+            }
+            ValueKind::List { items, .. } => {
+                write!(f, "List<{self_type}>")?;
+                items
+                    .iter()
+                    .fold(
+                        &mut f.debug_tuple(""),
+                        |tuple, item| tuple.field(item),
+                    )
+                    .finish()
+            }
+            ValueKind::ListRange { kind, start, end, step, .. } => {
+                write!(f, "ListRange{kind:?}<{self_type}>")?;
+                f.debug_tuple("").field(start).field(end).field(step).finish()
+            }
+            ValueKind::ListFill { value, count } => {
+                write!(f, "ListFill<{self_type}>")?;
+                f.debug_tuple("").field(value).field(count).finish()
+            }
+            ValueKind::ListMap { loops, value } => {
+                write!(f, "ListMap<{self_type}>")?;
+                f.debug_tuple("").field(loops).field(value).finish()
+            }
+            ValueKind::ListFilter { list, condition, .. } => {
+                write!(f, "ListFilter<{self_type}>")?;
+                f.debug_tuple("").field(list).field(condition).finish()
+            }
+            ValueKind::Index { list, operation, .. } => {
+                write!(f, "Index<{self_type}>")?;
+                f.debug_tuple("").field(list).field(operation).finish()
+            }
+            ValueKind::Conditional { condition_consequents, alternative, .. } => {
+                write!(f, "Conditional<{self_type}>")?;
+                condition_consequents
+                    .iter()
+                    .fold(
+                        &mut f.debug_tuple(""),
+                        |tuple, pair| tuple.field(pair),
+                    )
+                    .field(alternative)
+                    .finish()
+            }
+            ValueKind::UserFunctionCall { function, arguments, .. } => {
+                write!(f, "UserFunctionCall<{self_type}>")?;
+                f.debug_tuple("").field(function).field(arguments).finish()
+            }
+            ValueKind::Let { local, value, inner, .. } => {
+                write!(f, "Let<{self_type}>")?;
+                f.debug_tuple("").field(local).field(value).field(inner).finish()
+            }
+        }
+    }
+}
+
+#[derive(Clone)]
 pub struct Value {
     pub kind: ValueKind,
     pub span: Option<crate::Span>,
@@ -396,6 +567,12 @@ impl From<ValueKind> for Value {
     }
 }
 
+impl std::fmt::Debug for Value {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        self.kind.fmt(f)
+    }
+}
+
 #[derive(Clone, Debug)]
 pub enum ActionValueKind {
     Disable,
@@ -440,7 +617,7 @@ impl ActionValueKind {
     }
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone)]
 pub struct ActionValue {
     pub kind: ActionValueKind,
     pub span: Option<crate::Span>,
@@ -467,5 +644,11 @@ impl From<ActionValueKind> for ActionValue {
             kind,
             span: None,
         }
+    }
+}
+
+impl std::fmt::Debug for ActionValue {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        self.kind.fmt(f)
     }
 }

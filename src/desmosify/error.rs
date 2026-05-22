@@ -181,6 +181,10 @@ pub enum ErrorKind {
     InvalidListItemType {
         item_type: String,
     },
+    BroadcastableTypeNotAllowed,
+    InvalidBroadcastableItemType {
+        item_type: String,
+    },
     InvalidPointComponentType {
         component_type: String,
     },
@@ -221,8 +225,8 @@ pub enum ErrorKind {
     ExpectedFunctionType {
         got_type: String,
     },
-    ExpectedTypeArgument,
-    ExpectedEnumType,
+    ExpectedTypeValue,
+    ExpectedEnumTypeValue,
     CannotMergeTypes {
         type_1: String,
         type_2: String,
@@ -344,6 +348,12 @@ impl std::fmt::Display for ErrorKind {
             Self::InvalidListItemType { item_type } => {
                 write!(f, "type '{item_type}' cannot be used inside a list")
             }
+            Self::BroadcastableTypeNotAllowed => {
+                write!(f, "types can only be broadcastable within a function")
+            }
+            Self::InvalidBroadcastableItemType { item_type } => {
+                write!(f, "type '{item_type}' cannot be marked as broadcastable")
+            }
             Self::InvalidPointComponentType { component_type } => {
                 write!(f, "type '{component_type}' cannot be the component of a point")
             }
@@ -377,11 +387,11 @@ impl std::fmt::Display for ErrorKind {
             Self::ExpectedFunctionType { got_type } => {
                 write!(f, "expected a function, got '{got_type}'")
             }
-            Self::ExpectedTypeArgument => {
-                write!(f, "this function requires a type to be given as its argument")
+            Self::ExpectedTypeValue => {
+                write!(f, "expected the name of a type")
             }
-            Self::ExpectedEnumType => {
-                write!(f, "expected an enumeration type")
+            Self::ExpectedEnumTypeValue => {
+                write!(f, "expected the name of an enumeration type")
             }
             Self::CannotMergeTypes { type_1, type_2 } => {
                 write!(f, "types '{type_1}' and '{type_2}' are incompatible")
@@ -439,6 +449,11 @@ pub struct Error {
 pub type Result<T> = std::result::Result<T, Box<Error>>;
 
 impl Error {
+    pub fn with_span(mut self: Box<Self>, span: Option<Span>) -> Box<Self> {
+        self.span = span;
+        self
+    }
+
     pub fn to_string_with_context(&self, paths: &[PathBuf]) -> String {
         if let Some(span) = self.span {
             let path = &paths[span.source_id];
