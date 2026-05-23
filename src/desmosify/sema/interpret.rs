@@ -57,6 +57,7 @@ pub fn interpret_program(context: &GlobalContext) -> crate::Result<Program> {
         ticker: interpret_ticker_declarations(context, &mut next_local_id)?,
         public: interpret_public_declarations(context, &mut next_local_id)?,
         display: interpret_display_declarations(context, &mut next_local_id)?,
+        next_local_id,
     })
 }
 

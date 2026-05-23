@@ -27,6 +27,7 @@ pub struct GraphExpressionListBuilder {
     global_entries: Vec<Box<dyn GraphEntry>>,
     action_entries: Vec<Box<dyn GraphEntry>>,
     display_entries: Vec<Box<dyn GraphEntry>>,
+    next_local_id: u64,
     next_entry_id: u64,
     global_symbols: SymbolTable,
     action_symbols: SymbolTable,
@@ -34,6 +35,11 @@ pub struct GraphExpressionListBuilder {
     dummy_unreachable_created: bool,
     intrinsic_range_inclusive_created: bool,
     intrinsic_range_exclusive_created: bool,
+    intrinsic_index_range_inclusive_created: bool,
+    intrinsic_index_range_exclusive_created: bool,
+    intrinsic_index_range_from_created: bool,
+    intrinsic_index_range_to_inclusive_created: bool,
+    intrinsic_index_range_to_exclusive_created: bool,
 }
 
 impl GraphExpressionListBuilder {
@@ -65,6 +71,7 @@ impl GraphExpressionListBuilder {
                 collapsed: true,
                 secret: false,
             })],
+            next_local_id: 0,
             next_entry_id: 0,
             global_symbols: SymbolTable::new(GraphExpression::Letter('G')),
             action_symbols: SymbolTable::new(GraphExpression::Letter('A')),
@@ -72,6 +79,11 @@ impl GraphExpressionListBuilder {
             dummy_unreachable_created: false,
             intrinsic_range_inclusive_created: false,
             intrinsic_range_exclusive_created: false,
+            intrinsic_index_range_inclusive_created: false,
+            intrinsic_index_range_exclusive_created: false,
+            intrinsic_index_range_from_created: false,
+            intrinsic_index_range_to_inclusive_created: false,
+            intrinsic_index_range_to_exclusive_created: false,
         }
     }
 
@@ -85,6 +97,7 @@ impl GraphExpressionListBuilder {
                 .chain(self.action_entries)
                 .chain(self.display_entries)
                 .collect(),
+            next_local_id: self.next_local_id,
         }
     }
 
@@ -98,6 +111,12 @@ impl GraphExpressionListBuilder {
         let id = self.next_entry_id;
         self.next_entry_id += 1;
         id.to_string()
+    }
+
+    pub fn create_local_id(&mut self) -> u64 {
+        let id = self.next_local_id;
+        self.next_local_id += 1;
+        id
     }
 
     pub fn get_global_symbol(&mut self, identifier: &str) -> GraphExpression {
@@ -114,6 +133,11 @@ impl GraphExpressionListBuilder {
             lhs: Box::new(GraphExpression::Letter('l')),
             rhs: Box::new(GraphExpression::Alphanumeric(id.to_string())),
         }
+    }
+
+    pub fn create_local_symbol(&mut self) -> GraphExpression {
+        let id = self.create_local_id();
+        self.get_local_symbol(id)
     }
 
     pub fn create_dummy_noop(&mut self) -> GraphExpression {
@@ -174,12 +198,17 @@ impl GraphExpressionListBuilder {
         };
 
         if !self.intrinsic_range_inclusive_created {
+            let entry_id = self.create_entry_id();
+
+            let local_a = self.create_local_symbol();
+            let local_b = self.create_local_symbol();
+            let local_s = self.create_local_symbol();
+
             // range_inc(a, b, s) = {
             //     a sign(s) > b sign(s): [],
             //     a + s * [0 ... floor((b - a) / s)]
             // }
             // This is terrible.
-            let id = self.create_entry_id();
             let expression = GraphExpression::Binary {
                 kind: GraphBinaryKind::Equal,
                 lhs: Box::new(GraphExpression::Binary {
@@ -187,9 +216,9 @@ impl GraphExpressionListBuilder {
                     lhs: Box::new(symbol.clone()),
                     rhs: Box::new(GraphExpression::Sequence {
                         elements: Vec::from([
-                            GraphExpression::Letter('a'),
-                            GraphExpression::Letter('b'),
-                            GraphExpression::Letter('s'),
+                            local_a.clone(),
+                            local_b.clone(),
+                            local_s.clone(),
                         ]),
                     }),
                 }),
@@ -202,21 +231,21 @@ impl GraphExpressionListBuilder {
                                 lhs: Box::new(GraphExpression::InequalityChain {
                                     lhs: Box::new(GraphExpression::Binary {
                                         kind: GraphBinaryKind::ImplicitMultiply,
-                                        lhs: Box::new(GraphExpression::Letter('a')),
+                                        lhs: Box::new(local_a.clone()),
                                         rhs: Box::new(GraphExpression::Binary {
                                             kind: GraphBinaryKind::Call,
                                             lhs: Box::new(GraphExpression::OperatorName("sign".into())),
-                                            rhs: Box::new(GraphExpression::Letter('s')),
+                                            rhs: Box::new(local_s.clone()),
                                         }),
                                     }),
                                     first_kind: GraphInequalityKind::GreaterThan,
                                     rhs: Box::new(GraphExpression::Binary {
                                         kind: GraphBinaryKind::ImplicitMultiply,
-                                        lhs: Box::new(GraphExpression::Letter('b')),
+                                        lhs: Box::new(local_b.clone()),
                                         rhs: Box::new(GraphExpression::Binary {
                                             kind: GraphBinaryKind::Call,
                                             lhs: Box::new(GraphExpression::OperatorName("sign".into())),
-                                            rhs: Box::new(GraphExpression::Letter('s')),
+                                            rhs: Box::new(local_s.clone()),
                                         }),
                                     }),
                                     chain: Vec::new(),
@@ -228,10 +257,10 @@ impl GraphExpressionListBuilder {
                             },
                             GraphExpression::Binary {
                                 kind: GraphBinaryKind::Add,
-                                lhs: Box::new(GraphExpression::Letter('a')),
+                                lhs: Box::new(local_a.clone()),
                                 rhs: Box::new(GraphExpression::Binary {
                                     kind: GraphBinaryKind::Multiply,
-                                    lhs: Box::new(GraphExpression::Letter('s')),
+                                    lhs: Box::new(local_s.clone()),
                                     rhs: Box::new(GraphExpression::Unary {
                                         kind: GraphUnaryKind::List,
                                         inner: Box::new(GraphExpression::Binary {
@@ -244,10 +273,10 @@ impl GraphExpressionListBuilder {
                                                     kind: GraphBinaryKind::Fraction,
                                                     lhs: Box::new(GraphExpression::Binary {
                                                         kind: GraphBinaryKind::Subtract,
-                                                        lhs: Box::new(GraphExpression::Letter('b')),
-                                                        rhs: Box::new(GraphExpression::Letter('a')),
+                                                        lhs: Box::new(local_b.clone()),
+                                                        rhs: Box::new(local_a.clone()),
                                                     }),
-                                                    rhs: Box::new(GraphExpression::Letter('s')),
+                                                    rhs: Box::new(local_s.clone()),
                                                 }),
                                             }),
                                         }),
@@ -258,8 +287,9 @@ impl GraphExpressionListBuilder {
                     }),
                 }),
             };
+
             self.intrinsic_entries.push(Box::new(GraphExpressionEntry {
-                id,
+                id: entry_id,
                 folder_id: Some(INTRINSICS_FOLDER_ID.into()),
                 expression,
                 hidden: true,
@@ -279,9 +309,15 @@ impl GraphExpressionListBuilder {
         };
 
         if !self.intrinsic_range_exclusive_created {
+            let entry_id = self.create_entry_id();
+
+            let local_a = self.create_local_symbol();
+            let local_b = self.create_local_symbol();
+            let local_s = self.create_local_symbol();
+            let local_x = self.create_local_symbol();
+
             // range_exc(a, b, s) = x[{x = b, 0} = 0] with x = range_inc(a, b, s)
             // This is also terrible, but not nearly as bad.
-            let id = self.create_entry_id();
             let expression = GraphExpression::Binary {
                 kind: GraphBinaryKind::Equal,
                 lhs: Box::new(GraphExpression::Binary {
@@ -289,9 +325,9 @@ impl GraphExpressionListBuilder {
                     lhs: Box::new(symbol.clone()),
                     rhs: Box::new(GraphExpression::Sequence {
                         elements: Vec::from([
-                            GraphExpression::Letter('a'),
-                            GraphExpression::Letter('b'),
-                            GraphExpression::Letter('s'),
+                            local_a.clone(),
+                            local_b.clone(),
+                            local_s.clone(),
                         ]),
                     }),
                 }),
@@ -299,7 +335,7 @@ impl GraphExpressionListBuilder {
                     kind: GraphBinaryKind::With,
                     lhs: Box::new(GraphExpression::Binary {
                         kind: GraphBinaryKind::Index,
-                        lhs: Box::new(GraphExpression::Letter('x')),
+                        lhs: Box::new(local_x.clone()),
                         rhs: Box::new(GraphExpression::Binary {
                             kind: GraphBinaryKind::Equal,
                             lhs: Box::new(GraphExpression::Unary {
@@ -308,8 +344,8 @@ impl GraphExpressionListBuilder {
                                     elements: Vec::from([
                                         GraphExpression::Binary {
                                             kind: GraphBinaryKind::Equal,
-                                            lhs: Box::new(GraphExpression::Letter('x')),
-                                            rhs: Box::new(GraphExpression::Letter('b')),
+                                            lhs: Box::new(local_x.clone()),
+                                            rhs: Box::new(local_b.clone()),
                                         },
                                         GraphExpression::Integer(0),
                                     ]),
@@ -320,29 +356,339 @@ impl GraphExpressionListBuilder {
                     }),
                     rhs: Box::new(GraphExpression::Binary {
                         kind: GraphBinaryKind::Equal,
-                        lhs: Box::new(GraphExpression::Letter('x')),
+                        lhs: Box::new(local_x.clone()),
                         rhs: Box::new(GraphExpression::Binary {
                             kind: GraphBinaryKind::Call,
                             lhs: Box::new(self.get_intrinsic_range_inclusive()),
                             rhs: Box::new(GraphExpression::Sequence {
                                 elements: Vec::from([
-                                    GraphExpression::Letter('a'),
-                                    GraphExpression::Letter('b'),
-                                    GraphExpression::Letter('s'),
+                                    local_a.clone(),
+                                    local_b.clone(),
+                                    local_s.clone(),
                                 ]),
                             }),
                         }),
                     }),
                 }),
             };
+
             self.intrinsic_entries.push(Box::new(GraphExpressionEntry {
-                id,
+                id: entry_id,
                 folder_id: Some(INTRINSICS_FOLDER_ID.into()),
                 expression,
                 hidden: true,
             }));
 
             self.intrinsic_range_exclusive_created = true;
+        }
+
+        symbol
+    }
+
+    pub fn get_intrinsic_index_range_inclusive(&mut self) -> GraphExpression {
+        let symbol = GraphExpression::Binary {
+            kind: GraphBinaryKind::Subscript,
+            lhs: Box::new(GraphExpression::Letter('I')),
+            rhs: Box::new(GraphExpression::Alphanumeric("IdxRangeInc".into())),
+        };
+
+        if !self.intrinsic_index_range_inclusive_created {
+            let entry_id = self.create_entry_id();
+
+            let local_l = self.create_local_symbol();
+            let local_a = self.create_local_symbol();
+            let local_b = self.create_local_symbol();
+            let local_s = self.create_local_symbol();
+            let local_i = self.create_local_symbol();
+
+            // idx_range_inc(l, a, b, s) = [l[i] for i = range_inc(a, b, s)]
+            let expression = GraphExpression::Binary {
+                kind: GraphBinaryKind::Equal,
+                lhs: Box::new(GraphExpression::Binary {
+                    kind: GraphBinaryKind::Call,
+                    lhs: Box::new(symbol.clone()),
+                    rhs: Box::new(GraphExpression::Sequence {
+                        elements: Vec::from([
+                            local_l.clone(),
+                            local_a.clone(),
+                            local_b.clone(),
+                            local_s.clone(),
+                        ]),
+                    }),
+                }),
+                rhs: Box::new(GraphExpression::Unary {
+                    kind: GraphUnaryKind::List,
+                    inner: Box::new(GraphExpression::Binary {
+                        kind: GraphBinaryKind::For,
+                        lhs: Box::new(GraphExpression::Binary {
+                            kind: GraphBinaryKind::Index,
+                            lhs: Box::new(local_l.clone()),
+                            rhs: Box::new(local_i.clone()),
+                        }),
+                        rhs: Box::new(GraphExpression::Binary {
+                            kind: GraphBinaryKind::Equal,
+                            lhs: Box::new(local_i.clone()),
+                            rhs: Box::new(GraphExpression::Binary {
+                                kind: GraphBinaryKind::Call,
+                                lhs: Box::new(self.get_intrinsic_range_inclusive()),
+                                rhs: Box::new(GraphExpression::Sequence {
+                                    elements: Vec::from([
+                                        local_a.clone(),
+                                        local_b.clone(),
+                                        local_s.clone(),
+                                    ]),
+                                }),
+                            }),
+                        }),
+                    }),
+                }),
+            };
+
+            self.intrinsic_entries.push(Box::new(GraphExpressionEntry {
+                id: entry_id,
+                folder_id: Some(INTRINSICS_FOLDER_ID.into()),
+                expression,
+                hidden: true,
+            }));
+
+            self.intrinsic_index_range_inclusive_created = true;
+        }
+
+        symbol
+    }
+
+    pub fn get_intrinsic_index_range_exclusive(&mut self) -> GraphExpression {
+        let symbol = GraphExpression::Binary {
+            kind: GraphBinaryKind::Subscript,
+            lhs: Box::new(GraphExpression::Letter('I')),
+            rhs: Box::new(GraphExpression::Alphanumeric("IdxRangeExc".into())),
+        };
+
+        if !self.intrinsic_index_range_exclusive_created {
+            let entry_id = self.create_entry_id();
+
+            let local_l = self.create_local_symbol();
+            let local_a = self.create_local_symbol();
+            let local_b = self.create_local_symbol();
+            let local_s = self.create_local_symbol();
+            let local_i = self.create_local_symbol();
+
+            // idx_range_exc(l, a, b, s) = [l[i] for i = range_exc(a, b, s)]
+            let expression = GraphExpression::Binary {
+                kind: GraphBinaryKind::Equal,
+                lhs: Box::new(GraphExpression::Binary {
+                    kind: GraphBinaryKind::Call,
+                    lhs: Box::new(symbol.clone()),
+                    rhs: Box::new(GraphExpression::Sequence {
+                        elements: Vec::from([
+                            local_l.clone(),
+                            local_a.clone(),
+                            local_b.clone(),
+                            local_s.clone(),
+                        ]),
+                    }),
+                }),
+                rhs: Box::new(GraphExpression::Unary {
+                    kind: GraphUnaryKind::List,
+                    inner: Box::new(GraphExpression::Binary {
+                        kind: GraphBinaryKind::For,
+                        lhs: Box::new(GraphExpression::Binary {
+                            kind: GraphBinaryKind::Index,
+                            lhs: Box::new(local_l.clone()),
+                            rhs: Box::new(local_i.clone()),
+                        }),
+                        rhs: Box::new(GraphExpression::Binary {
+                            kind: GraphBinaryKind::Equal,
+                            lhs: Box::new(local_i.clone()),
+                            rhs: Box::new(GraphExpression::Binary {
+                                kind: GraphBinaryKind::Call,
+                                lhs: Box::new(self.get_intrinsic_range_exclusive()),
+                                rhs: Box::new(GraphExpression::Sequence {
+                                    elements: Vec::from([
+                                        local_a.clone(),
+                                        local_b.clone(),
+                                        local_s.clone(),
+                                    ]),
+                                }),
+                            }),
+                        }),
+                    }),
+                }),
+            };
+
+            self.intrinsic_entries.push(Box::new(GraphExpressionEntry {
+                id: entry_id,
+                folder_id: Some(INTRINSICS_FOLDER_ID.into()),
+                expression,
+                hidden: true,
+            }));
+
+            self.intrinsic_index_range_exclusive_created = true;
+        }
+
+        symbol
+    }
+
+    pub fn get_intrinsic_index_range_from(&mut self) -> GraphExpression {
+        let symbol = GraphExpression::Binary {
+            kind: GraphBinaryKind::Subscript,
+            lhs: Box::new(GraphExpression::Letter('I')),
+            rhs: Box::new(GraphExpression::Alphanumeric("IdxRangeFrom".into())),
+        };
+
+        if !self.intrinsic_index_range_from_created {
+            let entry_id = self.create_entry_id();
+
+            let local_l = self.create_local_symbol();
+            let local_a = self.create_local_symbol();
+            let local_s = self.create_local_symbol();
+
+            // idx_range_from(l, a, s) = idx_range_inc(l, a, count(l), s)
+            let expression = GraphExpression::Binary {
+                kind: GraphBinaryKind::Equal,
+                lhs: Box::new(GraphExpression::Binary {
+                    kind: GraphBinaryKind::Call,
+                    lhs: Box::new(symbol.clone()),
+                    rhs: Box::new(GraphExpression::Sequence {
+                        elements: Vec::from([
+                            local_l.clone(),
+                            local_a.clone(),
+                            local_s.clone(),
+                        ]),
+                    }),
+                }),
+                rhs: Box::new(GraphExpression::Binary {
+                    kind: GraphBinaryKind::Call,
+                    lhs: Box::new(self.get_intrinsic_index_range_inclusive()),
+                    rhs: Box::new(GraphExpression::Sequence {
+                        elements: Vec::from([
+                            local_l.clone(),
+                            local_a.clone(),
+                            GraphExpression::Binary {
+                                kind: GraphBinaryKind::Call,
+                                lhs: Box::new(GraphExpression::OperatorName("count".into())),
+                                rhs: Box::new(local_l.clone()),
+                            },
+                            local_s.clone(),
+                        ]),
+                    }),
+                }),
+            };
+
+            self.intrinsic_entries.push(Box::new(GraphExpressionEntry {
+                id: entry_id,
+                folder_id: Some(INTRINSICS_FOLDER_ID.into()),
+                expression,
+                hidden: true,
+            }));
+
+            self.intrinsic_index_range_from_created = true;
+        }
+
+        symbol
+    }
+
+    pub fn get_intrinsic_index_range_to_inclusive(&mut self) -> GraphExpression {
+        let symbol = GraphExpression::Binary {
+            kind: GraphBinaryKind::Subscript,
+            lhs: Box::new(GraphExpression::Letter('I')),
+            rhs: Box::new(GraphExpression::Alphanumeric("IdxRangeToInc".into())),
+        };
+
+        if !self.intrinsic_index_range_to_inclusive_created {
+            let entry_id = self.create_entry_id();
+
+            let local_l = self.create_local_symbol();
+            let local_b = self.create_local_symbol();
+
+            // idx_range_to_inc(l, b) = idx_range_inc(l, 1, b, 1)
+            let expression = GraphExpression::Binary {
+                kind: GraphBinaryKind::Equal,
+                lhs: Box::new(GraphExpression::Binary {
+                    kind: GraphBinaryKind::Call,
+                    lhs: Box::new(symbol.clone()),
+                    rhs: Box::new(GraphExpression::Sequence {
+                        elements: Vec::from([
+                            local_l.clone(),
+                            local_b.clone(),
+                        ]),
+                    }),
+                }),
+                rhs: Box::new(GraphExpression::Binary {
+                    kind: GraphBinaryKind::Call,
+                    lhs: Box::new(self.get_intrinsic_index_range_inclusive()),
+                    rhs: Box::new(GraphExpression::Sequence {
+                        elements: Vec::from([
+                            local_l.clone(),
+                            GraphExpression::Integer(1),
+                            local_b.clone(),
+                            GraphExpression::Integer(1),
+                        ]),
+                    }),
+                }),
+            };
+
+            self.intrinsic_entries.push(Box::new(GraphExpressionEntry {
+                id: entry_id,
+                folder_id: Some(INTRINSICS_FOLDER_ID.into()),
+                expression,
+                hidden: true,
+            }));
+
+            self.intrinsic_index_range_to_inclusive_created = true;
+        }
+
+        symbol
+    }
+
+    pub fn get_intrinsic_index_range_to_exclusive(&mut self) -> GraphExpression {
+        let symbol = GraphExpression::Binary {
+            kind: GraphBinaryKind::Subscript,
+            lhs: Box::new(GraphExpression::Letter('I')),
+            rhs: Box::new(GraphExpression::Alphanumeric("IdxRangeToExc".into())),
+        };
+
+        if !self.intrinsic_index_range_to_exclusive_created {
+            let entry_id = self.create_entry_id();
+
+            let local_l = self.create_local_symbol();
+            let local_b = self.create_local_symbol();
+
+            // idx_range_to_exc(l, b) = idx_range_exc(l, 1, b, 1)
+            let expression = GraphExpression::Binary {
+                kind: GraphBinaryKind::Equal,
+                lhs: Box::new(GraphExpression::Binary {
+                    kind: GraphBinaryKind::Call,
+                    lhs: Box::new(symbol.clone()),
+                    rhs: Box::new(GraphExpression::Sequence {
+                        elements: Vec::from([
+                            local_l.clone(),
+                            local_b.clone(),
+                        ]),
+                    }),
+                }),
+                rhs: Box::new(GraphExpression::Binary {
+                    kind: GraphBinaryKind::Call,
+                    lhs: Box::new(self.get_intrinsic_index_range_exclusive()),
+                    rhs: Box::new(GraphExpression::Sequence {
+                        elements: Vec::from([
+                            local_l.clone(),
+                            GraphExpression::Integer(1),
+                            local_b.clone(),
+                            GraphExpression::Integer(1),
+                        ]),
+                    }),
+                }),
+            };
+
+            self.intrinsic_entries.push(Box::new(GraphExpressionEntry {
+                id: entry_id,
+                folder_id: Some(INTRINSICS_FOLDER_ID.into()),
+                expression,
+                hidden: true,
+            }));
+
+            self.intrinsic_index_range_to_exclusive_created = true;
         }
 
         symbol
@@ -544,13 +890,49 @@ impl GraphExpressionListBuilder {
                     })
                 }
                 ValueIndexOperation::Range { kind, from_index, to_index, step} => {
-                    todo!()
+                    Ok(GraphExpression::Binary {
+                        kind: GraphBinaryKind::Call,
+                        lhs: Box::new(match kind {
+                            RangeKind::Inclusive => self.get_intrinsic_index_range_inclusive(),
+                            RangeKind::Exclusive => self.get_intrinsic_index_range_exclusive(),
+                        }),
+                        rhs: Box::new(GraphExpression::Sequence {
+                            elements: Vec::from([
+                                self.translate_value(list)?,
+                                self.translate_value(from_index)?,
+                                self.translate_value(to_index)?,
+                                self.translate_value(step)?,
+                            ]),
+                        }),
+                    })
                 }
                 ValueIndexOperation::RangeFrom { from_index, step } => {
-                    todo!()
+                    Ok(GraphExpression::Binary {
+                        kind: GraphBinaryKind::Call,
+                        lhs: Box::new(self.get_intrinsic_index_range_from()),
+                        rhs: Box::new(GraphExpression::Sequence {
+                            elements: Vec::from([
+                                self.translate_value(list)?,
+                                self.translate_value(from_index)?,
+                                self.translate_value(step)?,
+                            ]),
+                        }),
+                    })
                 }
                 ValueIndexOperation::RangeTo { kind, to_index } => {
-                    todo!()
+                    Ok(GraphExpression::Binary {
+                        kind: GraphBinaryKind::Call,
+                        lhs: Box::new(match kind {
+                            RangeKind::Inclusive => self.get_intrinsic_index_range_to_inclusive(),
+                            RangeKind::Exclusive => self.get_intrinsic_index_range_to_exclusive(),
+                        }),
+                        rhs: Box::new(GraphExpression::Sequence {
+                            elements: Vec::from([
+                                self.translate_value(list)?,
+                                self.translate_value(to_index)?,
+                            ]),
+                        }),
+                    })
                 }
             }
             ValueKind::Conditional { condition_consequents, alternative, .. } => {
