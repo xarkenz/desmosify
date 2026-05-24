@@ -1,7 +1,7 @@
 use crate::ast::{BinaryOperation, RangeKind, UnaryOperation};
-use crate::desmos::{GraphBinaryKind, GraphExpressionEntry, GraphFolderEntry, GraphEntry, GraphExpression, GraphExpressionList, GraphTicker, GraphInequalityKind, GraphUnaryKind, GraphTextEntry, GraphPointStyle, GraphLabelOrientation, GraphLineStyle};
+use crate::desmos::{GraphBinaryKind, GraphExpressionEntry, GraphFolderEntry, GraphEntry, GraphExpression, GraphExpressionList, GraphTicker, GraphInequalityKind, GraphUnaryKind, GraphTextEntry, GraphPointStyle, GraphLabelOrientation, GraphLineStyle, GraphSlider, GraphSliderLoopMode};
 use crate::desmos::symbol::SymbolTable;
-use crate::sema::{Program, ProgramAction, ProgramDisplayAttribute, ProgramDisplayAttributeValue, ProgramDisplayElement, ProgramLet, ProgramPublicLine, ProgramTicker, ProgramVariable};
+use crate::sema::{Program, ProgramAction, ProgramDisplayAttribute, ProgramDisplayAttributeValue, ProgramDisplayElement, ProgramLet, ProgramPublicLine, ProgramTicker, ProgramVariable, ProgramVariableKind};
 use crate::sema::intrinsic::{IntrinsicBinaryKind, IntrinsicColorKind, IntrinsicDoubleReducerKind, IntrinsicParameterizedReducerKind, IntrinsicReducerKind, IntrinsicUnaryKind, IntrinsicValue};
 use crate::sema::types::Type;
 use crate::sema::values::{ActionValue, ActionValueKind, MathematicalConstant, Value, ValueIndexOperation, ValueKind};
@@ -878,7 +878,7 @@ impl GraphExpressionListBuilder {
                 Ok(GraphExpression::Binary {
                     kind: GraphBinaryKind::Index,
                     lhs: Box::new(self.translate_value(list)?),
-                    rhs: Box::new(self.translate_value(condition)?),
+                    rhs: Box::new(self.translate_condition(condition)?),
                 })
             }
             ValueKind::Index { list, operation, .. } => match operation {
@@ -1212,7 +1212,8 @@ impl GraphExpressionListBuilder {
                     inner: Box::new(GraphExpression::Sequence {
                         elements: Vec::from([
                             self.translate_condition(lhs)?,
-                            self.translate_value(rhs)?,
+                            self.translate_condition(rhs)?,
+                            GraphExpression::Integer(0),
                         ]),
                     }),
                 })
@@ -1225,6 +1226,27 @@ impl GraphExpressionListBuilder {
 
     pub fn translate_condition(&mut self, value: &Value) -> crate::Result<GraphExpression> {
         match &value.kind {
+            ValueKind::Bool(true) => {
+                Ok(GraphExpression::Binary {
+                    kind: GraphBinaryKind::Equal,
+                    lhs: Box::new(GraphExpression::Integer(0)),
+                    rhs: Box::new(GraphExpression::Integer(0)),
+                })
+            }
+            ValueKind::Bool(false) => {
+                Ok(GraphExpression::Binary {
+                    kind: GraphBinaryKind::Equal,
+                    lhs: Box::new(GraphExpression::Integer(0)),
+                    rhs: Box::new(GraphExpression::Integer(1)),
+                })
+            }
+            ValueKind::Unary { operation: UnaryOperation::LogicalNot, operand, .. } => {
+                Ok(GraphExpression::Binary {
+                    kind: GraphBinaryKind::Equal,
+                    lhs: Box::new(self.translate_value(operand)?),
+                    rhs: Box::new(GraphExpression::Integer(0)),
+                })
+            }
             ValueKind::Binary { operation: BinaryOperation::Equal, lhs, rhs, .. } => {
                 Ok(GraphExpression::Binary {
                     kind: GraphBinaryKind::Equal,
@@ -1651,11 +1673,20 @@ impl GraphExpressionListBuilder {
             lhs: Box::new(self.get_global_symbol(&program_variable.identifier())),
             rhs: Box::new(self.translate_value(program_variable.value())?),
         };
+        let slider = match program_variable.kind() {
+            ProgramVariableKind::Default => None,
+            ProgramVariableKind::Timer => Some(GraphSlider {
+                loop_mode: GraphSliderLoopMode::PlayIndefinitely,
+                is_playing: true,
+                ..Default::default()
+            }),
+        };
 
         self.global_entries.push(Box::new(GraphExpressionEntry {
             id,
             folder_id: Some(GLOBALS_FOLDER_ID.into()),
             expression,
+            slider,
             ..Default::default()
         }));
 
@@ -1714,7 +1745,6 @@ impl GraphExpressionListBuilder {
                 if text.is_empty() {
                     Box::new(GraphExpressionEntry {
                         id,
-                        expression: GraphExpression::Empty,
                         ..Default::default()
                     })
                 }
@@ -1747,14 +1777,6 @@ impl GraphExpressionListBuilder {
     }
 
     pub fn add_display_element(&mut self, element: &ProgramDisplayElement) -> crate::Result<()> {
-        let mut entry = GraphExpressionEntry {
-            id: self.create_entry_id(),
-            folder_id: Some(DISPLAY_FOLDER_ID.into()),
-            expression: self.translate_value(element.expression())?,
-            display: true,
-            ..Default::default()
-        };
-
         let unsupported_error = |value: &Value| Box::new(crate::Error {
             kind: crate::ErrorKind::UnsupportedValue,
             span: value.span,
@@ -1813,6 +1835,13 @@ impl GraphExpressionListBuilder {
             }
         }
 
+        let mut entry = GraphExpressionEntry {
+            id: self.create_entry_id(),
+            folder_id: Some(DISPLAY_FOLDER_ID.into()),
+            expression: self.translate_value(element.expression())?,
+            ..Default::default()
+        };
+
         let mut has_color = false;
         let mut has_point = false;
         let mut has_label = false;
@@ -1835,6 +1864,7 @@ impl GraphExpressionListBuilder {
                     prevent_duplicate(attribute, &mut has_point)?;
                     let arguments = get_arguments(attribute, 0, 4)?;
 
+                    entry.display = true;
                     entry.point.display = true;
                     if let Some(opacity) = arguments.get(0) {
                         entry.point.opacity = self.translate_value(opacity)?;
@@ -1864,6 +1894,7 @@ impl GraphExpressionListBuilder {
                     prevent_duplicate(attribute, &mut has_label)?;
                     let arguments = get_arguments(attribute, 0, 6)?;
 
+                    // Don't set entry.display = true, that will show points as well
                     entry.label.display = true;
                     if let Some(text_value) = arguments.get(0) {
                         let ValueKind::Str(text) = &text_value.kind else {
@@ -1901,6 +1932,7 @@ impl GraphExpressionListBuilder {
                     prevent_duplicate(attribute, &mut has_line)?;
                     let arguments = get_arguments(attribute, 0, 3)?;
 
+                    entry.display = true;
                     entry.line.display = true;
                     if let Some(opacity) = arguments.get(0) {
                         entry.line.opacity = self.translate_value(opacity)?;
@@ -1923,6 +1955,7 @@ impl GraphExpressionListBuilder {
                     prevent_duplicate(attribute, &mut has_fill)?;
                     let arguments = get_arguments(attribute, 0, 1)?;
 
+                    entry.display = true;
                     entry.fill.display = true;
                     if let Some(opacity) = arguments.get(0) {
                         entry.fill.opacity = self.translate_value(opacity)?;

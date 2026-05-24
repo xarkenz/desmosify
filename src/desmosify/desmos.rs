@@ -94,7 +94,8 @@ impl GraphSliderLoopMode {
 #[derive(Debug)]
 pub struct GraphSlider {
     pub loop_mode: GraphSliderLoopMode,
-    pub animation_period: f64,
+    pub animation_period: Option<f64>,
+    pub is_playing: bool,
     pub min: GraphExpression,
     pub max: GraphExpression,
     pub step: GraphExpression,
@@ -104,8 +105,13 @@ impl ToJson for GraphSlider {
     fn to_json(&self) -> JsonValue {
         let mut object = json::object!{
             "loopMode": self.loop_mode.name(),
-            "animationPeriod": self.animation_period,
         };
+        if let Some(animation_period) = self.animation_period {
+            object["animationPeriod"] = animation_period.into();
+        }
+        if self.is_playing {
+            object["isPlaying"] = true.into();
+        }
         if !self.min.is_empty() {
             object["min"] = self.min.to_latex().to_string().into();
             object["hardMin"] = true.into();
@@ -118,6 +124,19 @@ impl ToJson for GraphSlider {
             object["step"] = self.step.to_latex().to_string().into();
         }
         object
+    }
+}
+
+impl Default for GraphSlider {
+    fn default() -> Self {
+        Self {
+            loop_mode: Default::default(),
+            animation_period: None,
+            is_playing: false,
+            min: Default::default(),
+            max: Default::default(),
+            step: Default::default(),
+        }
     }
 }
 
@@ -491,6 +510,9 @@ impl ToJson for GraphExpressionEntry {
         if !self.color_expression.is_empty() {
             object["colorLatex"] = self.color_expression.to_latex().to_string().into();
         }
+        if let Some(slider) = &self.slider {
+            object["slider"] = slider.to_json();
+        }
         self.point.add_fields(&mut object);
         self.label.add_fields(&mut object);
         self.line.add_fields(&mut object);
@@ -590,12 +612,28 @@ impl ToJson for GraphExpressionList {
 #[derive(Debug)]
 pub struct GraphSettings {
     pub product_name: String,
+    pub show_grid: bool,
+    pub show_x_axis: bool,
+    pub show_y_axis: bool,
+    pub viewport_x_min: f64,
+    pub viewport_y_min: f64,
+    pub viewport_x_max: f64,
+    pub viewport_y_max: f64,
 }
 
 impl ToJson for GraphSettings {
     fn to_json(&self) -> JsonValue {
         json::object!{
             "product": self.product_name.as_str(),
+            "showGrid": self.show_grid,
+            "showXAxis": self.show_x_axis,
+            "showYAxis": self.show_y_axis,
+            "viewport": {
+                "xmin": self.viewport_x_min,
+                "ymin": self.viewport_y_min,
+                "xmax": self.viewport_x_max,
+                "ymax": self.viewport_y_max,
+            },
         }
     }
 }

@@ -96,14 +96,16 @@ let next_player: Player = {
     player == Player.BLUE: Player.RED,
 };
 
+let piece_values: [Piece] = @enum_values(Piece)[2..];
+
 let piece_counts: [int] = [
     @count([pieces where pieces == piece])
-    for piece in @enum_values(Piece)
+    for piece in piece_values
 ];
 
 let cyclable_pieces: [Piece] = [
-    @enum_values(Piece)
-    where piece_counts < MAX_PIECE_COUNTS && player_of(@enum_values(Piece)) == player
+    piece_values
+    where piece_counts < MAX_PIECE_COUNTS && player_of(piece_values) == player
 ];
 
 let turn_is_over: bool = {
@@ -135,8 +137,9 @@ let poke(l: [?], i: int, x: ?): [?] = {
 };
 
 let player_of(piece: Piece+): Player+ = {
-    Piece.RED_FLAG <= piece <= Piece.RED_MARSHAL: Player.RED,
-    Piece.BLUE_FLAG <= piece <= Piece.BLUE_MARSHAL: Player.BLUE,
+    // TODO: chained inequalities
+    Piece.RED_FLAG <= piece && piece <= Piece.RED_MARSHAL: Player.RED,
+    Piece.BLUE_FLAG <= piece && piece <= Piece.BLUE_MARSHAL: Player.BLUE,
 };
 
 let piece_type_of(piece: Piece+): PieceType+ = {
@@ -246,6 +249,7 @@ let label_opacity: [real] = @join(
     {
         revealed_spaces: 1,
         player_of(pieces) == player: {
+            mode == Mode.SETUP: 1,
             turn_stage == TurnStage.BEFORE: 0,
             ease_linear(seconds_since_reveal)
         },
@@ -328,6 +332,7 @@ let piece_size: real = 0.75;
 let board_size: real = @min(width_units, height_units) - 2 * border_size;
 let space_size: real = board_size / GRID_SIZE;
 let piece_size_pixels: real = to_pixels(piece_size * space_size);
+let label_size: real = 2.0;
 
 let transform(p: (real, real)+): (real, real)+ = @rotate(
     board_size * ((p + (0.5, 0.5)) / GRID_SIZE - (0.5, 0.5)),
@@ -345,13 +350,16 @@ let view_rectangle: polygon = @polygon(
 );
 
 let board_squares: [polygon] = [
-    @polygon(transform(p + [
-        (-0.5, -0.5),
-        (0.5, -0.5),
-        (0.5, 0.5),
-        (-0.5, 0.5),
-    ]))
-    for p in grid
+    [
+        @polygon(transform(p + [
+            (-0.5, -0.5),
+            (0.5, -0.5),
+            (0.5, 0.5),
+            (-0.5, 0.5),
+        ]))
+        for p in grid
+    ]
+    where !is_point_outside(grid)
 ];
 
 let last_move_indicator: segment = @segment(
@@ -375,8 +383,6 @@ let piece_labels(piece: Piece): [(real, real)] = @join(
     {pieces == piece: view_grid},
     {last_captured == piece: 0.5 * (view_grid[last_move_begin_index] + view_grid[last_move_end_index])},
 );
-
-let label_size: real = 2.0; // TODO: dynamic size
 
 action reset() {
     mode := Mode.SETUP,
@@ -421,7 +427,7 @@ action cycle_piece(index: int) {
         @max(@join(cyclable_pieces, pieces[index])) == pieces[index]: Piece.NONE,
         @min([cyclable_pieces where cyclable_pieces > pieces[index]])
     }),
-    if pieces[index] == Piece.NONE && @total([piece_counts where player_of(@enum_values(Piece)) == player]) == 39 then {
+    if pieces[index] == Piece.NONE && @total([piece_counts where player_of(piece_values) == player]) == 39 then {
         seconds_since_message := 0,
     }
     else disable,
@@ -496,8 +502,8 @@ display {
     setup_blank_spaces: color(player_color), point(0.5, 0.5 * piece_size_pixels), click { action cycle_piece(@index) };
     possible_move_spaces: color(highlight_color), point(1, 0.4 * piece_size_pixels), click { action move_piece(@index) };
 
-    piece_labels(Piece.RED_FLAG): color(red_label_color), label("`🏳`", label_opacity, label_size);
-    piece_labels(Piece.RED_BOMB): color(red_label_color), label("`💣`", label_opacity, label_size);
+    piece_labels(Piece.RED_FLAG): color(red_label_color), label("🏳️", label_opacity, label_size);
+    piece_labels(Piece.RED_BOMB): color(red_label_color), label("💣", label_opacity, label_size);
     piece_labels(Piece.RED_SPY): color(red_label_color), label("`S`", label_opacity, label_size);
     piece_labels(Piece.RED_SCOUT): color(red_label_color), label("`9`", label_opacity, label_size);
     piece_labels(Piece.RED_MINER): color(red_label_color), label("`8`", label_opacity, label_size);
@@ -508,8 +514,8 @@ display {
     piece_labels(Piece.RED_COLONEL): color(red_label_color), label("`3`", label_opacity, label_size);
     piece_labels(Piece.RED_GENERAL): color(red_label_color), label("`2`", label_opacity, label_size);
     piece_labels(Piece.RED_MARSHAL): color(red_label_color), label("`1`", label_opacity, label_size);
-    piece_labels(Piece.BLUE_FLAG): color(blue_label_color), label("`🏳`", label_opacity, label_size);
-    piece_labels(Piece.BLUE_BOMB): color(blue_label_color), label("`💣`", label_opacity, label_size);
+    piece_labels(Piece.BLUE_FLAG): color(blue_label_color), label("🏳️", label_opacity, label_size);
+    piece_labels(Piece.BLUE_BOMB): color(blue_label_color), label("💣", label_opacity, label_size);
     piece_labels(Piece.BLUE_SPY): color(blue_label_color), label("`S`", label_opacity, label_size);
     piece_labels(Piece.BLUE_SCOUT): color(blue_label_color), label("`9`", label_opacity, label_size);
     piece_labels(Piece.BLUE_MINER): color(blue_label_color), label("`8`", label_opacity, label_size);

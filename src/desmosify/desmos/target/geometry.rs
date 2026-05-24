@@ -15,7 +15,14 @@ impl crate::target::Target for DesmosGeometryTarget {
         let mut state = GraphState {
             version: 11,
             graph: GraphSettings {
-                product_name: "geometry-calculator".into()
+                product_name: "geometry-calculator".into(),
+                show_grid: false,
+                show_x_axis: false,
+                show_y_axis: false,
+                viewport_x_min: -10.0,
+                viewport_y_min: -10.0,
+                viewport_x_max: 10.0,
+                viewport_y_max: 10.0,
             },
             expressions: GraphExpressionListBuilder::build_program(program)?,
         };
