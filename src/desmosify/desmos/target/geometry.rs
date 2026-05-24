@@ -1,12 +1,11 @@
-use crate::desmos::{GraphFolderEntry, GraphSettings, GraphState, ToJson};
-use crate::desmos::error::DesmosResult;
+use crate::desmos::{GraphFolderEntry, GraphSettings, GraphState};
 use crate::desmos::target::GraphExpressionListBuilder;
 use crate::sema::Program;
 
 pub struct DesmosGeometryTarget;
 
 impl crate::target::Target for DesmosGeometryTarget {
-    type Output = DesmosResult<GraphState>;
+    type Output = crate::Result<GraphState>;
 
     fn name(&self) -> &'static str {
         "desmos-geometry"

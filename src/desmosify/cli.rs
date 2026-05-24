@@ -59,11 +59,7 @@ pub fn invoke(args: &DesmosifyArgs) -> crate::Result<()> {
 
     println!("Compiling program...");
 
-    let graph = DesmosGeometryTarget.compile(&program)
-        .map_err(|error| Box::new(crate::Error {
-            kind: crate::ErrorKind::Target(error),
-            span: None,
-        }))?;
+    let graph = DesmosGeometryTarget.compile(&program)?;
 
     let output_path = args.output_path();
     let mut output_file = std::fs::File::create(output_path)

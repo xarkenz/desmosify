@@ -1,8 +1,7 @@
 use crate::ast::{BinaryOperation, RangeKind, UnaryOperation};
-use crate::desmos::{GraphBinaryKind, GraphExpressionEntry, GraphFolderEntry, GraphEntry, GraphExpression, GraphExpressionList, GraphTicker, GraphInequalityKind, GraphUnaryKind, GraphTextEntry};
-use crate::desmos::error::{DesmosError, DesmosErrorKind, DesmosResult};
+use crate::desmos::{GraphBinaryKind, GraphExpressionEntry, GraphFolderEntry, GraphEntry, GraphExpression, GraphExpressionList, GraphTicker, GraphInequalityKind, GraphUnaryKind, GraphTextEntry, GraphPointStyle, GraphLabelOrientation, GraphLineStyle};
 use crate::desmos::symbol::SymbolTable;
-use crate::sema::{Program, ProgramAction, ProgramDisplayElement, ProgramLet, ProgramPublicLine, ProgramTicker, ProgramVariable};
+use crate::sema::{Program, ProgramAction, ProgramDisplayAttribute, ProgramDisplayAttributeValue, ProgramDisplayElement, ProgramLet, ProgramPublicLine, ProgramTicker, ProgramVariable};
 use crate::sema::intrinsic::{IntrinsicBinaryKind, IntrinsicColorKind, IntrinsicDoubleReducerKind, IntrinsicParameterizedReducerKind, IntrinsicReducerKind, IntrinsicUnaryKind, IntrinsicValue};
 use crate::sema::types::Type;
 use crate::sema::values::{ActionValue, ActionValueKind, MathematicalConstant, Value, ValueIndexOperation, ValueKind};
@@ -101,8 +100,9 @@ impl GraphExpressionListBuilder {
         }
     }
 
-    pub fn build_program(program: &Program) -> DesmosResult<GraphExpressionList> {
+    pub fn build_program(program: &Program) -> crate::Result<GraphExpressionList> {
         let mut builder = Self::new();
+        builder.next_local_id = program.next_local_id();
         builder.set_program(program)?;
         Ok(builder.finish())
     }
@@ -158,7 +158,7 @@ impl GraphExpressionListBuilder {
                 lhs: Box::new(symbol.clone()),
                 rhs: Box::new(GraphExpression::Integer(0)),
             },
-            hidden: true,
+            ..Default::default()
         }));
 
         symbol
@@ -181,7 +181,7 @@ impl GraphExpressionListBuilder {
                     lhs: Box::new(symbol.clone()),
                     rhs: Box::new(GraphExpression::Integer(0)),
                 },
-                hidden: true,
+                ..Default::default()
             }));
 
             self.dummy_unreachable_created = true;
@@ -292,7 +292,7 @@ impl GraphExpressionListBuilder {
                 id: entry_id,
                 folder_id: Some(INTRINSICS_FOLDER_ID.into()),
                 expression,
-                hidden: true,
+                ..Default::default()
             }));
 
             self.intrinsic_range_inclusive_created = true;
@@ -376,7 +376,7 @@ impl GraphExpressionListBuilder {
                 id: entry_id,
                 folder_id: Some(INTRINSICS_FOLDER_ID.into()),
                 expression,
-                hidden: true,
+                ..Default::default()
             }));
 
             self.intrinsic_range_exclusive_created = true;
@@ -448,7 +448,7 @@ impl GraphExpressionListBuilder {
                 id: entry_id,
                 folder_id: Some(INTRINSICS_FOLDER_ID.into()),
                 expression,
-                hidden: true,
+                ..Default::default()
             }));
 
             self.intrinsic_index_range_inclusive_created = true;
@@ -520,7 +520,7 @@ impl GraphExpressionListBuilder {
                 id: entry_id,
                 folder_id: Some(INTRINSICS_FOLDER_ID.into()),
                 expression,
-                hidden: true,
+                ..Default::default()
             }));
 
             self.intrinsic_index_range_exclusive_created = true;
@@ -579,7 +579,7 @@ impl GraphExpressionListBuilder {
                 id: entry_id,
                 folder_id: Some(INTRINSICS_FOLDER_ID.into()),
                 expression,
-                hidden: true,
+                ..Default::default()
             }));
 
             self.intrinsic_index_range_from_created = true;
@@ -632,7 +632,7 @@ impl GraphExpressionListBuilder {
                 id: entry_id,
                 folder_id: Some(INTRINSICS_FOLDER_ID.into()),
                 expression,
-                hidden: true,
+                ..Default::default()
             }));
 
             self.intrinsic_index_range_to_inclusive_created = true;
@@ -685,7 +685,7 @@ impl GraphExpressionListBuilder {
                 id: entry_id,
                 folder_id: Some(INTRINSICS_FOLDER_ID.into()),
                 expression,
-                hidden: true,
+                ..Default::default()
             }));
 
             self.intrinsic_index_range_to_exclusive_created = true;
@@ -694,9 +694,9 @@ impl GraphExpressionListBuilder {
         symbol
     }
 
-    pub fn translate_value(&mut self, value: &Value) -> DesmosResult<GraphExpression> {
-        let unsupported_error = || Box::new(DesmosError {
-            kind: DesmosErrorKind::UnsupportedValue,
+    pub fn translate_value(&mut self, value: &Value) -> crate::Result<GraphExpression> {
+        let unsupported_error = || Box::new(crate::Error {
+            kind: crate::ErrorKind::UnsupportedValue,
             span: value.span,
         });
 
@@ -822,7 +822,7 @@ impl GraphExpressionListBuilder {
                         elements: items
                             .iter()
                             .map(|item| self.translate_value(item))
-                            .collect::<DesmosResult<_>>()?,
+                            .collect::<crate::Result<_>>()?,
                     }),
                 })
             }
@@ -869,7 +869,7 @@ impl GraphExpressionListBuilder {
                                     lhs: Box::new(self.get_local_symbol(map_loop.local.id)),
                                     rhs: Box::new(self.translate_value(&map_loop.list)?),
                                 }))
-                                .collect::<DesmosResult<_>>()?,
+                                .collect::<crate::Result<_>>()?,
                         }),
                     }),
                 })
@@ -947,7 +947,7 @@ impl GraphExpressionListBuilder {
                                     lhs: Box::new(self.translate_condition(condition)?),
                                     rhs: Box::new(self.translate_value(consequent)?),
                                 }))
-                                .collect::<DesmosResult<_>>()?;
+                                .collect::<crate::Result<_>>()?;
                             if !alternative.is_undefined() {
                                 elements.push(self.translate_value(alternative)?);
                             }
@@ -964,7 +964,7 @@ impl GraphExpressionListBuilder {
                         elements: arguments
                             .iter()
                             .map(|argument| self.translate_value(argument))
-                            .collect::<DesmosResult<_>>()?,
+                            .collect::<crate::Result<_>>()?,
                     }),
                 })
             }
@@ -985,7 +985,7 @@ impl GraphExpressionListBuilder {
         }
     }
 
-    pub fn translate_unary(&mut self, operation: UnaryOperation, operand: &Value) -> DesmosResult<GraphExpression> {
+    pub fn translate_unary(&mut self, operation: UnaryOperation, operand: &Value) -> crate::Result<GraphExpression> {
         match operation {
             UnaryOperation::Positive => {
                 Ok(GraphExpression::Unary {
@@ -1028,8 +1028,8 @@ impl GraphExpressionListBuilder {
         operation: BinaryOperation,
         lhs: &Value,
         rhs: &Value,
-        unsupported_error: impl Fn() -> Box<DesmosError>,
-    ) -> DesmosResult<GraphExpression> {
+        unsupported_error: impl Fn() -> Box<crate::Error>,
+    ) -> crate::Result<GraphExpression> {
         match operation {
             BinaryOperation::Exponent => {
                 Ok(GraphExpression::Unary {
@@ -1223,7 +1223,7 @@ impl GraphExpressionListBuilder {
         }
     }
 
-    pub fn translate_condition(&mut self, value: &Value) -> DesmosResult<GraphExpression> {
+    pub fn translate_condition(&mut self, value: &Value) -> crate::Result<GraphExpression> {
         match &value.kind {
             ValueKind::Binary { operation: BinaryOperation::Equal, lhs, rhs, .. } => {
                 Ok(GraphExpression::Binary {
@@ -1307,7 +1307,7 @@ impl GraphExpressionListBuilder {
         }
     }
 
-    pub fn translate_intrinsic_value(&mut self, value: &IntrinsicValue) -> DesmosResult<GraphExpression> {
+    pub fn translate_intrinsic_value(&mut self, value: &IntrinsicValue) -> crate::Result<GraphExpression> {
         fn unary_function(name: &str, argument: GraphExpression) -> GraphExpression {
             GraphExpression::Binary {
                 kind: GraphBinaryKind::Call,
@@ -1421,7 +1421,7 @@ impl GraphExpressionListBuilder {
                         elements: arguments
                             .iter()
                             .map(|argument| self.translate_value(argument))
-                            .collect::<DesmosResult<_>>()?,
+                            .collect::<crate::Result<_>>()?,
                     }),
                 })
             }
@@ -1501,7 +1501,7 @@ impl GraphExpressionListBuilder {
                         elements: arguments
                             .iter()
                             .map(|argument| self.translate_value(argument))
-                            .collect::<DesmosResult<_>>()?,
+                            .collect::<crate::Result<_>>()?,
                     }),
                 })
             }
@@ -1520,7 +1520,7 @@ impl GraphExpressionListBuilder {
         }
     }
 
-    pub fn translate_action_value(&mut self, action: &ActionValue) -> DesmosResult<GraphExpression> {
+    pub fn translate_action_value(&mut self, action: &ActionValue) -> crate::Result<GraphExpression> {
         if action.is_empty() {
             // Usually omitting the action expression is not an option, so update a dummy
             // variable instead.
@@ -1567,7 +1567,7 @@ impl GraphExpressionListBuilder {
                             elements: actions
                                 .iter()
                                 .map(|action| self.translate_action_value(action))
-                                .collect::<DesmosResult<_>>()?,
+                                .collect::<crate::Result<_>>()?,
                         }),
                     })
                 }
@@ -1587,7 +1587,7 @@ impl GraphExpressionListBuilder {
                         elements: arguments
                             .iter()
                             .map(|argument| self.translate_value(argument))
-                            .collect::<DesmosResult<_>>()?,
+                            .collect::<crate::Result<_>>()?,
                     }),
                 })
             }
@@ -1603,7 +1603,7 @@ impl GraphExpressionListBuilder {
                                     lhs: Box::new(self.translate_condition(condition)?),
                                     rhs: Box::new(self.translate_action_value(consequent)?),
                                 }))
-                                .collect::<DesmosResult<_>>()?;
+                                .collect::<crate::Result<_>>()?;
                             // TODO: propagate disable
                             elements.push(self.translate_action_value(alternative)?);
                             elements
@@ -1614,7 +1614,7 @@ impl GraphExpressionListBuilder {
         }
     }
 
-    pub fn add_program_let(&mut self, program_let: &ProgramLet) -> DesmosResult<()> {
+    pub fn add_program_let(&mut self, program_let: &ProgramLet) -> crate::Result<()> {
         let id = self.create_entry_id();
         let expression = GraphExpression::Binary {
             kind: GraphBinaryKind::Equal,
@@ -1638,13 +1638,13 @@ impl GraphExpressionListBuilder {
             id,
             folder_id: Some(GLOBALS_FOLDER_ID.into()),
             expression,
-            hidden: true,
+            ..Default::default()
         }));
 
         Ok(())
     }
 
-    pub fn add_program_variable(&mut self, program_variable: &ProgramVariable) -> DesmosResult<()> {
+    pub fn add_program_variable(&mut self, program_variable: &ProgramVariable) -> crate::Result<()> {
         let id = self.create_entry_id();
         let expression = GraphExpression::Binary {
             kind: GraphBinaryKind::Equal,
@@ -1652,18 +1652,17 @@ impl GraphExpressionListBuilder {
             rhs: Box::new(self.translate_value(program_variable.value())?),
         };
 
-        // TODO: kinds
         self.global_entries.push(Box::new(GraphExpressionEntry {
             id,
             folder_id: Some(GLOBALS_FOLDER_ID.into()),
             expression,
-            hidden: true,
+            ..Default::default()
         }));
 
         Ok(())
     }
 
-    pub fn add_program_action(&mut self, program_action: &ProgramAction) -> DesmosResult<()> {
+    pub fn add_program_action(&mut self, program_action: &ProgramAction) -> crate::Result<()> {
         let id = self.create_entry_id();
         let expression = GraphExpression::Binary {
             kind: GraphBinaryKind::Equal,
@@ -1685,13 +1684,13 @@ impl GraphExpressionListBuilder {
             id,
             folder_id: Some(ACTIONS_FOLDER_ID.into()),
             expression,
-            hidden: true,
+            ..Default::default()
         }));
 
         Ok(())
     }
 
-    pub fn set_program_ticker(&mut self, program_ticker: Option<&ProgramTicker>) -> DesmosResult<()> {
+    pub fn set_program_ticker(&mut self, program_ticker: Option<&ProgramTicker>) -> crate::Result<()> {
         self.ticker = match program_ticker {
             Some(program_ticker) => Some(GraphTicker {
                 playing: false,
@@ -1707,7 +1706,7 @@ impl GraphExpressionListBuilder {
         Ok(())
     }
 
-    pub fn add_public_line(&mut self, public_line: &ProgramPublicLine) -> DesmosResult<()> {
+    pub fn add_public_line(&mut self, public_line: &ProgramPublicLine) -> crate::Result<()> {
         let id = self.create_entry_id();
         let entry: Box<dyn GraphEntry> = match public_line {
             ProgramPublicLine::Text(text) => {
@@ -1715,9 +1714,8 @@ impl GraphExpressionListBuilder {
                 if text.is_empty() {
                     Box::new(GraphExpressionEntry {
                         id,
-                        folder_id: None,
                         expression: GraphExpression::Empty,
-                        hidden: true,
+                        ..Default::default()
                     })
                 }
                 else {
@@ -1731,17 +1729,15 @@ impl GraphExpressionListBuilder {
             ProgramPublicLine::Expression(value) => {
                 Box::new(GraphExpressionEntry {
                     id,
-                    folder_id: None,
                     expression: self.translate_value(value)?,
-                    hidden: true,
+                    ..Default::default()
                 })
             }
             ProgramPublicLine::Action(action) => {
                 Box::new(GraphExpressionEntry {
                     id,
-                    folder_id: None,
                     expression: self.translate_action_value(action)?,
-                    hidden: true,
+                    ..Default::default()
                 })
             }
         };
@@ -1750,12 +1746,214 @@ impl GraphExpressionListBuilder {
         Ok(())
     }
 
-    pub fn add_display_element(&mut self, display_element: &ProgramDisplayElement) -> DesmosResult<()> {
-        // TODO
+    pub fn add_display_element(&mut self, element: &ProgramDisplayElement) -> crate::Result<()> {
+        let mut entry = GraphExpressionEntry {
+            id: self.create_entry_id(),
+            folder_id: Some(DISPLAY_FOLDER_ID.into()),
+            expression: self.translate_value(element.expression())?,
+            display: true,
+            ..Default::default()
+        };
+
+        let unsupported_error = |value: &Value| Box::new(crate::Error {
+            kind: crate::ErrorKind::UnsupportedValue,
+            span: value.span,
+        });
+
+        fn prevent_duplicate(attribute: &ProgramDisplayAttribute, has_attribute: &mut bool) -> crate::Result<()> {
+            if *has_attribute {
+                Err(Box::new(crate::Error {
+                    kind: crate::ErrorKind::DuplicatedDisplayAttribute {
+                        key: attribute.key().into(),
+                    },
+                    span: attribute.key_span(),
+                }))
+            }
+            else {
+                *has_attribute = true;
+                Ok(())
+            }
+        }
+        fn get_arguments(attribute: &ProgramDisplayAttribute, min_arity: usize, max_arity: usize) -> crate::Result<&[Value]> {
+            let ProgramDisplayAttributeValue::Arguments(arguments) = attribute.value() else {
+                return Err(Box::new(crate::Error {
+                    kind: crate::ErrorKind::DisplayAttributeExpectedArguments {
+                        key: attribute.key().into(),
+                    },
+                    span: attribute.key_span(),
+                }));
+            };
+
+            if (min_arity ..= max_arity).contains(&arguments.len()) {
+                Ok(arguments)
+            }
+            else {
+                Err(Box::new(crate::Error {
+                    kind: crate::ErrorKind::InvalidDisplayAttributeArity {
+                        key: attribute.key().into(),
+                        min: min_arity,
+                        max: max_arity,
+                        got: arguments.len(),
+                    },
+                    span: attribute.key_span(),
+                }))
+            }
+        }
+        fn get_action(attribute: &ProgramDisplayAttribute) -> crate::Result<&ActionValue> {
+            if let ProgramDisplayAttributeValue::Action(action) = attribute.value() {
+                Ok(action)
+            }
+            else {
+                Err(Box::new(crate::Error {
+                    kind: crate::ErrorKind::DisplayAttributeExpectedAction {
+                        key: attribute.key().into(),
+                    },
+                    span: attribute.key_span(),
+                }))
+            }
+        }
+
+        let mut has_color = false;
+        let mut has_point = false;
+        let mut has_label = false;
+        let mut has_line = false;
+        let mut has_fill = false;
+        let mut has_click = false;
+
+        for attribute in element.attributes() {
+            match attribute.key() {
+                "color" => {
+                    // color(<color>: color)
+                    prevent_duplicate(attribute, &mut has_color)?;
+                    let arguments = get_arguments(attribute, 1, 1)?;
+
+                    // TODO: constant => set entry.color
+                    entry.color_expression = self.translate_value(&arguments[0])?;
+                }
+                "point" => {
+                    // point([opacity]: real, [size]: real, [style]: str, [outline]: bool)
+                    prevent_duplicate(attribute, &mut has_point)?;
+                    let arguments = get_arguments(attribute, 0, 4)?;
+
+                    entry.point.display = true;
+                    if let Some(opacity) = arguments.get(0) {
+                        entry.point.opacity = self.translate_value(opacity)?;
+                    }
+                    if let Some(size) = arguments.get(1) {
+                        entry.point.size = self.translate_value(size)?;
+                    }
+                    if let Some(style_value) = arguments.get(2) {
+                        let ValueKind::Str(style_name) = &style_value.kind else {
+                            return Err(unsupported_error(style_value))
+                        };
+                        let Some(style) = GraphPointStyle::from_name(style_name) else {
+                            return Err(unsupported_error(style_value))
+                        };
+                        entry.point.style = style;
+                    }
+                    if let Some(outline_value) = arguments.get(3) {
+                        let ValueKind::Bool(outline) = outline_value.kind else {
+                            return Err(unsupported_error(outline_value))
+                        };
+                        entry.point.outline = outline;
+                    }
+                }
+                "label" => {
+                    // label([text]: str, [opacity]: real, [size]: real, [angle]: real,
+                    //       [orientation]: str, [outline]: bool)
+                    prevent_duplicate(attribute, &mut has_label)?;
+                    let arguments = get_arguments(attribute, 0, 6)?;
+
+                    entry.label.display = true;
+                    if let Some(text_value) = arguments.get(0) {
+                        let ValueKind::Str(text) = &text_value.kind else {
+                            return Err(unsupported_error(text_value))
+                        };
+                        entry.label.text = text.to_string();
+                    }
+                    if let Some(opacity) = arguments.get(1) {
+                        entry.label.opacity = self.translate_value(opacity)?;
+                    }
+                    if let Some(size) = arguments.get(2) {
+                        entry.label.size = self.translate_value(size)?;
+                    }
+                    if let Some(angle) = arguments.get(3) {
+                        entry.label.angle = self.translate_value(angle)?;
+                    }
+                    if let Some(orientation_value) = arguments.get(4) {
+                        let ValueKind::Str(orientation_name) = &orientation_value.kind else {
+                            return Err(unsupported_error(orientation_value))
+                        };
+                        let Some(orientation) = GraphLabelOrientation::from_name(orientation_name) else {
+                            return Err(unsupported_error(orientation_value))
+                        };
+                        entry.label.orientation = orientation;
+                    }
+                    if let Some(outline_value) = arguments.get(5) {
+                        let ValueKind::Bool(outline) = outline_value.kind else {
+                            return Err(unsupported_error(outline_value))
+                        };
+                        entry.label.outline = outline;
+                    }
+                }
+                "line" => {
+                    // line([opacity]: real, [width]: real, [style]: str)
+                    prevent_duplicate(attribute, &mut has_line)?;
+                    let arguments = get_arguments(attribute, 0, 3)?;
+
+                    entry.line.display = true;
+                    if let Some(opacity) = arguments.get(0) {
+                        entry.line.opacity = self.translate_value(opacity)?;
+                    }
+                    if let Some(width) = arguments.get(1) {
+                        entry.line.width = self.translate_value(width)?;
+                    }
+                    if let Some(style_value) = arguments.get(2) {
+                        let ValueKind::Str(style_name) = &style_value.kind else {
+                            return Err(unsupported_error(style_value))
+                        };
+                        let Some(style) = GraphLineStyle::from_name(style_name) else {
+                            return Err(unsupported_error(style_value))
+                        };
+                        entry.line.style = style;
+                    }
+                }
+                "fill" => {
+                    // fill([opacity]: real)
+                    prevent_duplicate(attribute, &mut has_fill)?;
+                    let arguments = get_arguments(attribute, 0, 1)?;
+
+                    entry.fill.display = true;
+                    if let Some(opacity) = arguments.get(0) {
+                        entry.fill.opacity = self.translate_value(opacity)?;
+                    }
+                }
+                "click" => {
+                    // TODO: click(action(index) { ... }) to allow other attributes?
+                    // click { ... }
+                    prevent_duplicate(attribute, &mut has_click)?;
+                    let action = get_action(attribute)?;
+
+                    entry.clickable.enabled = true;
+                    entry.clickable.expression = self.translate_action_value(action)?;
+                }
+                _ => {
+                    return Err(Box::new(crate::Error {
+                        kind: crate::ErrorKind::UnsupportedDisplayAttribute {
+                            key: attribute.key().into(),
+                        },
+                        span: attribute.key_span(),
+                    }));
+                }
+            }
+        }
+
+        self.display_entries.push(Box::new(entry));
+
         Ok(())
     }
 
-    pub fn set_program(&mut self, program: &Program) -> DesmosResult<()> {
+    pub fn set_program(&mut self, program: &Program) -> crate::Result<()> {
         for program_let in program.lets() {
             self.add_program_let(program_let)?;
         }

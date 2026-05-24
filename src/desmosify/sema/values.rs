@@ -1,6 +1,6 @@
 use std::rc::Rc;
 use crate::ast::{BinaryOperation, RangeKind, UnaryOperation};
-use crate::sema::intrinsic::{IntrinsicFunction, IntrinsicValue};
+use crate::sema::intrinsic::{IntrinsicColorKind, IntrinsicFunction, IntrinsicValue};
 use crate::sema::types::{ListState, Type};
 
 #[derive(Copy, Clone, PartialEq, Debug)]
@@ -205,6 +205,13 @@ pub enum ValueKind {
 }
 
 impl ValueKind {
+    pub fn with_span(self, span: Option<crate::Span>) -> Value {
+        Value {
+            kind: self,
+            span,
+        }
+    }
+
     pub fn get_type(&self) -> Type {
         match self {
             Self::Type { identifier } => {
@@ -349,6 +356,15 @@ impl ValueKind {
             match (self, target_type) {
                 (Self::Int(value), Type::Real) => {
                     Ok(Self::Real(value as f64))
+                }
+                (Self::Int(value), Type::Color) => {
+                    Ok(Self::Intrinsic(Box::new(IntrinsicValue::Color {
+                        kind: IntrinsicColorKind::Rgb,
+                        value_1: Self::Int(value >> 16 & 0xFF).with_span(span),
+                        value_2: Self::Int(value >> 8 & 0xFF).with_span(span),
+                        value_3: Self::Int(value & 0xFF).with_span(span),
+                        list_state: None,
+                    })))
                 }
                 (Self::Bool(value), Type::Int) => {
                     Ok(Self::Int(value as i64))

@@ -103,15 +103,8 @@ impl Span {
     }
 }
 
-pub trait TargetError : std::error::Error {
-    fn span(&self) -> Option<Span> {
-        None
-    }
-}
-
 #[derive(Debug)]
 pub enum ErrorKind {
-    Target(Box<dyn TargetError>),
     SourceFileOpen {
         cause: std::io::Error,
     },
@@ -252,14 +245,30 @@ pub enum ErrorKind {
         lhs_type: String,
         rhs: Box<str>,
     },
+    UnsupportedValue,
+    UnsupportedDisplayAttribute {
+        key: Box<str>,
+    },
+    DuplicatedDisplayAttribute {
+        key: Box<str>,
+    },
+    DisplayAttributeExpectedArguments {
+        key: Box<str>,
+    },
+    DisplayAttributeExpectedAction {
+        key: Box<str>,
+    },
+    InvalidDisplayAttributeArity {
+        key: Box<str>,
+        min: usize,
+        max: usize,
+        got: usize,
+    },
 }
 
 impl std::fmt::Display for ErrorKind {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            Self::Target(error) => {
-                error.fmt(f)
-            }
             Self::SourceFileOpen { cause } => {
                 write!(f, "unable to open file: {cause}")
             }
@@ -361,7 +370,12 @@ impl std::fmt::Display for ErrorKind {
                 write!(f, "expected {expected} arguments, got {got}")
             }
             Self::InvalidIntrinsicArity { identifier, min, max, got } => {
-                write!(f, "function '@{identifier}' expects between {min} and {max} arguments but received {got}")
+                if min == max {
+                    write!(f, "function '@{identifier}' expects {min} arguments but received {got}")
+                }
+                else {
+                    write!(f, "function '@{identifier}' expects between {min} and {max} arguments but received {got}")
+                }
             }
             Self::InvalidVariadicIntrinsicArity { identifier, min, got } => {
                 write!(f, "function '@{identifier}' expects at least {min} arguments but received {got}")
@@ -423,6 +437,29 @@ impl std::fmt::Display for ErrorKind {
             Self::InvalidAccessOperation { lhs_type, rhs } => {
                 write!(f, "'{lhs_type}' has no member '{rhs}'")
             }
+            Self::UnsupportedValue => {
+                write!(f, "this value is not supported by the target")
+            }
+            Self::UnsupportedDisplayAttribute { key } => {
+                write!(f, "display attribute '{key}' is not supported by the target")
+            }
+            Self::DuplicatedDisplayAttribute { key } => {
+                write!(f, "display attribute '{key}' is duplicated on this element")
+            }
+            Self::DisplayAttributeExpectedArguments { key } => {
+                write!(f, "display attribute '{key}' expects an argument list")
+            }
+            Self::DisplayAttributeExpectedAction { key } => {
+                write!(f, "display attribute '{key}' expects an action")
+            }
+            Self::InvalidDisplayAttributeArity { key, min, max, got } => {
+                if min == max {
+                    write!(f, "display attribute '{key}' expects {min} arguments but received {got}")
+                }
+                else {
+                    write!(f, "display attribute '{key}' expects between {min} and {max} arguments but received {got}")
+                }
+            }
         }
     }
 }
@@ -430,7 +467,6 @@ impl std::fmt::Display for ErrorKind {
 impl std::error::Error for ErrorKind {
     fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
         match self {
-            Self::Target(error) => Some(error.as_ref()),
             Self::SourceFileOpen { cause, .. } => Some(cause),
             Self::SourceFileRead { cause, .. } => Some(cause),
             Self::OutputFileOpen { cause, .. } => Some(cause),

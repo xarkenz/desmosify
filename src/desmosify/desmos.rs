@@ -4,41 +4,6 @@ use crate::desmos::latex::{BracketType, Latex, LatexNode};
 pub mod latex;
 pub mod target;
 pub mod symbol;
-pub mod error;
-
-#[derive(Copy, Clone, Debug)]
-pub struct Color {
-    r: u8,
-    g: u8,
-    b: u8,
-}
-
-impl Color {
-    pub const fn new(r: u8, g: u8, b: u8) -> Self {
-        Self {
-            r,
-            g,
-            b,
-        }
-    }
-}
-
-impl std::fmt::Display for Color {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "#{:02x}{:02x}{:02x}", self.r, self.g, self.b)
-    }
-}
-
-pub mod colors {
-    use super::Color;
-
-    pub const RED: Color = Color::new(0xC7, 0x44, 0x40);
-    pub const BLUE: Color = Color::new(0x2D, 0x70, 0xB3);
-    pub const GREEN: Color = Color::new(0x38, 0x8C, 0x46);
-    pub const PURPLE: Color = Color::new(0x60, 0x42, 0xA6);
-    pub const ORANGE: Color = Color::new(0xFA, 0x7E, 0x19);
-    pub const BLACK: Color = Color::new(0x00, 0x00, 0x00);
-}
 
 pub trait ToJson {
     fn to_json(&self) -> JsonValue;
@@ -82,12 +47,431 @@ impl GraphEntry for GraphFolderEntry {
     }
 }
 
+#[derive(Copy, Clone, Debug)]
+pub enum GraphColor {
+    IntRgb(u8, u8, u8),
+}
+
+impl GraphColor {
+    pub const RED: Self = Self::IntRgb(0xC7, 0x44, 0x40);
+    pub const BLUE: Self = Self::IntRgb(0x2D, 0x70, 0xB3);
+    pub const GREEN: Self = Self::IntRgb(0x38, 0x8C, 0x46);
+    pub const PURPLE: Self = Self::IntRgb(0x60, 0x42, 0xA6);
+    pub const ORANGE: Self = Self::IntRgb(0xFA, 0x7E, 0x19);
+    pub const BLACK: Self = Self::IntRgb(0x00, 0x00, 0x00);
+}
+
+impl std::fmt::Display for GraphColor {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::IntRgb(r, g, b) => {
+                write!(f, "#{r:02x}{g:02x}{b:02x}")
+            }
+        }
+    }
+}
+
+#[derive(Copy, Clone, PartialEq, Default, Debug)]
+pub enum GraphSliderLoopMode {
+    #[default]
+    LoopForwardReverse,
+    LoopForward,
+    PlayOnce,
+    PlayIndefinitely,
+}
+
+impl GraphSliderLoopMode {
+    pub fn name(&self) -> &'static str {
+        match self {
+            Self::LoopForwardReverse => "LOOP_FORWARD_REVERSE",
+            Self::LoopForward => "LOOP_FORWARD",
+            Self::PlayOnce => "PLAY_ONCE",
+            Self::PlayIndefinitely => "PLAY_INDEFINITELY",
+        }
+    }
+}
+
+#[derive(Debug)]
+pub struct GraphSlider {
+    pub loop_mode: GraphSliderLoopMode,
+    pub animation_period: f64,
+    pub min: GraphExpression,
+    pub max: GraphExpression,
+    pub step: GraphExpression,
+}
+
+impl ToJson for GraphSlider {
+    fn to_json(&self) -> JsonValue {
+        let mut object = json::object!{
+            "loopMode": self.loop_mode.name(),
+            "animationPeriod": self.animation_period,
+        };
+        if !self.min.is_empty() {
+            object["min"] = self.min.to_latex().to_string().into();
+            object["hardMin"] = true.into();
+        }
+        if !self.max.is_empty() {
+            object["max"] = self.max.to_latex().to_string().into();
+            object["hardMax"] = true.into();
+        }
+        if !self.step.is_empty() {
+            object["step"] = self.step.to_latex().to_string().into();
+        }
+        object
+    }
+}
+
+#[derive(Copy, Clone, PartialEq, Default, Debug)]
+pub enum GraphPointStyle {
+    #[default]
+    Point,
+    Open,
+    Cross,
+    Square,
+    Plus,
+    Triangle,
+    Diamond,
+    Star,
+}
+
+impl GraphPointStyle {
+    pub fn from_name(name: &str) -> Option<Self> {
+        match name {
+            "point" | "POINT" => Some(Self::Point),
+            "open" | "OPEN" => Some(Self::Open),
+            "cross" | "CROSS" => Some(Self::Cross),
+            "square" | "SQUARE" => Some(Self::Square),
+            "plus" | "PLUS" => Some(Self::Plus),
+            "triangle" | "TRIANGLE" => Some(Self::Triangle),
+            "diamond" | "DIAMOND" => Some(Self::Diamond),
+            "star" | "STAR" => Some(Self::Star),
+            _ => None
+        }
+    }
+
+    pub fn name(&self) -> &'static str {
+        match self {
+            Self::Point => "POINT",
+            Self::Open => "OPEN",
+            Self::Cross => "CROSS",
+            Self::Square => "SQUARE",
+            Self::Plus => "PLUS",
+            Self::Triangle => "TRIANGLE",
+            Self::Diamond => "DIAMOND",
+            Self::Star => "STAR",
+        }
+    }
+}
+
+#[derive(Debug)]
+pub struct GraphPointInfo {
+    pub display: bool,
+    pub opacity: GraphExpression,
+    pub size: GraphExpression,
+    pub style: GraphPointStyle,
+    pub outline: bool,
+}
+
+impl GraphPointInfo {
+    pub fn add_fields(&self, object: &mut JsonValue) {
+        object["points"] = self.display.into();
+        if !self.opacity.is_empty() {
+            object["pointOpacity"] = self.opacity.to_latex().to_string().into();
+        }
+        if !self.size.is_empty() {
+            object["pointSize"] = self.size.to_latex().to_string().into();
+            object["movablePointSize"] = object["pointSize"].clone();
+        }
+        if self.style != Default::default() {
+            object["pointStyle"] = self.style.name().into();
+        }
+        if self.outline {
+            object["pointOutline"] = true.into();
+        }
+    }
+}
+
+impl Default for GraphPointInfo {
+    fn default() -> Self {
+        Self {
+            display: false,
+            opacity: Default::default(),
+            size: Default::default(),
+            style: Default::default(),
+            outline: false,
+        }
+    }
+}
+
+#[derive(Copy, Clone, PartialEq, Default, Debug)]
+pub enum GraphLabelOrientation {
+    #[default]
+    Default,
+    Center,
+    CenterAuto,
+    AutoCenter,
+    Above,
+    AboveLeft,
+    AboveRight,
+    AboveAuto,
+    Below,
+    BelowLeft,
+    BelowRight,
+    BelowAuto,
+    Left,
+    AutoLeft,
+    Right,
+    AutoRight,
+}
+
+impl GraphLabelOrientation {
+    pub fn from_name(name: &str) -> Option<Self> {
+        match name {
+            "default" => Some(Self::Default),
+            "center" => Some(Self::Center),
+            "center_auto" => Some(Self::CenterAuto),
+            "auto_center" => Some(Self::AutoCenter),
+            "above" => Some(Self::Above),
+            "above_left" => Some(Self::AboveLeft),
+            "above_right" => Some(Self::AboveRight),
+            "above_auto" => Some(Self::AboveAuto),
+            "below" => Some(Self::Below),
+            "below_left" => Some(Self::BelowLeft),
+            "below_right" => Some(Self::BelowRight),
+            "below_auto" => Some(Self::BelowAuto),
+            "left" => Some(Self::Left),
+            "auto_left" => Some(Self::AutoLeft),
+            "right" => Some(Self::Right),
+            "auto_right" => Some(Self::AutoRight),
+            _ => None
+        }
+    }
+
+    pub fn name(&self) -> &'static str {
+        match self {
+            Self::Default => "default",
+            Self::Center => "center",
+            Self::CenterAuto => "center_auto",
+            Self::AutoCenter => "auto_center",
+            Self::Above => "above",
+            Self::AboveLeft => "above_left",
+            Self::AboveRight => "above_right",
+            Self::AboveAuto => "above_auto",
+            Self::Below => "below",
+            Self::BelowLeft => "below_left",
+            Self::BelowRight => "below_right",
+            Self::BelowAuto => "below_auto",
+            Self::Left => "left",
+            Self::AutoLeft => "auto_left",
+            Self::Right => "right",
+            Self::AutoRight => "auto_right",
+        }
+    }
+}
+
+#[derive(Debug)]
+pub struct GraphLabelInfo {
+    pub display: bool,
+    pub text: String,
+    pub opacity: GraphExpression,
+    pub size: GraphExpression,
+    pub angle: GraphExpression,
+    pub orientation: GraphLabelOrientation,
+    pub outline: bool,
+}
+
+impl GraphLabelInfo {
+    pub fn add_fields(&self, object: &mut JsonValue) {
+        object["showLabel"] = self.display.into();
+        if !self.text.is_empty() {
+            object["label"] = self.text.as_str().into();
+        }
+        if !self.opacity.is_empty() {
+            // Wish you could control the label opacity separately...
+            object["pointOpacity"] = self.opacity.to_latex().to_string().into();
+        }
+        if !self.size.is_empty() {
+            object["labelSize"] = self.size.to_latex().to_string().into();
+        }
+        if !self.angle.is_empty() {
+            object["labelAngle"] = self.angle.to_latex().to_string().into();
+        }
+        if self.orientation != Default::default() {
+            object["labelOrientation"] = self.orientation.name().into();
+        }
+        if !self.outline {
+            object["suppressTextOutline"] = true.into();
+        }
+    }
+}
+
+impl Default for GraphLabelInfo {
+    fn default() -> Self {
+        Self {
+            display: false,
+            text: String::new(),
+            opacity: Default::default(),
+            size: Default::default(),
+            angle: Default::default(),
+            orientation: Default::default(),
+            outline: true,
+        }
+    }
+}
+
+#[derive(Copy, Clone, PartialEq, Default, Debug)]
+pub enum GraphLineStyle {
+    #[default]
+    Solid,
+    Dashed,
+    Dotted,
+}
+
+impl GraphLineStyle {
+    pub fn from_name(name: &str) -> Option<Self> {
+        match name {
+            "solid" | "SOLID" => Some(Self::Solid),
+            "dashed" | "DASHED" => Some(Self::Dashed),
+            "dotted" | "DOTTED" => Some(Self::Dotted),
+            _ => None
+        }
+    }
+
+    pub fn name(&self) -> &'static str {
+        match self {
+            Self::Solid => "SOLID",
+            Self::Dashed => "DASHED",
+            Self::Dotted => "DOTTED",
+        }
+    }
+}
+
+#[derive(Debug)]
+pub struct GraphLineInfo {
+    pub display: bool,
+    pub opacity: GraphExpression,
+    pub width: GraphExpression,
+    pub style: GraphLineStyle,
+}
+
+impl GraphLineInfo {
+    pub fn add_fields(&self, object: &mut JsonValue) {
+        object["lines"] = self.display.into();
+        if !self.opacity.is_empty() {
+            object["lineOpacity"] = self.opacity.to_latex().to_string().into();
+        }
+        if !self.width.is_empty() {
+            object["lineWidth"] = self.width.to_latex().to_string().into();
+        }
+        if self.style != Default::default() {
+            object["lineStyle"] = self.style.name().into();
+        }
+    }
+}
+
+impl Default for GraphLineInfo {
+    fn default() -> Self {
+        Self {
+            display: false,
+            opacity: Default::default(),
+            width: Default::default(),
+            style: Default::default(),
+        }
+    }
+}
+
+#[derive(Debug)]
+pub struct GraphFillInfo {
+    pub display: bool,
+    pub opacity: GraphExpression,
+}
+
+impl GraphFillInfo {
+    pub fn add_fields(&self, object: &mut JsonValue) {
+        object["fill"] = self.display.into();
+        if !self.opacity.is_empty() {
+            object["fillOpacity"] = self.opacity.to_latex().to_string().into();
+        }
+    }
+}
+
+impl Default for GraphFillInfo {
+    fn default() -> Self {
+        Self {
+            display: false,
+            opacity: Default::default(),
+        }
+    }
+}
+
+#[derive(Debug)]
+pub struct GraphClickableInfo {
+    pub enabled: bool,
+    pub description: String,
+    pub expression: GraphExpression,
+}
+
+impl GraphClickableInfo {
+    pub fn add_fields(&self, object: &mut JsonValue) {
+        if !self.description.is_empty() {
+            object["description"] = self.description.as_str().into();
+        }
+        if self.enabled || !self.expression.is_empty() {
+            let mut clickable_info = json::object!{};
+            if self.enabled {
+                clickable_info["enabled"] = true.into();
+            }
+            if !self.expression.is_empty() {
+                clickable_info["latex"] = self.expression.to_latex().to_string().into();
+            }
+            object["clickableInfo"] = clickable_info;
+        }
+    }
+}
+
+impl Default for GraphClickableInfo {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            description: String::new(),
+            expression: Default::default(),
+        }
+    }
+}
+
 #[derive(Debug)]
 pub struct GraphExpressionEntry {
     pub id: String,
     pub folder_id: Option<String>,
     pub expression: GraphExpression,
-    pub hidden: bool,
+    pub display: bool,
+    pub color: Option<GraphColor>,
+    pub color_expression: GraphExpression,
+    pub slider: Option<GraphSlider>,
+    pub point: GraphPointInfo,
+    pub label: GraphLabelInfo,
+    pub line: GraphLineInfo,
+    pub fill: GraphFillInfo,
+    pub clickable: GraphClickableInfo,
+}
+
+impl Default for GraphExpressionEntry {
+    fn default() -> Self {
+        Self {
+            id: String::new(),
+            folder_id: None,
+            expression: Default::default(),
+            display: false,
+            color: None,
+            color_expression: Default::default(),
+            slider: None,
+            point: Default::default(),
+            label: Default::default(),
+            line: Default::default(),
+            fill: Default::default(),
+            clickable: Default::default(),
+        }
+    }
 }
 
 impl ToJson for GraphExpressionEntry {
@@ -95,14 +479,23 @@ impl ToJson for GraphExpressionEntry {
         let mut object = json::object!{
             "type": self.type_name(),
             "id": self.id(),
+            "latex": self.expression.to_latex().to_string(),
+            "hidden": !self.display,
         };
         if let Some(folder_id) = &self.folder_id {
             object["folderId"] = folder_id.as_str().into();
         }
-        object["latex"] = self.expression.to_latex().to_string().into();
-        if self.hidden {
-            object["hidden"] = true.into();
+        if let Some(color) = &self.color {
+            object["color"] = color.to_string().into();
         }
+        if !self.color_expression.is_empty() {
+            object["colorLatex"] = self.color_expression.to_latex().to_string().into();
+        }
+        self.point.add_fields(&mut object);
+        self.label.add_fields(&mut object);
+        self.line.add_fields(&mut object);
+        self.fill.add_fields(&mut object);
+        self.clickable.add_fields(&mut object);
         object
     }
 }
@@ -283,8 +676,9 @@ pub enum GraphBinaryKind {
     RightArrow,
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Default, Debug)]
 pub enum GraphExpression {
+    #[default]
     Empty,
     Letter(char),
     Integer(i64),

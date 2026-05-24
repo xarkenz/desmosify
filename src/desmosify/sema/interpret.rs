@@ -261,6 +261,7 @@ pub fn interpret_display_declarations(
                     .iter()
                     .map(|attribute| Ok(ProgramDisplayAttribute {
                         key: attribute.key.clone(),
+                        key_span: Some(attribute.key_span),
                         value: match &attribute.value {
                             DisplayAttributeValue::Arguments(arguments) => {
                                 ProgramDisplayAttributeValue::Arguments(arguments

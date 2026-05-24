@@ -119,12 +119,17 @@ pub enum ProgramDisplayAttributeValue {
 #[derive(Clone, Debug)]
 pub struct ProgramDisplayAttribute {
     key: Rc<str>,
+    key_span: Option<crate::Span>,
     value: ProgramDisplayAttributeValue,
 }
 
 impl ProgramDisplayAttribute {
     pub fn key(&self) -> &str {
         &self.key
+    }
+
+    pub fn key_span(&self) -> Option<crate::Span> {
+        self.key_span
     }
 
     pub fn value(&self) -> &ProgramDisplayAttributeValue {

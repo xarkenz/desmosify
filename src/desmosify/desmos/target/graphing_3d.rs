@@ -1,11 +1,10 @@
 use crate::desmos::GraphState;
-use crate::desmos::error::DesmosResult;
 use crate::sema::Program;
 
 pub struct DesmosGraphing3DTarget;
 
 impl crate::target::Target for DesmosGraphing3DTarget {
-    type Output = DesmosResult<GraphState>;
+    type Output = crate::Result<GraphState>;
 
     fn name(&self) -> &'static str {
         "desmos-graphing3d"

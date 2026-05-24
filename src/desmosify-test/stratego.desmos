@@ -487,14 +487,14 @@ action move_piece(move_index: int) {
 }
 
 display {
-    view_rectangle: color(player_color), stroke(20), fill(0.7);
-    board_squares: color(board_color), stroke(1), fill(1.0);
-    board_squares: color(grid_color), stroke(2.5);
-    last_move_indicator: color(last_move_color), stroke(piece_size_pixels, 0.3);
-    red_pieces: color(red_color), point(piece_size_pixels), click { action click_piece(@index) };
-    blue_pieces: color(blue_color), point(piece_size_pixels), click { action click_piece(@index) };
-    setup_blank_spaces: color(player_color), point(0.5 * piece_size_pixels, 0.5), click { action cycle_piece(@index) };
-    possible_move_spaces: color(highlight_color), point(0.4 * piece_size_pixels), click { action move_piece(@index) };
+    view_rectangle: color(player_color), line(1, 20), fill(0.7);
+    board_squares: color(board_color), line(1, 1), fill(1);
+    board_squares: color(grid_color), line(1, 2.5);
+    last_move_indicator: color(last_move_color), line(0.3, piece_size_pixels);
+    red_pieces: color(red_color), point(1, piece_size_pixels), click { action click_piece(@index) };
+    blue_pieces: color(blue_color), point(1, piece_size_pixels), click { action click_piece(@index) };
+    setup_blank_spaces: color(player_color), point(0.5, 0.5 * piece_size_pixels), click { action cycle_piece(@index) };
+    possible_move_spaces: color(highlight_color), point(1, 0.4 * piece_size_pixels), click { action move_piece(@index) };
 
     piece_labels(Piece.RED_FLAG): color(red_label_color), label("`🏳`", label_opacity, label_size);
     piece_labels(Piece.RED_BOMB): color(red_label_color), label("`💣`", label_opacity, label_size);
