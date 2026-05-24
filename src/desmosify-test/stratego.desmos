@@ -74,8 +74,8 @@ enum Piece {
     BLUE_MARSHAL,
 }
 
-let GRID_SIZE: int = 10;
-let MAX_PIECE_COUNTS: [int] = [1, 6, 1, 8, 5, 4, 4, 4, 3, 2, 1, 1, 1, 6, 1, 8, 5, 4, 4, 4, 3, 2, 1, 1];
+let grid_size: int = 10;
+let max_piece_counts: [int] = [1, 6, 1, 8, 5, 4, 4, 4, 3, 2, 1, 1, 1, 6, 1, 8, 5, 4, 4, 4, 3, 2, 1, 1];
 
 var mode: Mode = Mode.SETUP;
 var player: Player = Player.RED;
@@ -84,11 +84,11 @@ var selected_index: int = 0;
 var last_move_begin_index: int = 0;
 var last_move_end_index: int = 0;
 var last_captured: Piece = Piece.NONE;
-var pieces: [Piece] = [Piece.NONE; GRID_SIZE * GRID_SIZE];
-var revealed_spaces: [bool] = [false; GRID_SIZE * GRID_SIZE];
+var pieces: [Piece] = [Piece.NONE; grid_size * grid_size];
+var revealed_spaces: [bool] = [false; grid_size * grid_size];
 
 let grid: [(int, int)] = [
-    (x, y) for x in [0 ..< GRID_SIZE] for y in [0 ..< GRID_SIZE]
+    (x, y) for y in [0 ..< grid_size] for x in [0 ..< grid_size]
 ];
 
 let next_player: Player = {
@@ -105,7 +105,7 @@ let piece_counts: [int] = [
 
 let cyclable_pieces: [Piece] = [
     piece_values
-    where piece_counts < MAX_PIECE_COUNTS && player_of(piece_values) == player
+    where piece_counts < max_piece_counts && player_of(piece_values) == player
 ];
 
 let turn_is_over: bool = {
@@ -152,7 +152,7 @@ let is_piece_fixed(piece: Piece): bool = (
 );
 
 let offset_point_index(from_index: int, offset: (int, int)+): int+ = {
-    !is_point_outside(grid[from_index] + offset): from_index + GRID_SIZE * offset.y + offset.x,
+    !is_point_outside(grid[from_index] + offset): from_index + grid_size * offset.y + offset.x,
     0
 };
 
@@ -221,7 +221,7 @@ let get_captured_piece(attacker_index: int, defender_index: int): Piece =
     };
 
 let is_point_outside(p: (int, int)+): bool+ = (
-    p.x < 0 || p.x >= GRID_SIZE || p.y < 0 || p.y >= GRID_SIZE
+    p.x < 0 || p.x >= grid_size || p.y < 0 || p.y >= grid_size
         || ((p.x == 2 || p.x == 3 || p.x == 6 || p.x == 7) && (p.y == 4 || p.y == 5))
 );
 
@@ -330,12 +330,12 @@ let to_pixels(units: real+): real+ = units * (@width_pixels / width_units);
 let border_size: real = 1.0;
 let piece_size: real = 0.75;
 let board_size: real = @min(width_units, height_units) - 2 * border_size;
-let space_size: real = board_size / GRID_SIZE;
+let space_size: real = board_size / grid_size;
 let piece_size_pixels: real = to_pixels(piece_size * space_size);
 let label_size: real = 2.0;
 
 let transform(p: (real, real)+): (real, real)+ = @rotate(
-    board_size * ((p + (0.5, 0.5)) / GRID_SIZE - (0.5, 0.5)),
+    board_size * ((p + (0.5, 0.5)) / grid_size - (0.5, 0.5)),
     (0, 0),
     board_angle,
 );
@@ -373,7 +373,7 @@ let blue_pieces: [(real, real)] = {player_of(pieces) == Player.BLUE: view_grid};
 let setup_blank_spaces: [(real, real)] = {
     mode == Mode.SETUP && pieces == Piece.NONE && {
         player == Player.RED: grid.y < 4,
-        player == Player.BLUE: grid.y >= GRID_SIZE - 4,
+        player == Player.BLUE: grid.y >= grid_size - 4,
     }: view_grid,
 };
 
@@ -392,15 +392,16 @@ action reset() {
     last_move_begin_index := 0,
     last_move_end_index := 0,
     last_captured := Piece.NONE,
-    pieces := [Piece.NONE; GRID_SIZE * GRID_SIZE],
-    revealed_spaces := [false; GRID_SIZE * GRID_SIZE],
+    pieces := [Piece.NONE; grid_size * grid_size],
+    revealed_spaces := [false; grid_size * grid_size],
     turn_seconds := 1,
     seconds_since_reveal := 1,
     seconds_since_message := 6,
 }
 
 action start_turn() {
-    if turn_stage == TurnStage.BEFORE then {
+    if mode == Mode.SETUP then disable
+    elif turn_stage == TurnStage.BEFORE then {
         turn_stage := TurnStage.DURING,
         seconds_since_reveal := 0,
     }

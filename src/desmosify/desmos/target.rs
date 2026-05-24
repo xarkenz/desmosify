@@ -86,7 +86,13 @@ impl GraphExpressionListBuilder {
         }
     }
 
-    pub fn finish(self) -> GraphExpressionList {
+    pub fn finish(mut self) -> GraphExpressionList {
+        let separator_entry = GraphExpressionEntry {
+            id: self.create_entry_id(),
+            ..Default::default()
+        };
+        self.public_entries.push(Box::new(separator_entry));
+
         GraphExpressionList {
             ticker: self.ticker,
             entries: self.public_entries

@@ -498,11 +498,13 @@ impl ToJson for GraphExpressionEntry {
         let mut object = json::object!{
             "type": self.type_name(),
             "id": self.id(),
-            "latex": self.expression.to_latex().to_string(),
             "hidden": !self.display,
         };
         if let Some(folder_id) = &self.folder_id {
             object["folderId"] = folder_id.as_str().into();
+        }
+        if !self.expression.is_empty() {
+            object["latex"] = self.expression.to_latex().to_string().into();
         }
         if let Some(color) = &self.color {
             object["color"] = color.to_string().into();
@@ -529,6 +531,129 @@ impl GraphEntry for GraphExpressionEntry {
 
     fn id(&self) -> &str {
         &self.id
+    }
+}
+
+#[derive(Debug)]
+pub struct GraphImageClickableInfo {
+    pub enabled: bool,
+    pub description: String,
+    pub expression: GraphExpression,
+    pub hovered_image_url: String,
+    pub depressed_image_url: String,
+}
+
+impl GraphImageClickableInfo {
+    pub fn add_fields(&self, object: &mut JsonValue) {
+        if !self.description.is_empty() {
+            object["description"] = self.description.as_str().into();
+        }
+        if self.enabled || !self.expression.is_empty() || !self.hovered_image_url.is_empty() || !self.depressed_image_url.is_empty() {
+            let mut clickable_info = json::object!{};
+            if self.enabled {
+                clickable_info["enabled"] = true.into();
+            }
+            if !self.expression.is_empty() {
+                clickable_info["latex"] = self.expression.to_latex().to_string().into();
+            }
+            if !self.hovered_image_url.is_empty() {
+                clickable_info["hoveredImage"] = self.hovered_image_url.as_str().into();
+            }
+            if !self.depressed_image_url.is_empty() {
+                clickable_info["depressedImage"] = self.depressed_image_url.as_str().into();
+            }
+            object["clickableInfo"] = clickable_info;
+        }
+    }
+}
+
+impl Default for GraphImageClickableInfo {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            description: String::new(),
+            expression: Default::default(),
+            hovered_image_url: String::new(),
+            depressed_image_url: String::new(),
+        }
+    }
+}
+
+#[derive(Debug)]
+pub struct GraphImageEntry {
+    pub id: String,
+    pub folder_id: Option<String>,
+    pub image_url: String,
+    pub name: String,
+    pub foreground: bool,
+    pub center: GraphExpression,
+    pub width: GraphExpression,
+    pub height: GraphExpression,
+    pub opacity: GraphExpression,
+    pub angle: GraphExpression,
+    pub clickable: GraphImageClickableInfo,
+}
+
+impl ToJson for GraphImageEntry {
+    fn to_json(&self) -> JsonValue {
+        let mut object = json::object!{
+            "type": self.type_name(),
+            "id": self.id(),
+            "name": self.name.as_str(),
+            "foreground": self.foreground,
+        };
+        if let Some(folder_id) = &self.folder_id {
+            object["folderId"] = folder_id.as_str().into();
+        }
+        if !self.image_url.is_empty() {
+            // Suddenly snake case for some reason?
+            object["image_url"] = self.image_url.as_str().into();
+        }
+        if !self.center.is_empty() {
+            object["center"] = self.center.to_latex().to_string().into();
+        }
+        if !self.width.is_empty() {
+            object["width"] = self.width.to_latex().to_string().into();
+        }
+        if !self.height.is_empty() {
+            object["height"] = self.height.to_latex().to_string().into();
+        }
+        if !self.opacity.is_empty() {
+            object["opacity"] = self.opacity.to_latex().to_string().into();
+        }
+        if !self.angle.is_empty() {
+            object["angle"] = self.angle.to_latex().to_string().into();
+        }
+        self.clickable.add_fields(&mut object);
+        object
+    }
+}
+
+impl GraphEntry for GraphImageEntry {
+    fn type_name(&self) -> &str {
+        "image"
+    }
+
+    fn id(&self) -> &str {
+        &self.id
+    }
+}
+
+impl Default for GraphImageEntry {
+    fn default() -> Self {
+        Self {
+            id: String::new(),
+            folder_id: None,
+            image_url: String::new(),
+            name: String::new(),
+            foreground: true,
+            center: Default::default(),
+            width: Default::default(),
+            height: Default::default(),
+            opacity: Default::default(),
+            angle: Default::default(),
+            clickable: Default::default(),
+        }
     }
 }
 
