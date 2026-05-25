@@ -2,6 +2,7 @@
 /.upm
 /.cache
 /.idea
+/.vscode
 
 /tests/**/out/
 /utils/fetched_*
