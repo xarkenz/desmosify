@@ -3,4 +3,5 @@
 /.cache
 /.idea
 
+/tests/**/out/
 /utils/fetched_*

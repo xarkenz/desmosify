@@ -121,6 +121,9 @@ pub enum ErrorKind {
         path: Option<Box<Path>>,
         cause: std::io::Error,
     },
+    UnsupportedTarget {
+        name: Box<str>,
+    },
     InvalidToken,
     InvalidLiteralSuffix,
     InvalidCharacterEscape {
@@ -308,6 +311,9 @@ impl std::fmt::Display for ErrorKind {
                 else {
                     write!(f, "error while writing file: {cause}")
                 }
+            }
+            Self::UnsupportedTarget { name } => {
+                write!(f, "compilation target '{}' is not supported", name)
             }
             Self::InvalidToken => {
                 write!(f, "unrecognized token")

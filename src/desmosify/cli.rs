@@ -1,47 +1,31 @@
-use std::io::Write;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
+use std::process::ExitCode;
 use clap::Parser as ClapParser;
 use crate::ast::parse::Parser;
-use crate::desmos::ToJson;
-use crate::desmos::target::DesmosGeometryTarget;
 use crate::sema::context::GlobalContext;
 use crate::sema::interpret::interpret_program;
-use crate::target::Target;
 use crate::token::scan::Scanner;
 
 #[derive(ClapParser, Debug)]
-#[command(author, version)]
+#[command(author, version, about)]
 pub struct DesmosifyArgs {
-    #[arg(short, long)]
-    pub src: Vec<PathBuf>,
-    #[arg(short, long)]
-    pub out: PathBuf,
-    #[arg(long)]
-    pub debug: bool,
-}
-
-impl DesmosifyArgs {
-    pub fn source_paths(&self) -> &[PathBuf] {
-        &self.src
-    }
-
-    pub fn output_path(&self) -> &Path {
-        &self.out
-    }
-
-    pub fn is_debug(&self) -> bool {
-        self.debug
-    }
-}
-
-pub fn parse_command_line_args() -> DesmosifyArgs {
-    DesmosifyArgs::parse()
+    #[doc = "The paths of source code files to compile into a single program"]
+    #[arg(value_name = "source_paths")]
+    pub source_paths: Vec<PathBuf>,
+    #[doc = "The path where compilation output will be written to"]
+    #[arg(short = 'o', long = "out", value_name = "output_path")]
+    pub output_path: PathBuf,
+    #[doc = "The name of the compilation target"]
+    #[arg(short = 't', long = "target", value_name = "target_name")]
+    pub target_name: String,
 }
 
 pub fn invoke(args: &DesmosifyArgs) -> crate::Result<()> {
+    let target = crate::target::get_target_by_name(&args.target_name)?;
+
     let mut declarations = Vec::new();
 
-    for (source_id, source_path) in args.source_paths().iter().enumerate() {
+    for (source_id, source_path) in args.source_paths.iter().enumerate() {
         println!("Parsing '{}'...", source_path.display());
 
         let mut scanner = Scanner::from_path(source_id, source_path)?;
@@ -55,32 +39,26 @@ pub fn invoke(args: &DesmosifyArgs) -> crate::Result<()> {
     println!("Analyzing program...");
 
     let context = GlobalContext::from_declarations(declarations)?;
-    let program = interpret_program(args.source_paths(), &context)?;
+    let program = interpret_program(&args.source_paths, &context)?;
 
     println!("Compiling program...");
 
-    let graph = DesmosGeometryTarget.compile(&program)?;
+    target.compile_to(&program, &args.output_path)?;
 
-    let output_path = args.output_path();
-    let mut output_file = std::fs::File::create(output_path)
-        .map_err(|cause| crate::Error {
-            kind: crate::ErrorKind::FileCreate {
-                path: Some(output_path.into()),
-                cause,
-            },
-            span: None,
-        })?;
-
-    writeln!(output_file, "{}", graph.to_json())
-        .map_err(|cause| crate::Error {
-            kind: crate::ErrorKind::FileWrite {
-                path: Some(output_path.into()),
-                cause,
-            },
-            span: None,
-        })?;
-
-    println!("Successfully written to '{}'.", output_path.display());
+    println!("Successfully written to '{}'.", args.output_path.display());
 
     Ok(())
+}
+
+pub fn invoke_wrapper(args: &DesmosifyArgs) -> ExitCode {
+    match invoke(args) {
+        Ok(()) => {
+            println!("\x1b[32mFinished\x1b[0m");
+            ExitCode::SUCCESS
+        }
+        Err(error) => {
+            println!("\x1b[31m{}\x1b[0m", error.to_string_with_context(&args.source_paths));
+            ExitCode::FAILURE
+        }
+    }
 }

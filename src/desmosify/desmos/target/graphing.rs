@@ -1,18 +1,17 @@
-use crate::desmos::{GraphSettings, GraphState};
+use std::path::Path;
+use crate::desmos::{GraphSettings, GraphState, ToJson};
 use crate::desmos::target::GraphExpressionListBuilder;
 use crate::sema::Program;
 
 pub struct DesmosGraphingTarget;
 
 impl crate::target::Target for DesmosGraphingTarget {
-    type Output = crate::Result<GraphState>;
-
     fn name(&self) -> &'static str {
         "desmos-graphing"
     }
 
-    fn compile(&self, program: &Program) -> Self::Output {
-        Ok(GraphState {
+    fn compile_to(&self, program: &Program, output_path: &Path) -> crate::Result<()> {
+        let state = GraphState {
             version: 11,
             graph: GraphSettings {
                 product_name: "graphing".into(),
@@ -25,6 +24,8 @@ impl crate::target::Target for DesmosGraphingTarget {
                 viewport_y_max: 10.0,
             },
             expressions: GraphExpressionListBuilder::build_program(program)?,
-        })
+        };
+
+        crate::target::write_output_file(output_path, state.to_json())
     }
 }

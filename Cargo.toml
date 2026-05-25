@@ -3,15 +3,17 @@ name = "desmosify"
 version = "0.1.0"
 authors = ["xarkenz"]
 edition = "2024"
-default-run = "desmosify-test"
+description = "A compiler that outputs Desmos graphs"
+readme = "README.md"
+default-run = "driver"
 
 [lib]
 name = "desmosify"
 path = "src/desmosify/lib.rs"
 
 [[bin]]
-name = "desmosify-test"
-path = "src/desmosify-test/main.rs"
+name = "driver"
+path = "src/driver/main.rs"
 
 [dependencies]
 clap = { version = "4.4.6", features = ["derive"] }

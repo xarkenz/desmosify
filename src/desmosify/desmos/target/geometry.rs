@@ -1,17 +1,16 @@
-use crate::desmos::{GraphFolderEntry, GraphSettings, GraphState};
+use std::path::Path;
+use crate::desmos::{GraphFolderEntry, GraphSettings, GraphState, ToJson};
 use crate::desmos::target::GraphExpressionListBuilder;
 use crate::sema::Program;
 
 pub struct DesmosGeometryTarget;
 
 impl crate::target::Target for DesmosGeometryTarget {
-    type Output = crate::Result<GraphState>;
-
     fn name(&self) -> &'static str {
         "desmos-geometry"
     }
 
-    fn compile(&self, program: &Program) -> Self::Output {
+    fn compile_to(&self, program: &Program, output_path: &Path) -> crate::Result<()> {
         let mut state = GraphState {
             version: 11,
             graph: GraphSettings {
@@ -34,6 +33,6 @@ impl crate::target::Target for DesmosGeometryTarget {
             secret: true,
         }));
 
-        Ok(state)
+        crate::target::write_output_file(output_path, state.to_json())
     }
 }

@@ -8,11 +8,25 @@ use crate::sema::values::{ActionValue, ActionValueKind, MathematicalConstant, Va
 
 mod geometry;
 mod graphing;
-mod graphing_3d;
+mod graphing3d;
 
 pub use geometry::DesmosGeometryTarget;
 pub use graphing::DesmosGraphingTarget;
-pub use graphing_3d::DesmosGraphing3DTarget;
+pub use graphing3d::DesmosGraphing3DTarget;
+
+pub fn get_target_by_name(name: &str) -> crate::Result<Box<dyn crate::target::Target>> {
+    match name {
+        "desmos-geometry" => Ok(Box::new(DesmosGeometryTarget)),
+        "desmos-graphing" => Ok(Box::new(DesmosGraphingTarget)),
+        "desmos-graphing3d" => Ok(Box::new(DesmosGraphing3DTarget)),
+        _ => Err(Box::new(crate::Error {
+            kind: crate::ErrorKind::UnsupportedTarget {
+                name: name.into(),
+            },
+            span: None,
+        }))
+    }
+}
 
 pub const INTRINSICS_FOLDER_ID: &str = "desmosify_intrinsics";
 pub const GLOBALS_FOLDER_ID: &str = "desmosify_globals";

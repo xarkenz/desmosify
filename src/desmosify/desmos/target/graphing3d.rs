@@ -1,16 +1,14 @@
-use crate::desmos::GraphState;
+use std::path::Path;
 use crate::sema::Program;
 
 pub struct DesmosGraphing3DTarget;
 
 impl crate::target::Target for DesmosGraphing3DTarget {
-    type Output = crate::Result<GraphState>;
-
     fn name(&self) -> &'static str {
         "desmos-graphing3d"
     }
 
-    fn compile(&self, program: &Program) -> Self::Output {
+    fn compile_to(&self, program: &Program, output_path: &Path) -> crate::Result<()> {
         todo!()
     }
 }
