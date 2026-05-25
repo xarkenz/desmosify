@@ -3,7 +3,7 @@ use crate::ast::{DefinitionKind, RangeKind, TypeDefinition};
 use crate::sema::context::{GlobalContext, LocalContext};
 use crate::sema::display::ImageValue;
 use crate::sema::types::{ListState, Type};
-use crate::sema::values::{MathematicalConstant, Value, ValueKind};
+use crate::sema::values::{BinaryKind, ColorKind, MathematicalConstant, ReducerKind, UnaryKind, Value, ValueKind};
 
 #[derive(Clone)]
 pub struct IntrinsicFunction {
@@ -75,231 +75,6 @@ impl std::fmt::Debug for IntrinsicFunction {
     }
 }
 
-#[derive(Copy, Clone, PartialEq, Debug)]
-pub enum IntrinsicUnaryKind {
-    Sin,
-    Cos,
-    Tan,
-    Csc,
-    Sec,
-    Cot,
-    Arcsin,
-    Arccos,
-    Arctan,
-    Arccsc,
-    Arcsec,
-    Arccot,
-    Sinh,
-    Cosh,
-    Tanh,
-    Csch,
-    Sech,
-    Coth,
-}
-
-#[derive(Copy, Clone, PartialEq, Debug)]
-pub enum IntrinsicBinaryKind {
-    Dot,
-    Cross,
-}
-
-#[derive(Copy, Clone, PartialEq, Debug)]
-pub enum IntrinsicReducerKind {
-    Mean,
-    Median,
-    Min,
-    Max,
-    Stdev,
-    Stdevp,
-    Var,
-    Varp,
-    Mad,
-    Count,
-    Total,
-    Polygon,
-    Lcm,
-    Gcd,
-}
-
-#[derive(Copy, Clone, PartialEq, Debug)]
-pub enum IntrinsicDoubleReducerKind {
-    Cov,
-    Covp,
-    Corr,
-    Spearman,
-}
-
-#[derive(Copy, Clone, PartialEq, Debug)]
-pub enum IntrinsicParameterizedReducerKind {
-    Quartile,
-    Quantile,
-    Tscore,
-}
-
-#[derive(Copy, Clone, PartialEq, Debug)]
-pub enum IntrinsicColorKind {
-    Rgb,
-    Hsv,
-    Okhsv,
-    Oklab,
-    Oklch,
-}
-
-#[derive(Clone, PartialEq)]
-pub enum IntrinsicValue {
-    Unary {
-        kind: IntrinsicUnaryKind,
-        argument: Value,
-        result_type: Type,
-    },
-    Binary {
-        kind: IntrinsicBinaryKind,
-        lhs: Value,
-        rhs: Value,
-        result_type: Type,
-    },
-    Reducer {
-        kind: IntrinsicReducerKind,
-        list: Value,
-        result_type: Type,
-    },
-    ArgumentsReducer {
-        kind: IntrinsicReducerKind,
-        arguments: Box<[Value]>,
-        result_type: Type,
-    },
-    DoubleReducer {
-        kind: IntrinsicDoubleReducerKind,
-        list_1: Value,
-        list_2: Value,
-        result_type: Type,
-    },
-    ParameterizedReducer {
-        kind: IntrinsicParameterizedReducerKind,
-        list: Value,
-        parameter: Value,
-        result_type: Type,
-    },
-    Color {
-        kind: IntrinsicColorKind,
-        value_1: Value,
-        value_2: Value,
-        value_3: Value,
-        list_state: Option<ListState>,
-    },
-    Segment {
-        point_1: Value,
-        point_2: Value,
-        list_state: Option<ListState>,
-    },
-    Rotate {
-        object: Value,
-        point: Value,
-        angle: Value,
-        result_type: Type,
-    },
-    Join {
-        arguments: Box<[Value]>,
-        result_type: Type,
-    },
-    Width,
-    Height,
-    Dt,
-    Index,
-}
-
-impl IntrinsicValue {
-    pub fn get_type(&self) -> Type {
-        match self {
-            Self::Unary { result_type, .. } => result_type.clone(),
-            Self::Binary { result_type, .. } => result_type.clone(),
-            Self::Reducer { result_type, .. } => result_type.clone(),
-            Self::ArgumentsReducer { result_type, .. } => result_type.clone(),
-            Self::DoubleReducer { result_type, .. } => result_type.clone(),
-            Self::ParameterizedReducer { result_type, .. } => result_type.clone(),
-            Self::Color { list_state, .. } => Type::Color.unflatten_list(*list_state),
-            Self::Segment { list_state, .. } => Type::Segment.unflatten_list(*list_state),
-            Self::Rotate { result_type, .. } => result_type.clone(),
-            Self::Join { result_type, .. } => result_type.clone(),
-            Self::Width |
-            Self::Height |
-            Self::Dt => Type::Real,
-            Self::Index => Type::Int,
-        }
-    }
-}
-
-impl From<IntrinsicValue> for ValueKind {
-    fn from(value: IntrinsicValue) -> Self {
-        Self::Intrinsic(Box::new(value))
-    }
-}
-
-impl std::fmt::Debug for IntrinsicValue {
-    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
-        match self {
-            IntrinsicValue::Unary { kind, argument, result_type } => {
-                write!(f, "{kind:?}<{result_type}>")?;
-                f.debug_tuple("").field(argument).finish()
-            }
-            IntrinsicValue::Binary { kind, lhs, rhs, result_type } => {
-                write!(f, "{kind:?}<{result_type}>")?;
-                f.debug_tuple("").field(lhs).field(rhs).finish()
-            }
-            IntrinsicValue::Reducer { kind, list, result_type } => {
-                write!(f, "{kind:?}<{result_type}>")?;
-                f.debug_tuple("").field(list).finish()
-            }
-            IntrinsicValue::ArgumentsReducer { kind, arguments, result_type } => {
-                write!(f, "{kind:?}<{result_type}>")?;
-                f.debug_tuple("").field(arguments).finish()
-            }
-            IntrinsicValue::DoubleReducer { kind, list_1, list_2, result_type } => {
-                write!(f, "{kind:?}<{result_type}>")?;
-                f.debug_tuple("").field(list_1).field(list_2).finish()
-            }
-            IntrinsicValue::ParameterizedReducer { kind, list, parameter, result_type } => {
-                write!(f, "{kind:?}<{result_type}>")?;
-                f.debug_tuple("").field(list).field(parameter).finish()
-            }
-            IntrinsicValue::Color { kind, value_1, value_2, value_3, list_state } => {
-                write!(f, "{kind:?}<{}>", Type::Color.unflatten_list(*list_state))?;
-                f.debug_tuple("").field(value_1).field(value_2).field(value_3).finish()
-            }
-            IntrinsicValue::Segment { point_1, point_2, list_state } => {
-                write!(f, "Segment<{}>", Type::Segment.unflatten_list(*list_state))?;
-                f.debug_tuple("").field(point_1).field(point_2).finish()
-            }
-            IntrinsicValue::Rotate { object, point, angle, result_type } => {
-                write!(f, "Rotate<{result_type}>")?;
-                f.debug_tuple("").field(object).field(point).field(angle).finish()
-            }
-            IntrinsicValue::Join { arguments, result_type } => {
-                write!(f, "Join<{result_type}>")?;
-                arguments
-                    .iter()
-                    .fold(
-                        &mut f.debug_tuple(""),
-                        |tuple, argument| tuple.field(argument),
-                    )
-                    .finish()
-            }
-            IntrinsicValue::Width => {
-                write!(f, "Width")
-            }
-            IntrinsicValue::Height => {
-                write!(f, "Height")
-            }
-            IntrinsicValue::Dt => {
-                write!(f, "Dt")
-            }
-            IntrinsicValue::Index => {
-                write!(f, "Index")
-            }
-        }
-    }
-}
-
 // TODO: per target
 pub fn get_core_intrinsics() -> impl Iterator<Item = (&'static str, ValueKind)> {
     CORE_INTRINSIC_FUNCTIONS
@@ -308,20 +83,11 @@ pub fn get_core_intrinsics() -> impl Iterator<Item = (&'static str, ValueKind)> 
             (function.identifier, ValueKind::IntrinsicFunction(function))
         })
         .chain([
-            ("PI", ValueKind::Mathematical {
-                kind: MathematicalConstant::Pi,
-                coefficient: 1.0,
-            }),
-            ("TAU", ValueKind::Mathematical {
-                kind: MathematicalConstant::Tau,
-                coefficient: 1.0,
-            }),
-            ("E", ValueKind::Mathematical {
-                kind: MathematicalConstant::E,
-                coefficient: 1.0,
-            }),
-            ("width_pixels", IntrinsicValue::Width.into()),
-            ("height_pixels", IntrinsicValue::Height.into()),
+            ("PI", ValueKind::Mathematical(MathematicalConstant::Pi)),
+            ("TAU", ValueKind::Mathematical(MathematicalConstant::Tau)),
+            ("E", ValueKind::Mathematical(MathematicalConstant::E)),
+            ("width_pixels", ValueKind::ViewportWidth),
+            ("height_pixels", ValueKind::ViewportHeight),
         ])
 }
 
@@ -469,17 +235,18 @@ pub const CORE_INTRINSIC_FUNCTIONS: &[&IntrinsicFunction] = &[
 ];
 
 pub fn interpret_trig_call(
-    kind: IntrinsicUnaryKind,
+    kind: UnaryKind,
     arguments: Box<[Value]>,
 ) -> crate::Result<ValueKind> {
-    let argument = arguments.into_iter().next().unwrap();
+    let argument = arguments.into_iter().next().unwrap()
+        .coerce_to(&Type::Real, true)?;
     let is_list = argument.get_type().list_state();
 
-    Ok(IntrinsicValue::Unary {
+    Ok(ValueKind::Unary {
         kind,
-        argument: argument.coerce_to(&Type::Real, true)?,
+        operand: Box::new(argument),
         result_type: Type::Real.unflatten_list(is_list),
-    }.into())
+    })
 }
 
 macro_rules! trig_intrinsic {
@@ -489,14 +256,14 @@ macro_rules! trig_intrinsic {
             min_arity: 1,
             max_arity: Some(1),
             interpret_call: |_, _, arguments| {
-                interpret_trig_call(IntrinsicUnaryKind::$kind, arguments)
+                interpret_trig_call(UnaryKind::$kind, arguments)
             },
         }
     };
 }
 
 pub fn interpret_reducer_call(
-    kind: IntrinsicReducerKind,
+    kind: ReducerKind,
     argument_check: Option<fn(&Type) -> crate::Result<()>>,
     result_override: Option<Type>,
     arguments: Box<[Value]>,
@@ -514,18 +281,18 @@ pub fn interpret_reducer_call(
 
         if list_state.is_some() {
             // This should also work for any MaybeList
-            Ok(IntrinsicValue::Reducer {
+            Ok(ValueKind::Reducer {
                 kind,
-                list: arguments.into_iter().next().unwrap(),
+                list: Box::new(arguments.into_iter().next().unwrap()),
                 result_type,
-            }.into())
+            })
         }
         else {
-            Ok(IntrinsicValue::ArgumentsReducer {
+            Ok(ValueKind::ArgumentsReducer {
                 kind,
                 arguments,
                 result_type,
-            }.into())
+            })
         }
     }
     else {
@@ -533,11 +300,11 @@ pub fn interpret_reducer_call(
             .iter()
             .map(|value| (value.get_type(), value.span)))?;
 
-        Ok(IntrinsicValue::ArgumentsReducer {
+        Ok(ValueKind::ArgumentsReducer {
             kind,
             arguments,
             result_type,
-        }.into())
+        })
     }
 }
 
@@ -548,14 +315,14 @@ macro_rules! reducer_intrinsic {
             min_arity: 1,
             max_arity: None,
             interpret_call: |_, _, arguments| {
-                interpret_reducer_call(IntrinsicReducerKind::$kind, $chk, $res, arguments)
+                interpret_reducer_call(ReducerKind::$kind, $chk, $res, arguments)
             },
         }
     };
 }
 
 pub fn interpret_color_call(
-    kind: IntrinsicColorKind,
+    kind: ColorKind,
     arguments: Box<[Value]>,
 ) -> crate::Result<ValueKind> {
     let mut arguments = arguments.into_iter();
@@ -573,13 +340,13 @@ pub fn interpret_color_call(
         value_3.get_type().list_state(),
     );
 
-    Ok(IntrinsicValue::Color {
+    Ok(ValueKind::Color {
         kind,
-        value_1,
-        value_2,
-        value_3,
+        value_1: Box::new(value_1),
+        value_2: Box::new(value_2),
+        value_3: Box::new(value_3),
         list_state,
-    }.into())
+    })
 }
 
 macro_rules! color_intrinsic {
@@ -589,7 +356,7 @@ macro_rules! color_intrinsic {
             min_arity: 3,
             max_arity: Some(3),
             interpret_call: |_, _, arguments| {
-                interpret_color_call(IntrinsicColorKind::$kind, arguments)
+                interpret_color_call(ColorKind::$kind, arguments)
             },
         }
     };
@@ -685,10 +452,10 @@ pub static JOIN: IntrinsicFunction = IntrinsicFunction {
             },
         )?;
 
-        Ok(IntrinsicValue::Join {
-            arguments,
+        Ok(ValueKind::Join {
+            values: arguments,
             result_type: item_type.into_list(ListState::IsList),
-        }.into())
+        })
     },
 };
 // SORT
@@ -749,25 +516,30 @@ pub static SEGMENT: IntrinsicFunction = IntrinsicFunction {
             point_2.get_type().list_state(),
         );
 
-        Ok(IntrinsicValue::Segment {
-            point_1,
-            point_2,
-            list_state,
-        }.into())
+        Ok(ValueKind::Binary {
+            kind: BinaryKind::Segment,
+            lhs: Box::new(point_1),
+            rhs: Box::new(point_2),
+            result_type: Type::Segment.unflatten_list(list_state),
+        })
     },
 };
+// SEGMENT3D
 // LINE
 // RAY
 // VECTOR
+// VECTOR3D
 // PARALLEL
 // PERPENDICULAR
 // CIRCLE
+// SPHERE3D
 // ARC
 // ANGLE
 // DIRECTED_ANGLE
 pub static POLYGON: IntrinsicFunction = reducer_intrinsic!(
     "polygon", Some(Type::require_numeric_point_2d) => Polygon, Some(Type::Polygon)
 );
+// TRIANGLE3D
 // GLIDER
 
 // ------ Properties & Measurements ------
@@ -816,10 +588,10 @@ pub static ROTATE: IntrinsicFunction = IntrinsicFunction {
             angle.get_type().list_state(),
         );
 
-        Ok(IntrinsicValue::Rotate {
-            object,
-            point,
-            angle,
+        Ok(ValueKind::Rotate {
+            object: Box::new(object),
+            point: Box::new(point),
+            angle: Box::new(angle),
             result_type: result_type.unflatten_list(list_state),
         }.into())
     },
@@ -932,10 +704,11 @@ pub static ENUM_VALUE: IntrinsicFunction = IntrinsicFunction {
             type_identifier: identifier,
         };
 
-        Ok(ValueKind::AssumeType(
-            Box::new(variant_ordinal),
-            result_type.unflatten_list(list_state),
-        ))
+        Ok(ValueKind::Unary {
+            kind: UnaryKind::AssumeType,
+            operand: Box::new(variant_ordinal),
+            result_type: result_type.unflatten_list(list_state),
+        })
     },
 };
 pub static INCLUDE_TEXT: IntrinsicFunction = IntrinsicFunction {
