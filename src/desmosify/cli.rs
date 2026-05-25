@@ -55,7 +55,7 @@ pub fn invoke(args: &DesmosifyArgs) -> crate::Result<()> {
     println!("Analyzing program...");
 
     let context = GlobalContext::from_declarations(declarations)?;
-    let program = interpret_program(&context)?;
+    let program = interpret_program(args.source_paths(), &context)?;
 
     println!("Compiling program...");
 
@@ -64,8 +64,8 @@ pub fn invoke(args: &DesmosifyArgs) -> crate::Result<()> {
     let output_path = args.output_path();
     let mut output_file = std::fs::File::create(output_path)
         .map_err(|cause| crate::Error {
-            kind: crate::ErrorKind::OutputFileOpen {
-                path: output_path.into(),
+            kind: crate::ErrorKind::FileCreate {
+                path: Some(output_path.into()),
                 cause,
             },
             span: None,
@@ -73,8 +73,8 @@ pub fn invoke(args: &DesmosifyArgs) -> crate::Result<()> {
 
     writeln!(output_file, "{}", graph.to_json())
         .map_err(|cause| crate::Error {
-            kind: crate::ErrorKind::OutputFileWrite {
-                path: output_path.into(),
+            kind: crate::ErrorKind::FileWrite {
+                path: Some(output_path.into()),
                 cause,
             },
             span: None,

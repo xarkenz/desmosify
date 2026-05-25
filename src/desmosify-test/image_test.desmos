@@ -1,0 +1,11 @@
+var clicked: bool = false;
+
+display {
+    @image(
+        @include_data("test_image.png"), // url
+        "test image", // name
+        (0, 0), // center
+        5, // width
+        5, // height
+    ): click { clicked := true };
+}

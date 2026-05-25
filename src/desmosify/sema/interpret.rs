@@ -1,3 +1,4 @@
+use std::path::PathBuf;
 use std::rc::Rc;
 use crate::ast::{ActionExpression, ActionExpressionKind, BinaryOperation, DefinitionKind, DisplayAttribute, DisplayAttributeValue, Expression, ExpressionIndexOperation, ExpressionKind, ParameterList, PublicLineKind, TypeDefinition, UnaryOperation, ValueDefinition, VariableKind};
 use crate::sema::{Program, ProgramAction, ProgramLet, ProgramPublic, ProgramPublicLine, ProgramTicker, ProgramVariable, ProgramVariableKind};
@@ -8,7 +9,7 @@ use crate::sema::types::{ListState, Type};
 use crate::sema::values::{ActionValue, ActionValueKind, GlobalReference, LocalReference, Value, ValueIndexOperation, ValueKind, ValueListMapLoop};
 use crate::token::Literal;
 
-pub fn interpret_program(context: &GlobalContext) -> crate::Result<Program> {
+pub fn interpret_program(source_paths: &[PathBuf], context: &GlobalContext) -> crate::Result<Program> {
     let mut lets = Vec::new();
     let mut variables = Vec::new();
     let mut actions = Vec::new();
@@ -16,11 +17,14 @@ pub fn interpret_program(context: &GlobalContext) -> crate::Result<Program> {
     let mut next_local_id = 0;
 
     for (identifier, definition) in context.definitions().chain(context.action_definitions()) {
+        let local_context = LocalContext::new(&source_paths[definition.definition.span.source_id]);
+
         match &definition.definition.kind {
             DefinitionKind::Value(ValueDefinition::Let { parameters, value, .. }) => {
                 lets.push(interpret_let_definition(
                     context,
                     &mut next_local_id,
+                    local_context,
                     identifier.clone(),
                     parameters.as_ref(),
                     &definition.value_type,
@@ -31,6 +35,7 @@ pub fn interpret_program(context: &GlobalContext) -> crate::Result<Program> {
                 variables.push(interpret_variable_definition(
                     context,
                     &mut next_local_id,
+                    local_context,
                     identifier.clone(),
                     kind,
                     &definition.value_type,
@@ -41,6 +46,7 @@ pub fn interpret_program(context: &GlobalContext) -> crate::Result<Program> {
                 actions.push(interpret_action_definition(
                     context,
                     &mut next_local_id,
+                    local_context,
                     identifier.clone(),
                     parameters,
                     &definition.value_type,
@@ -55,9 +61,9 @@ pub fn interpret_program(context: &GlobalContext) -> crate::Result<Program> {
         lets: lets.into_boxed_slice(),
         variables: variables.into_boxed_slice(),
         actions: actions.into_boxed_slice(),
-        ticker: interpret_ticker_declarations(context, &mut next_local_id)?,
-        public: interpret_public_declarations(context, &mut next_local_id)?,
-        display: interpret_display_declarations(context, &mut next_local_id)?,
+        ticker: interpret_ticker_declarations(source_paths, context, &mut next_local_id)?,
+        public: interpret_public_declarations(source_paths, context, &mut next_local_id)?,
+        display: interpret_display_declarations(source_paths, context, &mut next_local_id)?,
         next_local_id,
     })
 }
@@ -65,13 +71,12 @@ pub fn interpret_program(context: &GlobalContext) -> crate::Result<Program> {
 pub fn interpret_let_definition(
     context: &GlobalContext,
     next_local_id: &mut u64,
+    mut local_context: LocalContext,
     identifier: Rc<str>,
     parameters: Option<&ParameterList>,
     value_type: &Type,
     value: &Expression,
 ) -> crate::Result<ProgramLet> {
-    let mut local_context = LocalContext::new();
-
     let (typed_parameters, expected_type) = if let Some(parameters) = parameters {
         let Type::UserFunction { signature } = value_type else {
             panic!("parameter list is present but value type is not a function")
@@ -98,13 +103,12 @@ pub fn interpret_let_definition(
 pub fn interpret_variable_definition(
     context: &GlobalContext,
     next_local_id: &mut u64,
+    local_context: LocalContext,
     identifier: Rc<str>,
     kind: &VariableKind,
     value_type: &Type,
     value: &Expression,
 ) -> crate::Result<ProgramVariable> {
-    let local_context = LocalContext::new();
-
     let kind = match kind {
         VariableKind::Default => ProgramVariableKind::Default,
         VariableKind::Timer => ProgramVariableKind::Timer,
@@ -123,13 +127,12 @@ pub fn interpret_variable_definition(
 pub fn interpret_action_definition(
     context: &GlobalContext,
     next_local_id: &mut u64,
+    mut local_context: LocalContext,
     identifier: Rc<str>,
     parameters: &ParameterList,
     action_type: &Type,
     action: &ActionExpression,
 ) -> crate::Result<ProgramAction> {
-    let mut local_context = LocalContext::new();
-
     let Type::Action { parameter_types } = action_type else {
         panic!("action definition has invalid type")
     };
@@ -158,6 +161,7 @@ pub fn process_parameters(
 }
 
 pub fn interpret_ticker_declarations(
+    source_paths: &[PathBuf],
     context: &GlobalContext,
     next_local_id: &mut u64,
 ) -> crate::Result<Option<ProgramTicker>> {
@@ -170,7 +174,7 @@ pub fn interpret_ticker_declarations(
         .try_fold::<_, _, crate::Result<_>>(
             None,
             |interval_ms, (index, declaration)| {
-                let mut local_context = LocalContext::new();
+                let mut local_context = LocalContext::new(&source_paths[declaration.span.source_id]);
 
                 let new_interval_ms = match declaration.interval_ms.as_ref() {
                     Some(interval_expression) => Some(interpret_expression(context, next_local_id, &local_context, interval_expression)?),
@@ -212,14 +216,15 @@ pub fn interpret_ticker_declarations(
 }
 
 pub fn interpret_public_declarations(
+    source_paths: &[PathBuf],
     context: &GlobalContext,
     next_local_id: &mut u64,
 ) -> crate::Result<Option<ProgramPublic>> {
-    // It's fine to create the local context here because it never changes.
-    let local_context = LocalContext::new();
     let mut lines = Vec::new();
 
     for declaration in context.public_declarations() {
+        let local_context = LocalContext::new(&source_paths[declaration.span.source_id]);
+
         for line in &declaration.lines {
             lines.push(match &line.kind {
                 PublicLineKind::Text(text) => {
@@ -246,6 +251,7 @@ pub fn interpret_public_declarations(
 }
 
 pub fn interpret_display_declarations(
+    source_paths: &[PathBuf],
     context: &GlobalContext,
     next_local_id: &mut u64,
 ) -> crate::Result<Option<ProgramDisplay>> {
@@ -303,78 +309,77 @@ pub fn interpret_display_declarations(
         }
     }
 
-    // It's fine to create the local context here because it never changes.
-    // (For click actions, just create a fresh context.)
-    let local_context = LocalContext::new();
-
-    macro_rules! interpret_option {
-        ($opt:expr) => {
-            (($opt)
-                .map(|expression| {
-                    interpret_expression(context, next_local_id, &local_context, expression)
-                })
-                .transpose())
-        };
-    }
-
-    macro_rules! interpret_option_named {
-        ($opt:expr, $e:ty) => {
-            (($opt)
-                .map_or(Ok(Default::default()), |expression| {
-                    let value = interpret_expression(context, next_local_id, &local_context, expression)?;
-                    value.kind
-                        .as_const_str()
-                        .and_then(|name| <$e>::from_name(&name))
-                        .ok_or_else(|| Box::new(crate::Error {
-                            kind: crate::ErrorKind::ExpectedConstantStrFromList {
-                                allowed: <$e>::NAMES
-                                    .iter()
-                                    .copied()
-                                    .map(Into::into)
-                                    .collect(),
-                            },
-                            span: value.span,
-                        }))
-                }))
-        };
-    }
-
-    macro_rules! interpret_option_bool {
-        ($opt:expr, $default:expr) => {
-            (($opt)
-                .map_or(Ok($default), |expression| {
-                    let value = interpret_expression(context, next_local_id, &local_context, expression)?;
-                    value.kind
-                        .as_const_bool()
-                        .ok_or_else(|| Box::new(crate::Error {
-                            kind: crate::ErrorKind::ExpectedConstant {
-                                type_name: Type::Bool.to_string(),
-                            },
-                            span: value.span,
-                        }))
-                }))
-        };
-    }
-
-    macro_rules! interpret_str {
-        ($expr:expr) => {
-            ({
-                let value = interpret_expression(context, next_local_id, &local_context, $expr)?;
-                value.kind
-                    .as_const_str()
-                    .ok_or_else(|| Box::new(crate::Error {
-                            kind: crate::ErrorKind::ExpectedConstant {
-                                type_name: Type::Str.to_string(),
-                            },
-                        span: value.span,
-                    }))
-            })
-        };
-    }
-
     let mut elements = Vec::new();
 
     for declaration in context.display_declarations() {
+        let local_context = LocalContext::new(&source_paths[declaration.span.source_id]);
+
+        macro_rules! interpret_option {
+            ($opt:expr, $t:expr) => {
+                (($opt)
+                    .map(|expression| {
+                        interpret_expression(context, next_local_id, &local_context, expression)?
+                            .coerce_to($t, true)
+                    })
+                    .transpose())
+            };
+        }
+
+        macro_rules! interpret_option_named {
+            ($opt:expr, $e:ty) => {
+                (($opt)
+                    .map_or(Ok(Default::default()), |expression| {
+                        let value = interpret_expression(context, next_local_id, &local_context, expression)?;
+                        value.kind
+                            .as_const_str()
+                            .and_then(|name| <$e>::from_name(&name))
+                            .ok_or_else(|| Box::new(crate::Error {
+                                kind: crate::ErrorKind::ExpectedConstantStrFromList {
+                                    allowed: <$e>::NAMES
+                                        .iter()
+                                        .copied()
+                                        .map(Into::into)
+                                        .collect(),
+                                },
+                                span: value.span,
+                            }))
+                    }))
+            };
+        }
+
+        macro_rules! interpret_option_bool {
+            ($opt:expr, $default:expr) => {
+                (($opt)
+                    .map_or(Ok($default), |expression| {
+                        let value = interpret_expression(context, next_local_id, &local_context, expression)?;
+                        value.kind
+                            .as_const_bool()
+                            .ok_or_else(|| Box::new(crate::Error {
+                                kind: crate::ErrorKind::ExpectedConstant {
+                                    type_name: Type::Bool.to_string(),
+                                },
+                                span: value.span,
+                            }))
+                    }))
+            };
+        }
+
+        macro_rules! interpret_str {
+            ($expr:expr) => {
+                ({
+                    let value = interpret_expression(context, next_local_id, &local_context, $expr)?;
+                    value.kind
+                        .as_const_str()
+                        .ok_or_else(|| Box::new(crate::Error {
+                                kind: crate::ErrorKind::ExpectedConstant {
+                                    type_name: Type::Str.to_string(),
+                                },
+                            span: value.span,
+                        }))
+                })
+            };
+        }
+
         for element in &declaration.elements {
             let mut has_color = false;
             let mut has_point = false;
@@ -406,8 +411,8 @@ pub fn interpret_display_declarations(
                         let arguments = require_arguments(attribute, 0, 4)?;
 
                         ProgramDisplayAttributeKind::Point {
-                            opacity: interpret_option!(arguments.get(0))?,
-                            size: interpret_option!(arguments.get(1))?,
+                            opacity: interpret_option!(arguments.get(0), &Type::Real)?,
+                            size: interpret_option!(arguments.get(1), &Type::Real)?,
                             style: interpret_option_named!(arguments.get(2), PointStyle)?,
                             outline: interpret_option_bool!(arguments.get(3), false)?,
                         }
@@ -429,9 +434,9 @@ pub fn interpret_display_declarations(
 
                         ProgramDisplayAttributeKind::Label {
                             text: interpret_str!(&arguments[0])?,
-                            opacity: interpret_option!(arguments.get(1))?,
-                            size: interpret_option!(arguments.get(2))?,
-                            angle: interpret_option!(arguments.get(3))?,
+                            opacity: interpret_option!(arguments.get(1), &Type::Real)?,
+                            size: interpret_option!(arguments.get(2), &Type::Real)?,
+                            angle: interpret_option!(arguments.get(3), &Type::Real)?,
                             orientation: interpret_option_named!(arguments.get(4), LabelOrientation)?,
                             outline: interpret_option_bool!(arguments.get(5), true)?,
                         }
@@ -442,8 +447,8 @@ pub fn interpret_display_declarations(
                         let arguments = require_arguments(attribute, 0, 3)?;
 
                         ProgramDisplayAttributeKind::Line {
-                            opacity: interpret_option!(arguments.get(0))?,
-                            width: interpret_option!(arguments.get(1))?,
+                            opacity: interpret_option!(arguments.get(0), &Type::Real)?,
+                            width: interpret_option!(arguments.get(1), &Type::Real)?,
                             style: interpret_option_named!(arguments.get(2), LineStyle)?,
                         }
                     }
@@ -453,7 +458,7 @@ pub fn interpret_display_declarations(
                         let arguments = require_arguments(attribute, 0, 1)?;
 
                         ProgramDisplayAttributeKind::Fill {
-                            opacity: interpret_option!(arguments.get(0))?,
+                            opacity: interpret_option!(arguments.get(0), &Type::Real)?,
                         }
                     }
                     "click" => {
@@ -858,7 +863,7 @@ pub fn interpret_expression(
 
             match function.get_type() {
                 Type::IntrinsicFunction(intrinsic_function) => {
-                    intrinsic_function.interpret_call(context, function.span, arguments)?
+                    intrinsic_function.interpret_call(context, local_context, function.span, arguments)?
                 }
                 Type::UserFunction { signature } => {
                     if arguments.len() != signature.parameter_types.len() {

@@ -1,4 +1,5 @@
 use std::collections::HashMap;
+use std::path::Path;
 use std::rc::Rc;
 use crate::ast::{Declaration, Definition, DefinitionKind, DisplayDeclaration, PublicDeclaration, TickerDeclaration, TypeExpression, TypeExpressionKind, ValueDefinition};
 use crate::sema::intrinsic::get_core_intrinsics;
@@ -311,24 +312,40 @@ impl GlobalContext {
 #[derive(Debug)]
 pub struct LocalContext<'a> {
     outer_context: Option<&'a Self>,
+    source_path: &'a Path,
     locals: HashMap<Rc<str>, ValueKind>,
     scoped_intrinsics: HashMap<&'static str, ValueKind>,
 }
 
 impl<'a> LocalContext<'a> {
-    pub fn new() -> Self {
+    pub fn new(source_path: &'a Path) -> Self {
         Self {
             outer_context: None,
+            source_path,
             locals: HashMap::new(),
             scoped_intrinsics: HashMap::new(),
         }
     }
 
-    pub fn new_inner(&'a self) -> LocalContext<'a> {
+    pub fn new_inner(&'a self) -> Self {
         Self {
             outer_context: Some(self),
+            source_path: self.source_path,
             locals: HashMap::new(),
             scoped_intrinsics: HashMap::new(),
+        }
+    }
+
+    pub fn source_path(&self) -> &Path {
+        self.source_path
+    }
+
+    pub fn source_directory(&self) -> &Path {
+        if self.source_path.is_dir() {
+            self.source_path
+        }
+        else {
+            self.source_path.parent().unwrap_or(self.source_path)
         }
     }
 

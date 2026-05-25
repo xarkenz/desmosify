@@ -119,7 +119,7 @@ pub enum ValueKind {
         variant_ordinal: i64,
     },
     Str(Rc<str>),
-    Image(Box<ImageValue>),
+    Image(Box<ImageValue>, Option<ListState>),
     Intrinsic(Box<IntrinsicValue>),
     IntrinsicFunction(&'static IntrinsicFunction),
     Global(GlobalReference),
@@ -255,8 +255,8 @@ impl ValueKind {
             Self::Str(..) => {
                 Type::Str
             }
-            Self::Image(..) => {
-                Type::Image
+            Self::Image(_, list_state) => {
+                Type::Image.unflatten_list(*list_state)
             }
             Self::Intrinsic(intrinsic) => {
                 intrinsic.get_type()
@@ -455,7 +455,7 @@ impl std::fmt::Debug for ValueKind {
             ValueKind::Str(value) => {
                 f.debug_tuple("Str").field(value).finish()
             }
-            ValueKind::Image(image) => {
+            ValueKind::Image(image, _) => {
                 image.fmt(f)
             }
             ValueKind::Intrinsic(value) => {

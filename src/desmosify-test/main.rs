@@ -6,8 +6,8 @@ fn main() {
 
     // let args = desmosify::cli::parse_command_line_args();
     let args = DesmosifyArgs {
-        src: vec!["src/desmosify-test/stratego.desmos".into()],
-        out: "src/desmosify-test/stratego-out.json".into(),
+        src: vec!["src/desmosify-test/image_test.desmos".into()],
+        out: "src/desmosify-test/image_test-out.json".into(),
         debug: false,
     };
     match desmosify::cli::invoke(&args) {

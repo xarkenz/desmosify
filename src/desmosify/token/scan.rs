@@ -21,7 +21,8 @@ impl Scanner<BufReader<File>> {
         File::open(path)
             .map(|file| Self::new(source_id, BufReader::new(file)))
             .map_err(|cause| Box::new(crate::Error {
-                kind: crate::ErrorKind::SourceFileOpen {
+                kind: crate::ErrorKind::FileOpen {
+                    path: None,
                     cause,
                 },
                 span: Some(crate::Span {
@@ -114,7 +115,8 @@ impl<T: BufRead> Scanner<T> {
         else {
             let read = self.source.read_char()
                 .map_err(|cause| Box::new(crate::Error {
-                    kind: crate::ErrorKind::SourceFileRead {
+                    kind: crate::ErrorKind::FileRead {
+                        path: None,
                         cause,
                     },
                     span: Some(crate::Span {

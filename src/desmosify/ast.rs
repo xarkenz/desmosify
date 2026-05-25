@@ -871,6 +871,17 @@ pub enum Declaration {
     Display(DisplayDeclaration),
 }
 
+impl Declaration {
+    pub fn span(&self) -> crate::Span {
+        match self {
+            Self::Definition(definition) => definition.span,
+            Self::Ticker(ticker) => ticker.span,
+            Self::Public(public) => public.span,
+            Self::Display(display) => display.span,
+        }
+    }
+}
+
 impl std::fmt::Display for Declaration {
     fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
         match self {

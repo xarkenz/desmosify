@@ -1,5 +1,7 @@
+use std::path::PathBuf;
 use crate::ast::{DefinitionKind, RangeKind, TypeDefinition};
-use crate::sema::context::GlobalContext;
+use crate::sema::context::{GlobalContext, LocalContext};
+use crate::sema::display::ImageValue;
 use crate::sema::types::{ListState, Type};
 use crate::sema::values::{MathematicalConstant, Value, ValueKind};
 
@@ -8,14 +10,24 @@ pub struct IntrinsicFunction {
     pub identifier: &'static str,
     pub min_arity: usize,
     pub max_arity: Option<usize>,
-    pub interpret_call: fn(context: &GlobalContext, arguments: Box<[Value]>) -> crate::Result<ValueKind>,
+    pub interpret_call: fn(
+        context: &GlobalContext,
+        local_context: &LocalContext,
+        arguments: Box<[Value]>,
+    ) -> crate::Result<ValueKind>,
 }
 
 impl IntrinsicFunction {
-    pub fn interpret_call(&self, context: &GlobalContext, span: Option<crate::Span>, arguments: Box<[Value]>) -> crate::Result<ValueKind> {
+    pub fn interpret_call(
+        &self,
+        context: &GlobalContext,
+        local_context: &LocalContext,
+        span: Option<crate::Span>,
+        arguments: Box<[Value]>,
+    ) -> crate::Result<ValueKind> {
         self.check_arity(arguments.len(), span)?;
 
-        (self.interpret_call)(context, arguments)
+        (self.interpret_call)(context, local_context, arguments)
     }
 
     pub fn check_arity(&self, argument_count: usize, span: Option<crate::Span>) -> crate::Result<()> {
@@ -451,6 +463,9 @@ pub const CORE_INTRINSIC_FUNCTIONS: &[&IntrinsicFunction] = &[
     // Desmosify
     &ENUM_VALUES,
     &ENUM_VALUE,
+    &INCLUDE_TEXT,
+    &INCLUDE_DATA,
+    &IMAGE,
 ];
 
 pub fn interpret_trig_call(
@@ -473,7 +488,7 @@ macro_rules! trig_intrinsic {
             identifier: $id,
             min_arity: 1,
             max_arity: Some(1),
-            interpret_call: |_, arguments| {
+            interpret_call: |_, _, arguments| {
                 interpret_trig_call(IntrinsicUnaryKind::$kind, arguments)
             },
         }
@@ -532,7 +547,7 @@ macro_rules! reducer_intrinsic {
             identifier: $id,
             min_arity: 1,
             max_arity: None,
-            interpret_call: |_, arguments| {
+            interpret_call: |_, _, arguments| {
                 interpret_reducer_call(IntrinsicReducerKind::$kind, $chk, $res, arguments)
             },
         }
@@ -573,11 +588,34 @@ macro_rules! color_intrinsic {
             identifier: $id,
             min_arity: 3,
             max_arity: Some(3),
-            interpret_call: |_, arguments| {
+            interpret_call: |_, _, arguments| {
                 interpret_color_call(IntrinsicColorKind::$kind, arguments)
             },
         }
     };
+}
+
+pub fn read_file_bytes(local_context: &LocalContext, path_value: &Value) -> crate::Result<(PathBuf, Vec<u8>)> {
+    let relative_path = path_value.kind
+        .as_const_str()
+        .ok_or_else(|| Box::new(crate::Error {
+            kind: crate::ErrorKind::ExpectedConstant {
+                type_name: Type::Str.to_string(),
+            },
+            span: path_value.span,
+        }))?;
+
+    let full_path = local_context.source_directory().join(relative_path.as_ref());
+
+    std::fs::read(&full_path)
+        .map_err(|cause| Box::new(crate::Error {
+            kind: crate::ErrorKind::FileOpen {
+                path: Some(full_path.as_path().into()),
+                cause,
+            },
+            span: path_value.span,
+        }))
+        .map(|contents| (full_path, contents))
 }
 
 // ------ Trigonometric ------
@@ -638,7 +676,7 @@ pub static JOIN: IntrinsicFunction = IntrinsicFunction {
     identifier: "join",
     min_arity: 2,
     max_arity: None,
-    interpret_call: |_, arguments| {
+    interpret_call: |_, _, arguments| {
         let item_type = arguments[1..].iter().try_fold(
             arguments[0].get_type().into_flatten_list().1,
             |current_type, argument| {
@@ -701,7 +739,7 @@ pub static SEGMENT: IntrinsicFunction = IntrinsicFunction {
     identifier: "segment",
     min_arity: 2,
     max_arity: Some(2),
-    interpret_call: |_, arguments| {
+    interpret_call: |_, _, arguments| {
         // TODO: check types
         let mut arguments = arguments.into_iter();
         let point_1 = arguments.next().unwrap();
@@ -758,7 +796,7 @@ pub static ROTATE: IntrinsicFunction = IntrinsicFunction {
     identifier: "rotate",
     min_arity: 3,
     max_arity: Some(3),
-    interpret_call: |_, arguments| {
+    interpret_call: |_, _, arguments| {
         // TODO: check types better
         let mut arguments = arguments.into_iter();
         let object = arguments.next().unwrap();
@@ -829,7 +867,7 @@ pub static ENUM_VALUES: IntrinsicFunction = IntrinsicFunction {
     identifier: "enum_values",
     min_arity: 1,
     max_arity: Some(1),
-    interpret_call: |context, arguments| {
+    interpret_call: |context, _, arguments| {
         let enum_type = arguments.into_iter().next().unwrap();
         let Type::Meta { identifier } = enum_type.get_type() else {
             return Err(Box::new(crate::Error {
@@ -867,7 +905,7 @@ pub static ENUM_VALUE: IntrinsicFunction = IntrinsicFunction {
     identifier: "enum_value",
     min_arity: 2,
     max_arity: Some(2),
-    interpret_call: |context, arguments| {
+    interpret_call: |context, _, arguments| {
         let mut arguments = arguments.into_iter();
 
         let enum_type = arguments.next().unwrap();
@@ -897,6 +935,138 @@ pub static ENUM_VALUE: IntrinsicFunction = IntrinsicFunction {
         Ok(ValueKind::AssumeType(
             Box::new(variant_ordinal),
             result_type.unflatten_list(list_state),
+        ))
+    },
+};
+pub static INCLUDE_TEXT: IntrinsicFunction = IntrinsicFunction {
+    identifier: "include_text",
+    min_arity: 1,
+    max_arity: Some(1),
+    interpret_call: |_, local_context, arguments| {
+        // TODO: allow user to specify encoding; better error handling
+        let path_value = arguments.into_iter().next().unwrap();
+        let (path, bytes) = read_file_bytes(local_context, &path_value)?;
+
+        let text = String::from_utf8(bytes)
+            .map_err(|_| Box::new(crate::Error {
+                kind: crate::ErrorKind::FileRead {
+                    path: Some(path.into_boxed_path()),
+                    cause: std::io::ErrorKind::InvalidData.into(),
+                },
+                span: path_value.span,
+            }))?;
+
+        Ok(ValueKind::Str(text.into()))
+    },
+};
+pub static INCLUDE_DATA: IntrinsicFunction = IntrinsicFunction {
+    identifier: "include_data",
+    min_arity: 1,
+    max_arity: Some(2),
+    interpret_call: |_, local_context, arguments| {
+        let mut arguments = arguments.into_iter();
+
+        let path_value = arguments.next().unwrap();
+        let media_type = arguments.next()
+            .map(|media_type_value| media_type_value.kind
+                .as_const_str()
+                .ok_or_else(|| Box::new(crate::Error {
+                    kind: crate::ErrorKind::ExpectedConstant {
+                        type_name: Type::Str.to_string(),
+                    },
+                    span: media_type_value.span,
+                })))
+            .transpose()?;
+
+        let (path, bytes) = read_file_bytes(local_context, &path_value)?;
+
+        let mut data_url = dataurl::DataUrl::new();
+        // Annoyingly, this immediately calls to_vec() on the argument. What's even the point of
+        // making us pass in a &[u8], then??
+        data_url.set_data(&bytes);
+        data_url.set_is_base64_encoded(true);
+
+        // Guess the media type for the file based on the path or user override
+        if let Some(media_type) = media_type {
+            data_url.set_media_type(Some(media_type.to_string()));
+        }
+        else if let Some(mime) = mime_guess::from_path(&path).first() {
+            data_url.set_media_type(Some(mime.essence_str().to_string()));
+        }
+
+        Ok(ValueKind::Str(data_url.to_string().into()))
+    },
+};
+pub static IMAGE: IntrinsicFunction = IntrinsicFunction {
+    identifier: "image",
+    min_arity: 5,
+    max_arity: Some(8),
+    interpret_call: |_, _, arguments| {
+        let mut arguments = arguments.into_iter();
+
+        let url_value = arguments.next().unwrap();
+        let url = url_value.kind
+            .as_const_str()
+            .ok_or_else(|| Box::new(crate::Error {
+                kind: crate::ErrorKind::ExpectedConstant {
+                    type_name: Type::Str.to_string(),
+                },
+                span: url_value.span,
+            }))?;
+        let name_value = arguments.next().unwrap();
+        let name = name_value.kind
+            .as_const_str()
+            .ok_or_else(|| Box::new(crate::Error {
+                kind: crate::ErrorKind::ExpectedConstant {
+                    type_name: Type::Str.to_string(),
+                },
+                span: name_value.span,
+            }))?;
+        let center = arguments.next().unwrap()
+            .coerce_to(&Type::Point2 {
+                x_type: Box::new(Type::Real),
+                y_type: Box::new(Type::Real),
+            }, true)?;
+        let width = arguments.next().unwrap()
+            .coerce_to(&Type::Real, true)?;
+        let height = arguments.next().unwrap()
+            .coerce_to(&Type::Real, true)?;
+        let opacity = arguments.next()
+            .unwrap_or(ValueKind::Real(1.0).into())
+            .coerce_to(&Type::Real, true)?;
+        let angle = arguments.next()
+            .unwrap_or(ValueKind::Real(0.0).into())
+            .coerce_to(&Type::Real, true)?;
+        let background = arguments.next()
+            .map_or(Ok(false), |background_value| {
+                background_value.kind
+                    .as_const_bool()
+                    .ok_or_else(|| Box::new(crate::Error {
+                        kind: crate::ErrorKind::ExpectedConstant {
+                            type_name: Type::Bool.to_string(),
+                        },
+                        span: background_value.span,
+                    }))
+            })?;
+
+        let list_state = center.get_type().list_state();
+        let list_state = ListState::merge(list_state, width.get_type().list_state());
+        let list_state = ListState::merge(list_state, height.get_type().list_state());
+        let list_state = ListState::merge(list_state, opacity.get_type().list_state());
+        let list_state = ListState::merge(list_state, angle.get_type().list_state());
+
+        Ok(ValueKind::Image(
+            Box::new(ImageValue {
+                url,
+                name,
+                center,
+                width,
+                height,
+                opacity,
+                angle,
+                background,
+            }),
+            list_state,
         ))
     },
 };

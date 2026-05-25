@@ -1785,7 +1785,7 @@ impl GraphExpressionListBuilder {
 
     pub fn add_display_element(&mut self, element: &ProgramDisplayElement) -> crate::Result<()> {
         match &element.value.kind {
-            ValueKind::Image(image) => {
+            ValueKind::Image(image, _) => {
                 self.add_image_display_element(element, image)
             }
             _ => {

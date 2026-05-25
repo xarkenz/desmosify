@@ -105,18 +105,20 @@ impl Span {
 
 #[derive(Debug)]
 pub enum ErrorKind {
-    SourceFileOpen {
+    FileOpen {
+        path: Option<Box<Path>>,
         cause: std::io::Error,
     },
-    SourceFileRead {
+    FileRead {
+        path: Option<Box<Path>>,
         cause: std::io::Error,
     },
-    OutputFileOpen {
-        path: Box<Path>,
+    FileCreate {
+        path: Option<Box<Path>>,
         cause: std::io::Error,
     },
-    OutputFileWrite {
-        path: Box<Path>,
+    FileWrite {
+        path: Option<Box<Path>>,
         cause: std::io::Error,
     },
     InvalidToken,
@@ -275,17 +277,37 @@ pub enum ErrorKind {
 impl std::fmt::Display for ErrorKind {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            Self::SourceFileOpen { cause } => {
-                write!(f, "unable to open file: {cause}")
+            Self::FileOpen { path, cause } => {
+                if let Some(path) = path {
+                    write!(f, "unable to open file '{}': {cause}", path.display())
+                }
+                else {
+                    write!(f, "unable to open file: {cause}")
+                }
             }
-            Self::SourceFileRead { cause } => {
-                write!(f, "error while reading file: {cause}")
+            Self::FileRead { path, cause } => {
+                if let Some(path) = path {
+                    write!(f, "error while reading file '{}': {cause}", path.display())
+                }
+                else {
+                    write!(f, "error while reading file: {cause}")
+                }
             }
-            Self::OutputFileOpen { path, cause } => {
-                write!(f, "unable to create file '{}': {cause}", path.display())
+            Self::FileCreate { path, cause } => {
+                if let Some(path) = path {
+                    write!(f, "unable to create file '{}': {cause}", path.display())
+                }
+                else {
+                    write!(f, "unable to create file: {cause}")
+                }
             }
-            Self::OutputFileWrite { path, cause } => {
-                write!(f, "error while writing file '{}': {cause}", path.display())
+            Self::FileWrite { path, cause } => {
+                if let Some(path) = path {
+                    write!(f, "error while writing file '{}': {cause}", path.display())
+                }
+                else {
+                    write!(f, "error while writing file: {cause}")
+                }
             }
             Self::InvalidToken => {
                 write!(f, "unrecognized token")
@@ -483,10 +505,10 @@ impl std::fmt::Display for ErrorKind {
 impl std::error::Error for ErrorKind {
     fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
         match self {
-            Self::SourceFileOpen { cause, .. } => Some(cause),
-            Self::SourceFileRead { cause, .. } => Some(cause),
-            Self::OutputFileOpen { cause, .. } => Some(cause),
-            Self::OutputFileWrite { cause, .. } => Some(cause),
+            Self::FileOpen { cause, .. } => Some(cause),
+            Self::FileRead { cause, .. } => Some(cause),
+            Self::FileCreate { cause, .. } => Some(cause),
+            Self::FileWrite { cause, .. } => Some(cause),
             _ => None
         }
     }
