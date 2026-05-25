@@ -1,7 +1,9 @@
 use std::rc::Rc;
+use crate::sema::display::ProgramDisplay;
 use crate::sema::values::{ActionValue, LocalReference, Value};
 
 pub mod context;
+pub mod display;
 pub mod interpret;
 pub mod intrinsic;
 pub mod types;
@@ -107,60 +109,6 @@ pub struct ProgramPublic {
 impl ProgramPublic {
     pub fn lines(&self) -> &[ProgramPublicLine] {
         &self.lines
-    }
-}
-
-#[derive(Clone, Debug)]
-pub enum ProgramDisplayAttributeValue {
-    Arguments(Box<[Value]>),
-    Action(ActionValue),
-}
-
-#[derive(Clone, Debug)]
-pub struct ProgramDisplayAttribute {
-    key: Rc<str>,
-    key_span: Option<crate::Span>,
-    value: ProgramDisplayAttributeValue,
-}
-
-impl ProgramDisplayAttribute {
-    pub fn key(&self) -> &str {
-        &self.key
-    }
-
-    pub fn key_span(&self) -> Option<crate::Span> {
-        self.key_span
-    }
-
-    pub fn value(&self) -> &ProgramDisplayAttributeValue {
-        &self.value
-    }
-}
-
-#[derive(Clone, Debug)]
-pub struct ProgramDisplayElement {
-    expression: Value,
-    attributes: Box<[ProgramDisplayAttribute]>,
-}
-
-impl ProgramDisplayElement {
-    pub fn expression(&self) -> &Value {
-        &self.expression
-    }
-
-    pub fn attributes(&self) -> &[ProgramDisplayAttribute] {
-        &self.attributes
-    }
-}
-
-#[derive(Clone, Debug)]
-pub struct ProgramDisplay {
-    elements: Box<[ProgramDisplayElement]>,
-}
-
-impl ProgramDisplay {
-    pub fn elements(&self) -> &[ProgramDisplayElement] {
-        &self.elements
     }
 }
 

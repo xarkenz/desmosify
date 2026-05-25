@@ -1,5 +1,6 @@
 use json::JsonValue;
 use crate::desmos::latex::{BracketType, Latex, LatexNode};
+use crate::sema::display::{DragMode, LabelOrientation, LineStyle, PointStyle};
 
 pub mod latex;
 pub mod target;
@@ -140,55 +141,14 @@ impl Default for GraphSlider {
     }
 }
 
-#[derive(Copy, Clone, PartialEq, Default, Debug)]
-pub enum GraphPointStyle {
-    #[default]
-    Point,
-    Open,
-    Cross,
-    Square,
-    Plus,
-    Triangle,
-    Diamond,
-    Star,
-}
-
-impl GraphPointStyle {
-    pub fn from_name(name: &str) -> Option<Self> {
-        match name {
-            "point" | "POINT" => Some(Self::Point),
-            "open" | "OPEN" => Some(Self::Open),
-            "cross" | "CROSS" => Some(Self::Cross),
-            "square" | "SQUARE" => Some(Self::Square),
-            "plus" | "PLUS" => Some(Self::Plus),
-            "triangle" | "TRIANGLE" => Some(Self::Triangle),
-            "diamond" | "DIAMOND" => Some(Self::Diamond),
-            "star" | "STAR" => Some(Self::Star),
-            _ => None
-        }
-    }
-
-    pub fn name(&self) -> &'static str {
-        match self {
-            Self::Point => "POINT",
-            Self::Open => "OPEN",
-            Self::Cross => "CROSS",
-            Self::Square => "SQUARE",
-            Self::Plus => "PLUS",
-            Self::Triangle => "TRIANGLE",
-            Self::Diamond => "DIAMOND",
-            Self::Star => "STAR",
-        }
-    }
-}
-
 #[derive(Debug)]
 pub struct GraphPointInfo {
     pub display: bool,
     pub opacity: GraphExpression,
     pub size: GraphExpression,
-    pub style: GraphPointStyle,
+    pub style: PointStyle,
     pub outline: bool,
+    pub drag_mode: DragMode,
 }
 
 impl GraphPointInfo {
@@ -207,6 +167,9 @@ impl GraphPointInfo {
         if self.outline {
             object["pointOutline"] = true.into();
         }
+        if self.drag_mode != Default::default() {
+            object["dragMode"] = self.drag_mode.name().into();
+        }
     }
 }
 
@@ -218,72 +181,7 @@ impl Default for GraphPointInfo {
             size: Default::default(),
             style: Default::default(),
             outline: false,
-        }
-    }
-}
-
-#[derive(Copy, Clone, PartialEq, Default, Debug)]
-pub enum GraphLabelOrientation {
-    #[default]
-    Default,
-    Center,
-    CenterAuto,
-    AutoCenter,
-    Above,
-    AboveLeft,
-    AboveRight,
-    AboveAuto,
-    Below,
-    BelowLeft,
-    BelowRight,
-    BelowAuto,
-    Left,
-    AutoLeft,
-    Right,
-    AutoRight,
-}
-
-impl GraphLabelOrientation {
-    pub fn from_name(name: &str) -> Option<Self> {
-        match name {
-            "default" => Some(Self::Default),
-            "center" => Some(Self::Center),
-            "center_auto" => Some(Self::CenterAuto),
-            "auto_center" => Some(Self::AutoCenter),
-            "above" => Some(Self::Above),
-            "above_left" => Some(Self::AboveLeft),
-            "above_right" => Some(Self::AboveRight),
-            "above_auto" => Some(Self::AboveAuto),
-            "below" => Some(Self::Below),
-            "below_left" => Some(Self::BelowLeft),
-            "below_right" => Some(Self::BelowRight),
-            "below_auto" => Some(Self::BelowAuto),
-            "left" => Some(Self::Left),
-            "auto_left" => Some(Self::AutoLeft),
-            "right" => Some(Self::Right),
-            "auto_right" => Some(Self::AutoRight),
-            _ => None
-        }
-    }
-
-    pub fn name(&self) -> &'static str {
-        match self {
-            Self::Default => "default",
-            Self::Center => "center",
-            Self::CenterAuto => "center_auto",
-            Self::AutoCenter => "auto_center",
-            Self::Above => "above",
-            Self::AboveLeft => "above_left",
-            Self::AboveRight => "above_right",
-            Self::AboveAuto => "above_auto",
-            Self::Below => "below",
-            Self::BelowLeft => "below_left",
-            Self::BelowRight => "below_right",
-            Self::BelowAuto => "below_auto",
-            Self::Left => "left",
-            Self::AutoLeft => "auto_left",
-            Self::Right => "right",
-            Self::AutoRight => "auto_right",
+            drag_mode: Default::default(),
         }
     }
 }
@@ -295,7 +193,7 @@ pub struct GraphLabelInfo {
     pub opacity: GraphExpression,
     pub size: GraphExpression,
     pub angle: GraphExpression,
-    pub orientation: GraphLabelOrientation,
+    pub orientation: LabelOrientation,
     pub outline: bool,
 }
 
@@ -338,39 +236,12 @@ impl Default for GraphLabelInfo {
     }
 }
 
-#[derive(Copy, Clone, PartialEq, Default, Debug)]
-pub enum GraphLineStyle {
-    #[default]
-    Solid,
-    Dashed,
-    Dotted,
-}
-
-impl GraphLineStyle {
-    pub fn from_name(name: &str) -> Option<Self> {
-        match name {
-            "solid" | "SOLID" => Some(Self::Solid),
-            "dashed" | "DASHED" => Some(Self::Dashed),
-            "dotted" | "DOTTED" => Some(Self::Dotted),
-            _ => None
-        }
-    }
-
-    pub fn name(&self) -> &'static str {
-        match self {
-            Self::Solid => "SOLID",
-            Self::Dashed => "DASHED",
-            Self::Dotted => "DOTTED",
-        }
-    }
-}
-
 #[derive(Debug)]
 pub struct GraphLineInfo {
     pub display: bool,
     pub opacity: GraphExpression,
     pub width: GraphExpression,
-    pub style: GraphLineStyle,
+    pub style: LineStyle,
 }
 
 impl GraphLineInfo {
@@ -585,7 +456,7 @@ pub struct GraphImageEntry {
     pub folder_id: Option<String>,
     pub image_url: String,
     pub name: String,
-    pub foreground: bool,
+    pub background: bool,
     pub center: GraphExpression,
     pub width: GraphExpression,
     pub height: GraphExpression,
@@ -600,7 +471,7 @@ impl ToJson for GraphImageEntry {
             "type": self.type_name(),
             "id": self.id(),
             "name": self.name.as_str(),
-            "foreground": self.foreground,
+            "foreground": !self.background,
         };
         if let Some(folder_id) = &self.folder_id {
             object["folderId"] = folder_id.as_str().into();
@@ -646,7 +517,7 @@ impl Default for GraphImageEntry {
             folder_id: None,
             image_url: String::new(),
             name: String::new(),
-            foreground: true,
+            background: false,
             center: Default::default(),
             width: Default::default(),
             height: Default::default(),

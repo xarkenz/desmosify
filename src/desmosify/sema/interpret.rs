@@ -1,7 +1,8 @@
 use std::rc::Rc;
-use crate::ast::{ActionExpression, ActionExpressionKind, BinaryOperation, DefinitionKind, DisplayAttributeValue, Expression, ExpressionIndexOperation, ExpressionKind, ParameterList, PublicLineKind, TypeDefinition, UnaryOperation, ValueDefinition, VariableKind};
-use crate::sema::{Program, ProgramAction, ProgramDisplay, ProgramDisplayAttribute, ProgramDisplayAttributeValue, ProgramDisplayElement, ProgramLet, ProgramPublic, ProgramPublicLine, ProgramTicker, ProgramVariable, ProgramVariableKind};
+use crate::ast::{ActionExpression, ActionExpressionKind, BinaryOperation, DefinitionKind, DisplayAttribute, DisplayAttributeValue, Expression, ExpressionIndexOperation, ExpressionKind, ParameterList, PublicLineKind, TypeDefinition, UnaryOperation, ValueDefinition, VariableKind};
+use crate::sema::{Program, ProgramAction, ProgramLet, ProgramPublic, ProgramPublicLine, ProgramTicker, ProgramVariable, ProgramVariableKind};
 use crate::sema::context::{GlobalContext, LocalContext};
+use crate::sema::display::{DragMode, LabelOrientation, LineStyle, PointStyle, ProgramDisplay, ProgramDisplayAttribute, ProgramDisplayAttributeKind, ProgramDisplayElement};
 use crate::sema::intrinsic::IntrinsicValue;
 use crate::sema::types::{ListState, Type};
 use crate::sema::values::{ActionValue, ActionValueKind, GlobalReference, LocalReference, Value, ValueIndexOperation, ValueKind, ValueListMapLoop};
@@ -248,37 +249,274 @@ pub fn interpret_display_declarations(
     context: &GlobalContext,
     next_local_id: &mut u64,
 ) -> crate::Result<Option<ProgramDisplay>> {
+    fn prevent_duplicate(attribute: &DisplayAttribute, has_attribute: &mut bool) -> crate::Result<()> {
+        if std::mem::replace(has_attribute, true) {
+            Err(Box::new(crate::Error {
+                kind: crate::ErrorKind::DuplicatedDisplayAttribute {
+                    key: attribute.key.as_ref().into(),
+                },
+                span: Some(attribute.key_span),
+            }))
+        }
+        else {
+            Ok(())
+        }
+    }
+
+    fn require_arguments(attribute: &DisplayAttribute, min_arity: usize, max_arity: usize) -> crate::Result<&[Expression]> {
+        let DisplayAttributeValue::Arguments(arguments) = &attribute.value else {
+            return Err(Box::new(crate::Error {
+                kind: crate::ErrorKind::DisplayAttributeExpectedArguments {
+                    key: attribute.key.as_ref().into(),
+                },
+                span: Some(attribute.key_span),
+            }));
+        };
+
+        if (min_arity ..= max_arity).contains(&arguments.len()) {
+            Ok(arguments)
+        }
+        else {
+            Err(Box::new(crate::Error {
+                kind: crate::ErrorKind::InvalidDisplayAttributeArity {
+                    key: attribute.key.as_ref().into(),
+                    min: min_arity,
+                    max: max_arity,
+                    got: arguments.len(),
+                },
+                span: Some(attribute.key_span),
+            }))
+        }
+    }
+
+    fn require_action(attribute: &DisplayAttribute) -> crate::Result<&ActionExpression> {
+        if let DisplayAttributeValue::Action(action) = &attribute.value {
+            Ok(action)
+        }
+        else {
+            Err(Box::new(crate::Error {
+                kind: crate::ErrorKind::DisplayAttributeExpectedAction {
+                    key: attribute.key.as_ref().into(),
+                },
+                span: Some(attribute.key_span),
+            }))
+        }
+    }
+
     // It's fine to create the local context here because it never changes.
     // (For click actions, just create a fresh context.)
     let local_context = LocalContext::new();
+
+    macro_rules! interpret_option {
+        ($opt:expr) => {
+            (($opt)
+                .map(|expression| {
+                    interpret_expression(context, next_local_id, &local_context, expression)
+                })
+                .transpose())
+        };
+    }
+
+    macro_rules! interpret_option_named {
+        ($opt:expr, $e:ty) => {
+            (($opt)
+                .map_or(Ok(Default::default()), |expression| {
+                    let value = interpret_expression(context, next_local_id, &local_context, expression)?;
+                    value.kind
+                        .as_const_str()
+                        .and_then(|name| <$e>::from_name(&name))
+                        .ok_or_else(|| Box::new(crate::Error {
+                            kind: crate::ErrorKind::ExpectedConstantStrFromList {
+                                allowed: <$e>::NAMES
+                                    .iter()
+                                    .copied()
+                                    .map(Into::into)
+                                    .collect(),
+                            },
+                            span: value.span,
+                        }))
+                }))
+        };
+    }
+
+    macro_rules! interpret_option_bool {
+        ($opt:expr, $default:expr) => {
+            (($opt)
+                .map_or(Ok($default), |expression| {
+                    let value = interpret_expression(context, next_local_id, &local_context, expression)?;
+                    value.kind
+                        .as_const_bool()
+                        .ok_or_else(|| Box::new(crate::Error {
+                            kind: crate::ErrorKind::ExpectedConstant {
+                                type_name: Type::Bool.to_string(),
+                            },
+                            span: value.span,
+                        }))
+                }))
+        };
+    }
+
+    macro_rules! interpret_str {
+        ($expr:expr) => {
+            ({
+                let value = interpret_expression(context, next_local_id, &local_context, $expr)?;
+                value.kind
+                    .as_const_str()
+                    .ok_or_else(|| Box::new(crate::Error {
+                            kind: crate::ErrorKind::ExpectedConstant {
+                                type_name: Type::Str.to_string(),
+                            },
+                        span: value.span,
+                    }))
+            })
+        };
+    }
+
     let mut elements = Vec::new();
 
     for declaration in context.display_declarations() {
         for element in &declaration.elements {
+            let mut has_color = false;
+            let mut has_point = false;
+            let mut has_drag = false;
+            let mut has_label = false;
+            let mut has_line = false;
+            let mut has_fill = false;
+            let mut has_click = false;
+            let mut has_hovered = false;
+            let mut has_pressed = false;
+            let mut has_description = false;
+
+            let mut attributes = Vec::with_capacity(element.attributes.len());
+
+            for attribute in &element.attributes {
+                let kind = match attribute.key.as_ref() {
+                    "color" => {
+                        // color(<color>: color)
+                        prevent_duplicate(attribute, &mut has_color)?;
+                        let arguments = require_arguments(attribute, 1, 1)?;
+
+                        ProgramDisplayAttributeKind::Color {
+                            value: interpret_expression(context, next_local_id, &local_context, &arguments[0])?,
+                        }
+                    }
+                    "point" => {
+                        // point([opacity]: real, [size]: real, [style]: str, [outline]: bool)
+                        prevent_duplicate(attribute, &mut has_point)?;
+                        let arguments = require_arguments(attribute, 0, 4)?;
+
+                        ProgramDisplayAttributeKind::Point {
+                            opacity: interpret_option!(arguments.get(0))?,
+                            size: interpret_option!(arguments.get(1))?,
+                            style: interpret_option_named!(arguments.get(2), PointStyle)?,
+                            outline: interpret_option_bool!(arguments.get(3), false)?,
+                        }
+                    }
+                    "drag" => {
+                        // drag([mode]: str)
+                        prevent_duplicate(attribute, &mut has_drag)?;
+                        let arguments = require_arguments(attribute, 0, 1)?;
+
+                        ProgramDisplayAttributeKind::Drag {
+                            mode: interpret_option_named!(arguments.get(0), DragMode)?,
+                        }
+                    }
+                    "label" => {
+                        // label(<text>: str, [opacity]: real, [size]: real, [angle]: real,
+                        //       [orientation]: str, [outline]: bool)
+                        prevent_duplicate(attribute, &mut has_label)?;
+                        let arguments = require_arguments(attribute, 1, 6)?;
+
+                        ProgramDisplayAttributeKind::Label {
+                            text: interpret_str!(&arguments[0])?,
+                            opacity: interpret_option!(arguments.get(1))?,
+                            size: interpret_option!(arguments.get(2))?,
+                            angle: interpret_option!(arguments.get(3))?,
+                            orientation: interpret_option_named!(arguments.get(4), LabelOrientation)?,
+                            outline: interpret_option_bool!(arguments.get(5), true)?,
+                        }
+                    }
+                    "line" => {
+                        // line([opacity]: real, [width]: real, [style]: str)
+                        prevent_duplicate(attribute, &mut has_line)?;
+                        let arguments = require_arguments(attribute, 0, 3)?;
+
+                        ProgramDisplayAttributeKind::Line {
+                            opacity: interpret_option!(arguments.get(0))?,
+                            width: interpret_option!(arguments.get(1))?,
+                            style: interpret_option_named!(arguments.get(2), LineStyle)?,
+                        }
+                    }
+                    "fill" => {
+                        // fill([opacity]: real)
+                        prevent_duplicate(attribute, &mut has_fill)?;
+                        let arguments = require_arguments(attribute, 0, 1)?;
+
+                        ProgramDisplayAttributeKind::Fill {
+                            opacity: interpret_option!(arguments.get(0))?,
+                        }
+                    }
+                    "click" => {
+                        // TODO: click(action(index) { ... }) to allow other attributes?
+                        // click { ... }
+                        prevent_duplicate(attribute, &mut has_click)?;
+                        let action = require_action(attribute)?;
+
+                        let mut action_context = local_context.new_inner();
+                        // TODO: only available when list?
+                        action_context.add_scoped_intrinsic("index", IntrinsicValue::Index.into());
+
+                        ProgramDisplayAttributeKind::Click {
+                            action: interpret_action_expression(context, next_local_id, &action_context, action)?,
+                        }
+                    }
+                    "hovered" => {
+                        // hovered(<url>: str)
+                        prevent_duplicate(attribute, &mut has_hovered)?;
+                        let arguments = require_arguments(attribute, 1, 1)?;
+
+                        ProgramDisplayAttributeKind::Hovered {
+                            url: interpret_str!(&arguments[0])?,
+                        }
+                    }
+                    "pressed" => {
+                        // pressed(<url>: str)
+                        prevent_duplicate(attribute, &mut has_pressed)?;
+                        let arguments = require_arguments(attribute, 1, 1)?;
+
+                        ProgramDisplayAttributeKind::Pressed {
+                            url: interpret_str!(&arguments[0])?,
+                        }
+                    }
+                    "description" => {
+                        // description(<text>: str)
+                        prevent_duplicate(attribute, &mut has_description)?;
+                        let arguments = require_arguments(attribute, 1, 1)?;
+
+                        ProgramDisplayAttributeKind::Description {
+                            text: interpret_str!(&arguments[0])?,
+                        }
+                    }
+                    _ => {
+                        return Err(Box::new(crate::Error {
+                            kind: crate::ErrorKind::UnsupportedDisplayAttribute {
+                                key: attribute.key.as_ref().into(),
+                            },
+                            span: Some(attribute.key_span),
+                        }));
+                    }
+                };
+
+                attributes.push(ProgramDisplayAttribute {
+                    kind,
+                    key_span: Some(attribute.key_span),
+                });
+            }
+
             elements.push(ProgramDisplayElement {
-                expression: interpret_expression(context, next_local_id, &local_context, &element.expression)?,
-                attributes: element.attributes
-                    .iter()
-                    .map(|attribute| Ok(ProgramDisplayAttribute {
-                        key: attribute.key.clone(),
-                        key_span: Some(attribute.key_span),
-                        value: match &attribute.value {
-                            DisplayAttributeValue::Arguments(arguments) => {
-                                ProgramDisplayAttributeValue::Arguments(arguments
-                                    .iter()
-                                    .map(|argument| interpret_expression(context, next_local_id, &local_context, argument))
-                                    .collect::<crate::Result<_>>()?)
-                            }
-                            DisplayAttributeValue::Action(action) => {
-                                let mut action_context = local_context.new_inner();
-                                // TODO: figure out how to do this better
-                                // TODO: only available when list?
-                                action_context.add_scoped_intrinsic("index", IntrinsicValue::Index.into());
-                                ProgramDisplayAttributeValue::Action(interpret_action_expression(context, next_local_id, &action_context, action)?)
-                            }
-                        },
-                    }))
-                    .collect::<crate::Result<_>>()?,
+                value: interpret_expression(context, next_local_id, &local_context, &element.expression)?,
+                span: Some(element.span),
+                attributes: attributes.into_boxed_slice(),
             });
         }
     }

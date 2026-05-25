@@ -2,3 +2,5 @@
 /.upm
 /.cache
 /.idea
+
+/utils/fetched_*

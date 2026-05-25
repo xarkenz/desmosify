@@ -264,6 +264,12 @@ pub enum ErrorKind {
         max: usize,
         got: usize,
     },
+    ExpectedConstant {
+        type_name: String,
+    },
+    ExpectedConstantStrFromList {
+        allowed: Vec<Box<str>>,
+    },
 }
 
 impl std::fmt::Display for ErrorKind {
@@ -459,6 +465,16 @@ impl std::fmt::Display for ErrorKind {
                 else {
                     write!(f, "display attribute '{key}' expects between {min} and {max} arguments but received {got}")
                 }
+            }
+            Self::ExpectedConstant { type_name } => {
+                write!(f, "expected a constant value of type '{type_name}'")
+            }
+            Self::ExpectedConstantStrFromList { allowed } => {
+                write!(f, "expected a constant string from {:?}", &allowed[0])?;
+                for string in &allowed[1..] {
+                    write!(f, ", {string:?}")?;
+                }
+                Ok(())
             }
         }
     }

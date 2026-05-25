@@ -1,7 +1,8 @@
 use crate::ast::{BinaryOperation, RangeKind, UnaryOperation};
-use crate::desmos::{GraphBinaryKind, GraphExpressionEntry, GraphFolderEntry, GraphEntry, GraphExpression, GraphExpressionList, GraphTicker, GraphInequalityKind, GraphUnaryKind, GraphTextEntry, GraphPointStyle, GraphLabelOrientation, GraphLineStyle, GraphSlider, GraphSliderLoopMode};
+use crate::desmos::{GraphBinaryKind, GraphEntry, GraphExpression, GraphExpressionEntry, GraphExpressionList, GraphFolderEntry, GraphImageEntry, GraphInequalityKind, GraphSlider, GraphSliderLoopMode, GraphTextEntry, GraphTicker, GraphUnaryKind};
 use crate::desmos::symbol::SymbolTable;
-use crate::sema::{Program, ProgramAction, ProgramDisplayAttribute, ProgramDisplayAttributeValue, ProgramDisplayElement, ProgramLet, ProgramPublicLine, ProgramTicker, ProgramVariable, ProgramVariableKind};
+use crate::sema::{Program, ProgramAction, ProgramLet, ProgramPublicLine, ProgramTicker, ProgramVariable, ProgramVariableKind};
+use crate::sema::display::{ImageValue, ProgramDisplayAttributeKind, ProgramDisplayElement};
 use crate::sema::intrinsic::{IntrinsicBinaryKind, IntrinsicColorKind, IntrinsicDoubleReducerKind, IntrinsicParameterizedReducerKind, IntrinsicReducerKind, IntrinsicUnaryKind, IntrinsicValue};
 use crate::sema::types::Type;
 use crate::sema::values::{ActionValue, ActionValueKind, MathematicalConstant, Value, ValueIndexOperation, ValueKind};
@@ -1783,207 +1784,126 @@ impl GraphExpressionListBuilder {
     }
 
     pub fn add_display_element(&mut self, element: &ProgramDisplayElement) -> crate::Result<()> {
-        let unsupported_error = |value: &Value| Box::new(crate::Error {
-            kind: crate::ErrorKind::UnsupportedValue,
-            span: value.span,
-        });
-
-        fn prevent_duplicate(attribute: &ProgramDisplayAttribute, has_attribute: &mut bool) -> crate::Result<()> {
-            if *has_attribute {
-                Err(Box::new(crate::Error {
-                    kind: crate::ErrorKind::DuplicatedDisplayAttribute {
-                        key: attribute.key().into(),
-                    },
-                    span: attribute.key_span(),
-                }))
+        match &element.value.kind {
+            ValueKind::Image(image) => {
+                self.add_image_display_element(element, image)
             }
-            else {
-                *has_attribute = true;
-                Ok(())
+            _ => {
+                self.add_expression_display_element(element)
             }
         }
-        fn get_arguments(attribute: &ProgramDisplayAttribute, min_arity: usize, max_arity: usize) -> crate::Result<&[Value]> {
-            let ProgramDisplayAttributeValue::Arguments(arguments) = attribute.value() else {
-                return Err(Box::new(crate::Error {
-                    kind: crate::ErrorKind::DisplayAttributeExpectedArguments {
-                        key: attribute.key().into(),
-                    },
-                    span: attribute.key_span(),
-                }));
-            };
+    }
 
-            if (min_arity ..= max_arity).contains(&arguments.len()) {
-                Ok(arguments)
-            }
-            else {
-                Err(Box::new(crate::Error {
-                    kind: crate::ErrorKind::InvalidDisplayAttributeArity {
-                        key: attribute.key().into(),
-                        min: min_arity,
-                        max: max_arity,
-                        got: arguments.len(),
-                    },
-                    span: attribute.key_span(),
-                }))
-            }
-        }
-        fn get_action(attribute: &ProgramDisplayAttribute) -> crate::Result<&ActionValue> {
-            if let ProgramDisplayAttributeValue::Action(action) = attribute.value() {
-                Ok(action)
-            }
-            else {
-                Err(Box::new(crate::Error {
-                    kind: crate::ErrorKind::DisplayAttributeExpectedAction {
-                        key: attribute.key().into(),
-                    },
-                    span: attribute.key_span(),
-                }))
-            }
-        }
-
-        let mut entry = GraphExpressionEntry {
+    fn add_image_display_element(&mut self, element: &ProgramDisplayElement, image: &ImageValue) -> crate::Result<()> {
+        let mut entry = GraphImageEntry {
             id: self.create_entry_id(),
             folder_id: Some(DISPLAY_FOLDER_ID.into()),
-            expression: self.translate_value(element.expression())?,
+            image_url: image.url.to_string(),
+            name: image.name.to_string(),
+            background: image.background,
+            center: self.translate_value(&image.center)?,
+            width: self.translate_value(&image.width)?,
+            height: self.translate_value(&image.height)?,
+            opacity: self.translate_value(&image.opacity)?,
+            angle: self.translate_value(&image.angle)?,
             ..Default::default()
         };
 
-        let mut has_color = false;
-        let mut has_point = false;
-        let mut has_label = false;
-        let mut has_line = false;
-        let mut has_fill = false;
-        let mut has_click = false;
-
-        for attribute in element.attributes() {
-            match attribute.key() {
-                "color" => {
-                    // color(<color>: color)
-                    prevent_duplicate(attribute, &mut has_color)?;
-                    let arguments = get_arguments(attribute, 1, 1)?;
-
-                    // TODO: constant => set entry.color
-                    entry.color_expression = self.translate_value(&arguments[0])?;
-                }
-                "point" => {
-                    // point([opacity]: real, [size]: real, [style]: str, [outline]: bool)
-                    prevent_duplicate(attribute, &mut has_point)?;
-                    let arguments = get_arguments(attribute, 0, 4)?;
-
-                    entry.display = true;
-                    entry.point.display = true;
-                    if let Some(opacity) = arguments.get(0) {
-                        entry.point.opacity = self.translate_value(opacity)?;
-                    }
-                    if let Some(size) = arguments.get(1) {
-                        entry.point.size = self.translate_value(size)?;
-                    }
-                    if let Some(style_value) = arguments.get(2) {
-                        let ValueKind::Str(style_name) = &style_value.kind else {
-                            return Err(unsupported_error(style_value))
-                        };
-                        let Some(style) = GraphPointStyle::from_name(style_name) else {
-                            return Err(unsupported_error(style_value))
-                        };
-                        entry.point.style = style;
-                    }
-                    if let Some(outline_value) = arguments.get(3) {
-                        let ValueKind::Bool(outline) = outline_value.kind else {
-                            return Err(unsupported_error(outline_value))
-                        };
-                        entry.point.outline = outline;
-                    }
-                }
-                "label" => {
-                    // label([text]: str, [opacity]: real, [size]: real, [angle]: real,
-                    //       [orientation]: str, [outline]: bool)
-                    prevent_duplicate(attribute, &mut has_label)?;
-                    let arguments = get_arguments(attribute, 0, 6)?;
-
-                    // Don't set entry.display = true, that will show points as well
-                    entry.label.display = true;
-                    if let Some(text_value) = arguments.get(0) {
-                        let ValueKind::Str(text) = &text_value.kind else {
-                            return Err(unsupported_error(text_value))
-                        };
-                        entry.label.text = text.to_string();
-                    }
-                    if let Some(opacity) = arguments.get(1) {
-                        entry.label.opacity = self.translate_value(opacity)?;
-                    }
-                    if let Some(size) = arguments.get(2) {
-                        entry.label.size = self.translate_value(size)?;
-                    }
-                    if let Some(angle) = arguments.get(3) {
-                        entry.label.angle = self.translate_value(angle)?;
-                    }
-                    if let Some(orientation_value) = arguments.get(4) {
-                        let ValueKind::Str(orientation_name) = &orientation_value.kind else {
-                            return Err(unsupported_error(orientation_value))
-                        };
-                        let Some(orientation) = GraphLabelOrientation::from_name(orientation_name) else {
-                            return Err(unsupported_error(orientation_value))
-                        };
-                        entry.label.orientation = orientation;
-                    }
-                    if let Some(outline_value) = arguments.get(5) {
-                        let ValueKind::Bool(outline) = outline_value.kind else {
-                            return Err(unsupported_error(outline_value))
-                        };
-                        entry.label.outline = outline;
-                    }
-                }
-                "line" => {
-                    // line([opacity]: real, [width]: real, [style]: str)
-                    prevent_duplicate(attribute, &mut has_line)?;
-                    let arguments = get_arguments(attribute, 0, 3)?;
-
-                    entry.display = true;
-                    entry.line.display = true;
-                    if let Some(opacity) = arguments.get(0) {
-                        entry.line.opacity = self.translate_value(opacity)?;
-                    }
-                    if let Some(width) = arguments.get(1) {
-                        entry.line.width = self.translate_value(width)?;
-                    }
-                    if let Some(style_value) = arguments.get(2) {
-                        let ValueKind::Str(style_name) = &style_value.kind else {
-                            return Err(unsupported_error(style_value))
-                        };
-                        let Some(style) = GraphLineStyle::from_name(style_name) else {
-                            return Err(unsupported_error(style_value))
-                        };
-                        entry.line.style = style;
-                    }
-                }
-                "fill" => {
-                    // fill([opacity]: real)
-                    prevent_duplicate(attribute, &mut has_fill)?;
-                    let arguments = get_arguments(attribute, 0, 1)?;
-
-                    entry.display = true;
-                    entry.fill.display = true;
-                    if let Some(opacity) = arguments.get(0) {
-                        entry.fill.opacity = self.translate_value(opacity)?;
-                    }
-                }
-                "click" => {
-                    // TODO: click(action(index) { ... }) to allow other attributes?
-                    // click { ... }
-                    prevent_duplicate(attribute, &mut has_click)?;
-                    let action = get_action(attribute)?;
-
+        for attribute in &element.attributes {
+            match &attribute.kind {
+                ProgramDisplayAttributeKind::Click { action } => {
                     entry.clickable.enabled = true;
                     entry.clickable.expression = self.translate_action_value(action)?;
                 }
-                _ => {
-                    return Err(Box::new(crate::Error {
-                        kind: crate::ErrorKind::UnsupportedDisplayAttribute {
-                            key: attribute.key().into(),
-                        },
-                        span: attribute.key_span(),
-                    }));
+                ProgramDisplayAttributeKind::Hovered { url } => {
+                    entry.clickable.hovered_image_url = url.to_string();
                 }
+                ProgramDisplayAttributeKind::Pressed { url } => {
+                    entry.clickable.depressed_image_url = url.to_string();
+                }
+                ProgramDisplayAttributeKind::Description { text } => {
+                    entry.clickable.description = text.to_string();
+                }
+                _ => panic!("given attribute is invalid for an image: {attribute:?}")
+            }
+        }
+
+        self.display_entries.push(Box::new(entry));
+
+        Ok(())
+    }
+
+    fn add_expression_display_element(&mut self, element: &ProgramDisplayElement) -> crate::Result<()> {
+        let mut entry = GraphExpressionEntry {
+            id: self.create_entry_id(),
+            folder_id: Some(DISPLAY_FOLDER_ID.into()),
+            expression: self.translate_value(&element.value)?,
+            ..Default::default()
+        };
+
+        for attribute in &element.attributes {
+            match &attribute.kind {
+                ProgramDisplayAttributeKind::Color { value } => {
+                    // TODO: constant => set entry.color
+                    entry.color_expression = self.translate_value(value)?;
+                }
+                ProgramDisplayAttributeKind::Point { opacity, size, style, outline } => {
+                    entry.display = true;
+                    entry.point.display = true;
+                    if let Some(opacity) = opacity {
+                        entry.point.opacity = self.translate_value(opacity)?;
+                    }
+                    if let Some(size) = size {
+                        entry.point.size = self.translate_value(size)?;
+                    }
+                    entry.point.style = *style;
+                    entry.point.outline = *outline;
+                }
+                ProgramDisplayAttributeKind::Drag { mode } => {
+                    entry.point.drag_mode = *mode;
+                }
+                ProgramDisplayAttributeKind::Label { text, opacity, size, angle, orientation, outline } => {
+                    // Don't set entry.display = true, that will show points as well
+                    entry.label.display = true;
+                    entry.label.text = text.to_string();
+                    if let Some(opacity) = opacity {
+                        entry.label.opacity = self.translate_value(opacity)?;
+                    }
+                    if let Some(size) = size {
+                        entry.label.size = self.translate_value(size)?;
+                    }
+                    if let Some(angle) = angle {
+                        entry.label.angle = self.translate_value(angle)?;
+                    }
+                    entry.label.orientation = *orientation;
+                    entry.label.outline = *outline;
+                }
+                ProgramDisplayAttributeKind::Line { opacity, width, style } => {
+                    entry.display = true;
+                    entry.line.display = true;
+                    if let Some(opacity) = opacity {
+                        entry.line.opacity = self.translate_value(opacity)?;
+                    }
+                    if let Some(width) = width {
+                        entry.line.width = self.translate_value(width)?;
+                    }
+                    entry.line.style = *style;
+                }
+                ProgramDisplayAttributeKind::Fill { opacity } => {
+                    entry.display = true;
+                    entry.fill.display = true;
+                    if let Some(opacity) = opacity {
+                        entry.fill.opacity = self.translate_value(opacity)?;
+                    }
+                }
+                ProgramDisplayAttributeKind::Click { action } => {
+                    entry.clickable.enabled = true;
+                    entry.clickable.expression = self.translate_action_value(action)?;
+                }
+                ProgramDisplayAttributeKind::Description { text } => {
+                    entry.clickable.description = text.to_string();
+                }
+                _ => panic!("given attribute is invalid for an expression: {attribute:?}")
             }
         }
 
@@ -2009,7 +1929,7 @@ impl GraphExpressionListBuilder {
             }
         }
         if let Some(program_display) = program.display() {
-            for display_element in program_display.elements() {
+            for display_element in &program_display.elements {
                 self.add_display_element(display_element)?;
             }
         }

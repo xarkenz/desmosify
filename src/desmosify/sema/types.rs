@@ -39,13 +39,26 @@ pub enum Type {
         identifier: Rc<str>,
     },
     Any,
+    Complex,
     Real,
     Int,
     Bool,
     Color,
+    Tone,
+    Distribution,
     Polygon,
     Segment,
+    Circle,
+    Arc,
+    Line,
+    Ray,
+    Vector,
+    Segment3D,
+    Triangle3D,
+    Sphere3D,
+    Vector3D,
     Str,
+    Image,
     Point2 {
         x_type: Box<Type>,
         y_type: Box<Type>,
@@ -74,13 +87,26 @@ pub enum Type {
 impl Type {
     pub fn find_primitive(identifier: &str) -> Option<Self> {
         match identifier {
+            "complex" => Some(Type::Complex),
             "real" => Some(Type::Real),
             "int" => Some(Type::Int),
             "bool" => Some(Type::Bool),
             "color" => Some(Type::Color),
+            "tone" => Some(Type::Tone),
+            "distribution" => Some(Type::Distribution),
             "polygon" => Some(Type::Polygon),
             "segment" => Some(Type::Segment),
+            "circle" => Some(Type::Circle),
+            "arc" => Some(Type::Arc),
+            "line" => Some(Type::Line),
+            "ray" => Some(Type::Ray),
+            "vector" => Some(Type::Vector),
+            "segment3d" => Some(Type::Segment3D),
+            "triangle3d" => Some(Type::Triangle3D),
+            "sphere3d" => Some(Type::Sphere3D),
+            "vector3d" => Some(Type::Vector3D),
             "str" => Some(Type::Str),
+            "image" => Some(Type::Image),
             _ => None,
         }
     }
@@ -136,8 +162,8 @@ impl Type {
     pub fn can_coerce_to(&self, target: &Self) -> bool {
         use self::Type::*;
         self == target || match (self, target) {
-            (_, Any) => !matches!(self, Meta { .. } | Str | UserFunction { .. } | IntrinsicFunction { .. }),
-            (Any, _) => !matches!(target, Meta { .. } | Str | UserFunction { .. } | IntrinsicFunction { .. }),
+            (_, Any) => self.is_first_class(),
+            (Any, _) => target.is_first_class(),
             (Int, Real) => true,
             (Bool, Int | Real) => true,
             (
@@ -150,6 +176,40 @@ impl Type {
             ) => self_x.can_coerce_to(target_x) && self_y.can_coerce_to(target_y) && self_z.can_coerce_to(target_z),
             (UserValue { .. }, Int | Real) => true,
             _ => false
+        }
+    }
+
+    pub fn is_first_class(&self) -> bool {
+        match self {
+            Self::Meta { .. } => false,
+            Self::Any => true,
+            Self::Complex => true,
+            Self::Real => true,
+            Self::Int => true,
+            Self::Bool => true,
+            Self::Color => true,
+            Self::Tone => true,
+            Self::Distribution => true,
+            Self::Polygon => true,
+            Self::Segment => true,
+            Self::Circle => true,
+            Self::Arc => true,
+            Self::Line => true,
+            Self::Ray => true,
+            Self::Vector => true,
+            Self::Segment3D => true,
+            Self::Triangle3D => true,
+            Self::Sphere3D => true,
+            Self::Vector3D => true,
+            Self::Str => false,
+            Self::Image => false,
+            Self::Point2 { .. } => true,
+            Self::Point3 { .. } => true,
+            Self::UserValue { .. } => true,
+            Self::UserFunction { .. } => false,
+            Self::IntrinsicFunction(..) => false,
+            Self::Action { .. } => false,
+            Self::List { .. } => true,
         }
     }
 
@@ -318,17 +378,26 @@ impl std::fmt::Display for Type {
         match self {
             Self::Meta { .. } => write!(f, "<type>"),
             Self::Any => write!(f, "?"),
+            Self::Complex => write!(f, "complex"),
             Self::Real => write!(f, "real"),
             Self::Int => write!(f, "int"),
             Self::Bool => write!(f, "bool"),
             Self::Color => write!(f, "color"),
+            Self::Tone => write!(f, "tone"),
+            Self::Distribution => write!(f, "distribution"),
             Self::Polygon => write!(f, "polygon"),
             Self::Segment => write!(f, "segment"),
+            Self::Circle => write!(f, "circle"),
+            Self::Arc => write!(f, "arc"),
+            Self::Line => write!(f, "line"),
+            Self::Ray => write!(f, "ray"),
+            Self::Vector => write!(f, "vector"),
+            Self::Segment3D => write!(f, "segment3d"),
+            Self::Triangle3D => write!(f, "triangle3d"),
+            Self::Sphere3D => write!(f, "sphere3d"),
+            Self::Vector3D => write!(f, "vector3d"),
             Self::Str => write!(f, "str"),
-            Self::List { state, item_type } => match state {
-                ListState::IsList => write!(f, "[{item_type}]"),
-                ListState::MaybeList => write!(f, "{item_type}+"),
-            }
+            Self::Image => write!(f, "image"),
             Self::Point2 { x_type, y_type } => {
                 write!(f, "({x_type}, {y_type})")
             }
@@ -341,6 +410,10 @@ impl std::fmt::Display for Type {
             Self::UserFunction { .. } => write!(f, "<function>"),
             Self::IntrinsicFunction { .. } => write!(f, "<intrinsic_function>"),
             Self::Action { .. } => write!(f, "<action>"),
+            Self::List { state, item_type } => match state {
+                ListState::IsList => write!(f, "[{item_type}]"),
+                ListState::MaybeList => write!(f, "{item_type}+"),
+            }
         }
     }
 }

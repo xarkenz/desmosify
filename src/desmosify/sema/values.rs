@@ -1,5 +1,6 @@
 use std::rc::Rc;
 use crate::ast::{BinaryOperation, RangeKind, UnaryOperation};
+use crate::sema::display::ImageValue;
 use crate::sema::intrinsic::{IntrinsicColorKind, IntrinsicFunction, IntrinsicValue};
 use crate::sema::types::{ListState, Type};
 
@@ -118,6 +119,7 @@ pub enum ValueKind {
         variant_ordinal: i64,
     },
     Str(Rc<str>),
+    Image(Box<ImageValue>),
     Intrinsic(Box<IntrinsicValue>),
     IntrinsicFunction(&'static IntrinsicFunction),
     Global(GlobalReference),
@@ -212,6 +214,20 @@ impl ValueKind {
         }
     }
 
+    pub fn as_const_bool(&self) -> Option<bool> {
+        match self {
+            Self::Bool(value) => Some(*value),
+            _ => None
+        }
+    }
+
+    pub fn as_const_str(&self) -> Option<Rc<str>> {
+        match self {
+            Self::Str(value) => Some(value.clone()),
+            _ => None
+        }
+    }
+
     pub fn get_type(&self) -> Type {
         match self {
             Self::Type { identifier } => {
@@ -238,6 +254,9 @@ impl ValueKind {
             }
             Self::Str(..) => {
                 Type::Str
+            }
+            Self::Image(..) => {
+                Type::Image
             }
             Self::Intrinsic(intrinsic) => {
                 intrinsic.get_type()
@@ -435,6 +454,9 @@ impl std::fmt::Debug for ValueKind {
             }
             ValueKind::Str(value) => {
                 f.debug_tuple("Str").field(value).finish()
+            }
+            ValueKind::Image(image) => {
+                image.fmt(f)
             }
             ValueKind::Intrinsic(value) => {
                 value.fmt(f)
