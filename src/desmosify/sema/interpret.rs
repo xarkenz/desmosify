@@ -401,7 +401,8 @@ pub fn interpret_display_declarations(
                         let arguments = require_arguments(attribute, 1, 1)?;
 
                         ProgramDisplayAttributeKind::Color {
-                            value: interpret_expression(context, next_local_id, &local_context, &arguments[0])?,
+                            value: interpret_expression(context, next_local_id, &local_context, &arguments[0])?
+                                .coerce_to(&Type::Color, true)?,
                         }
                     }
                     "point" => {
@@ -952,31 +953,18 @@ pub fn interpret_expression(
                 result_type,
             }
         }
-        ExpressionKind::Let { identifier, identifier_span, value_type, value, expression } => {
+        ExpressionKind::Let { identifier, value_type, value, inner, .. } => {
             let mut value = interpret_expression(context, next_local_id, local_context, value)?;
 
-            let value_type = match value_type {
-                Some(type_expression) => {
-                    let value_type = context.resolve_type(type_expression, true)?;
-                    value = value.coerce_to(&value_type, false)?;
-                    value_type
-                }
-                None => {
-                    value.get_type()
-                }
-            };
+            if let Some(value_type) = value_type {
+                let value_type = context.resolve_type(value_type, true)?;
+                value = value.coerce_to(&value_type, false)?;
+            }
 
             let mut inner_context = local_context.new_inner();
-            let local = inner_context.add_local_variable(identifier.clone(), next_local_id, value_type);
+            inner_context.add_local(identifier.clone(), value.kind);
 
-            let inner = interpret_expression(context, next_local_id, &inner_context, expression)?;
-
-            ValueKind::Let {
-                local,
-                local_span: Some(*identifier_span),
-                value: Box::new(value),
-                inner: Box::new(inner),
-            }
+            interpret_expression(context, next_local_id, &inner_context, inner)?.kind
         }
         _ => {
             return Err(Box::new(crate::Error {

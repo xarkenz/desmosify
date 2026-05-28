@@ -262,14 +262,25 @@ pub enum ValueKind {
         value_3: Box<Value>,
         list_state: Option<ListState>,
     },
+    Join {
+        values: Box<[Value]>,
+        result_type: Type,
+    },
+    Sort {
+        list: Box<Value>,
+        key_list: Option<Box<Value>>,
+    },
+    Shuffle {
+        list: Box<Value>,
+        seed: Option<Box<Value>>,
+    },
+    Unique {
+        list: Box<Value>,
+    },
     Rotate {
         object: Box<Value>,
         point: Box<Value>,
         angle: Box<Value>,
-        result_type: Type,
-    },
-    Join {
-        values: Box<[Value]>,
         result_type: Type,
     },
     Point2 {
@@ -321,12 +332,6 @@ pub enum ValueKind {
         function: Box<Value>,
         arguments: Box<[Value]>,
         return_type: Type,
-    },
-    Let {
-        local: LocalReference,
-        local_span: Option<crate::Span>,
-        value: Box<Value>,
-        inner: Box<Value>,
     },
 }
 
@@ -417,10 +422,19 @@ impl ValueKind {
             Self::Color { list_state, .. } => {
                 Type::Color.unflatten_list(*list_state)
             }
-            Self::Rotate { result_type, .. } => {
+            Self::Join { result_type, .. } => {
                 result_type.clone()
             }
-            Self::Join { result_type, .. } => {
+            Self::Sort { list, .. } => {
+                list.get_type()
+            }
+            Self::Shuffle { list, .. } => {
+                list.get_type()
+            }
+            Self::Unique { list } => {
+                list.get_type()
+            }
+            Self::Rotate { result_type, .. } => {
                 result_type.clone()
             }
             Self::Point2 { point_type, .. } => {
@@ -452,9 +466,6 @@ impl ValueKind {
             }
             Self::UserFunctionCall { return_type, .. } => {
                 return_type.clone()
-            }
-            Self::Let { inner, .. } => {
-                inner.get_type()
             }
         }
     }
@@ -550,7 +561,7 @@ impl ValueKind {
 
         match &self_type {
             Type::Bool => {
-                self = self.coerce_to(&Type::Int, false, span)?;
+                self = self.coerce_to(&Type::Int, true, span)?;
                 self_type = Type::Int;
             }
             _ => {}
@@ -621,32 +632,28 @@ impl std::fmt::Debug for ValueKind {
                 write!(f, "{operation:?}<{self_type}>")?;
                 f.debug_tuple("").field(lhs).field(rhs).finish()
             }
-            Self::Reducer { kind, list, result_type } => {
-                write!(f, "{kind:?}<{result_type}>")?;
+            Self::Reducer { kind, list, .. } => {
+                write!(f, "{kind:?}<{self_type}>")?;
                 f.debug_tuple("").field(list).finish()
             }
-            Self::ArgumentsReducer { kind, arguments, result_type } => {
-                write!(f, "{kind:?}<{result_type}>")?;
+            Self::ArgumentsReducer { kind, arguments, .. } => {
+                write!(f, "{kind:?}<{self_type}>")?;
                 f.debug_tuple("").field(arguments).finish()
             }
-            Self::DoubleReducer { kind, list_1, list_2, result_type } => {
-                write!(f, "{kind:?}<{result_type}>")?;
+            Self::DoubleReducer { kind, list_1, list_2, .. } => {
+                write!(f, "{kind:?}<{self_type}>")?;
                 f.debug_tuple("").field(list_1).field(list_2).finish()
             }
-            Self::ParameterizedReducer { kind, list, parameter, result_type } => {
-                write!(f, "{kind:?}<{result_type}>")?;
+            Self::ParameterizedReducer { kind, list, parameter, .. } => {
+                write!(f, "{kind:?}<{self_type}>")?;
                 f.debug_tuple("").field(list).field(parameter).finish()
             }
-            Self::Color { kind, value_1, value_2, value_3, list_state } => {
-                write!(f, "{kind:?}<{}>", Type::Color.unflatten_list(*list_state))?;
+            Self::Color { kind, value_1, value_2, value_3, .. } => {
+                write!(f, "{kind:?}<{self_type}>")?;
                 f.debug_tuple("").field(value_1).field(value_2).field(value_3).finish()
             }
-            Self::Rotate { object, point, angle, result_type } => {
-                write!(f, "Rotate<{result_type}>")?;
-                f.debug_tuple("").field(object).field(point).field(angle).finish()
-            }
-            Self::Join { values, result_type } => {
-                write!(f, "Join<{result_type}>")?;
+            Self::Join { values, .. } => {
+                write!(f, "Join<{self_type}>")?;
                 values
                     .iter()
                     .fold(
@@ -654,6 +661,32 @@ impl std::fmt::Debug for ValueKind {
                         |tuple, argument| tuple.field(argument),
                     )
                     .finish()
+            }
+            Self::Sort { list, key_list } => {
+                write!(f, "Sort<{self_type}>")?;
+                let mut tuple = f.debug_tuple("");
+                tuple.field(list);
+                if let Some(key_list) = key_list {
+                    tuple.field(key_list);
+                }
+                tuple.finish()
+            }
+            Self::Shuffle { list, seed } => {
+                write!(f, "Shuffle<{self_type}>")?;
+                let mut tuple = f.debug_tuple("");
+                tuple.field(list);
+                if let Some(seed) = seed {
+                    tuple.field(seed);
+                }
+                tuple.finish()
+            }
+            Self::Unique { list } => {
+                write!(f, "Unique<{self_type}>")?;
+                f.debug_tuple("").field(list).finish()
+            }
+            Self::Rotate { object, point, angle, .. } => {
+                write!(f, "Rotate<{self_type}>")?;
+                f.debug_tuple("").field(object).field(point).field(angle).finish()
             }
             Self::Point2 { x, y, .. } => {
                 write!(f, "Point2<{self_type}>")?;
@@ -707,10 +740,6 @@ impl std::fmt::Debug for ValueKind {
             Self::UserFunctionCall { function, arguments, .. } => {
                 write!(f, "UserFunctionCall<{self_type}>")?;
                 f.debug_tuple("").field(function).field(arguments).finish()
-            }
-            Self::Let { local, value, inner, .. } => {
-                write!(f, "Let<{self_type}>")?;
-                f.debug_tuple("").field(local).field(value).field(inner).finish()
             }
         }
     }

@@ -132,9 +132,9 @@ pub const CORE_INTRINSIC_FUNCTIONS: &[&IntrinsicFunction] = &[
     &TOTAL,
     // List Operations
     &JOIN,
-    // &SORT,
-    // &SHUFFLE,
-    // &UNIQUE,
+    &SORT,
+    &SHUFFLE,
+    &UNIQUE,
     // Visualizations
     // &HISTOGRAM,
     // &DOT_PLOT,
@@ -458,9 +458,77 @@ pub static JOIN: IntrinsicFunction = IntrinsicFunction {
         })
     },
 };
-// SORT
-// SHUFFLE
-// UNIQUE
+pub static SORT: IntrinsicFunction = IntrinsicFunction {
+    identifier: "sort",
+    min_arity: 1,
+    max_arity: Some(2),
+    interpret_call: |_, _, arguments| {
+        let mut arguments = arguments.into_iter();
+
+        let mut list = arguments.next().unwrap();
+        list.get_type()
+            .require_flatten_list()
+            .map_err(|error| error.with_span(list.span))?;
+
+        let key_list = arguments.next()
+            .map(|key_list| {
+                key_list.get_type()
+                    .require_flatten_list()
+                    .map_err(|error| error.with_span(list.span))?;
+                key_list.coerce_to(&Type::Real, true)
+            })
+            .transpose()?;
+
+        if key_list.is_none() {
+            // The values in the original list are used as keys
+            list = list.coerce_to(&Type::Real, true)?;
+        }
+
+        Ok(ValueKind::Sort {
+            list: Box::new(list),
+            key_list: key_list.map(Box::new),
+        })
+    },
+};
+pub static SHUFFLE: IntrinsicFunction = IntrinsicFunction {
+    identifier: "shuffle",
+    min_arity: 1,
+    max_arity: Some(2),
+    interpret_call: |_, _, arguments| {
+        let mut arguments = arguments.into_iter();
+
+        let list = arguments.next().unwrap();
+        list.get_type()
+            .require_flatten_list()
+            .map_err(|error| error.with_span(list.span))?;
+
+        let seed = arguments.next()
+            .map(|seed| seed.coerce_to(&Type::Real, false))
+            .transpose()?;
+
+        Ok(ValueKind::Shuffle {
+            list: Box::new(list),
+            seed: seed.map(Box::new),
+        })
+    },
+};
+pub static UNIQUE: IntrinsicFunction = IntrinsicFunction {
+    identifier: "unique",
+    min_arity: 1,
+    max_arity: Some(1),
+    interpret_call: |_, _, arguments| {
+        // It seems like unique() accepts basically any type, so don't bother checking the item type
+        // TODO: check if any types can go in a list but cannot be uniqued
+        let list = arguments.into_iter().next().unwrap();
+        list.get_type()
+            .require_flatten_list()
+            .map_err(|error| error.with_span(list.span))?;
+
+        Ok(ValueKind::Unique {
+            list: Box::new(list),
+        })
+    },
+};
 
 // ------ Visualizations ------
 

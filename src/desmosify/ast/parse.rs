@@ -432,17 +432,17 @@ impl<'a, T: BufRead> Parser<'a, T> {
                     self.consume_token()?; // Equal
                     let value = self.parse_expression(None, &[TokenKind::In])?;
                     self.consume_token()?; // In
-                    let expression = self.parse_expression(None, allowed_ends)?;
+                    let inner = self.parse_expression(None, allowed_ends)?;
 
                     // This operand took over the rest of the expression, so return here
                     return Ok(Expression {
-                        span: start_span.expand_to(expression.span),
+                        span: start_span.expand_to(inner.span),
                         kind: ExpressionKind::Let {
                             identifier,
                             identifier_span,
                             value_type: value_type.map(Box::new),
                             value: Box::new(value),
-                            expression: Box::new(expression),
+                            inner: Box::new(inner),
                         },
                     });
                 }

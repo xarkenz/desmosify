@@ -808,6 +808,51 @@ impl GraphExpressionListBuilder {
             ValueKind::Color { kind, value_1, value_2, value_3, .. } => {
                 self.translate_color(*kind, value_1, value_2, value_3, unsupported_error)
             }
+            ValueKind::Join { values, .. } => {
+                Ok(GraphExpression::Binary {
+                    kind: GraphBinaryKind::Call,
+                    lhs: Box::new(GraphExpression::OperatorName("join".into())),
+                    rhs: Box::new(GraphExpression::Sequence {
+                        elements: values
+                            .iter()
+                            .map(|argument| self.translate_value(argument))
+                            .collect::<crate::Result<_>>()?,
+                    }),
+                })
+            }
+            ValueKind::Sort { list, key_list } => {
+                Ok(GraphExpression::Binary {
+                    kind: GraphBinaryKind::Call,
+                    lhs: Box::new(GraphExpression::OperatorName("sort".into())),
+                    rhs: Box::new(GraphExpression::Sequence {
+                        elements: [list.as_ref()]
+                            .into_iter()
+                            .chain(key_list.as_deref())
+                            .map(|argument| self.translate_value(argument))
+                            .collect::<crate::Result<_>>()?,
+                    }),
+                })
+            }
+            ValueKind::Shuffle { list, seed } => {
+                Ok(GraphExpression::Binary {
+                    kind: GraphBinaryKind::Call,
+                    lhs: Box::new(GraphExpression::OperatorName("shuffle".into())),
+                    rhs: Box::new(GraphExpression::Sequence {
+                        elements: [list.as_ref()]
+                            .into_iter()
+                            .chain(seed.as_deref())
+                            .map(|argument| self.translate_value(argument))
+                            .collect::<crate::Result<_>>()?,
+                    }),
+                })
+            }
+            ValueKind::Unique { list } => {
+                Ok(GraphExpression::Binary {
+                    kind: GraphBinaryKind::Call,
+                    lhs: Box::new(GraphExpression::OperatorName("unique".into())),
+                    rhs: Box::new(self.translate_value(list)?),
+                })
+            }
             ValueKind::Rotate { object, point, angle, .. } => {
                 Ok(GraphExpression::Binary {
                     kind: GraphBinaryKind::Call,
@@ -818,18 +863,6 @@ impl GraphExpressionListBuilder {
                             self.translate_value(point)?,
                             self.translate_value(angle)?,
                         ]),
-                    }),
-                })
-            }
-            ValueKind::Join { values, .. } => {
-                Ok(GraphExpression::Binary {
-                    kind: GraphBinaryKind::Call,
-                    lhs: Box::new(GraphExpression::OperatorName("join".into())),
-                    rhs: Box::new(GraphExpression::Sequence {
-                        elements: values
-                            .iter()
-                            .map(|argument| self.translate_value(argument))
-                            .collect::<crate::Result<_>>()?,
                     }),
                 })
             }
@@ -1006,17 +1039,6 @@ impl GraphExpressionListBuilder {
                             .iter()
                             .map(|argument| self.translate_value(argument))
                             .collect::<crate::Result<_>>()?,
-                    }),
-                })
-            }
-            ValueKind::Let { local, value, inner, .. } => {
-                Ok(GraphExpression::Binary {
-                    kind: GraphBinaryKind::With,
-                    lhs: Box::new(self.translate_value(inner)?),
-                    rhs: Box::new(GraphExpression::Binary {
-                        kind: GraphBinaryKind::Equal,
-                        lhs: Box::new(self.get_local_symbol(local.id)),
-                        rhs: Box::new(self.translate_value(value)?),
                     }),
                 })
             }

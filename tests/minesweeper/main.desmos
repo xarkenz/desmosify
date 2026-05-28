@@ -1,0 +1,346 @@
+enum Mode {
+    Initial,
+    Play,
+    Win,
+    Loss,
+}
+
+enum Tile {
+    Empty,
+    One,
+    Two,
+    Three,
+    Four,
+    Five,
+    Six,
+    Seven,
+    Eight,
+    Mine,
+}
+
+enum TileState {
+    Hidden,
+    Revealed,
+    Flagged,
+}
+
+// Config
+
+var board_size: int = 20;
+var mine_count: int = 75;
+var border_units: real = 0.5;
+var tick_seconds: real = 0.1;
+
+// Variables
+
+var mode: Mode = Mode.Initial;
+var current_size: int = board_size;
+var tiles: [Tile] = [Tile.Empty; board_size ** 2];
+var tile_states: [TileState] = [TileState.Hidden; board_size ** 2];
+
+// Definitions
+
+let grid: [(int, int)] = [
+    (x, y)
+    for y in [0 ..< current_size]
+    for x in [0 ..< current_size]
+];
+
+let current_mine_count: int = @total(tiles == Tile.Mine);
+
+let populate_tiles(initial_tiles: [Tile]): [Tile] = [
+    {
+        initial_tiles[index] == Tile.Mine: Tile.Mine,
+        @enum_value(Tile, count_adjacent_mines(initial_tiles, index))
+    }
+    for index in [1 ..= @count(initial_tiles)]
+];
+
+let count_adjacent_mines(tiles: [Tile], index: int): int =
+    let has_left = index % board_size != 1 in
+    let has_right = index % board_size != 0 in
+    let has_down = index > board_size in
+    let has_up = index <= @count(tiles) - board_size in
+    (has_left && tiles[index - 1] == Tile.Mine) +
+    (has_right && tiles[index + 1] == Tile.Mine) +
+    (has_down && tiles[index - board_size] == Tile.Mine) +
+    (has_up && tiles[index + board_size] == Tile.Mine) +
+    (has_left && has_down && tiles[index - 1 - board_size] == Tile.Mine) +
+    (has_left && has_up && tiles[index - 1 + board_size] == Tile.Mine) +
+    (has_right && has_down && tiles[index + 1 - board_size] == Tile.Mine) +
+    (has_right && has_up && tiles[index + 1 + board_size] == Tile.Mine);
+
+let count_adjacent_revealed_empty(index: int+): int+ =
+    let has_left = index % current_size != 1 in
+    let has_right = index % current_size != 0 in
+    let has_down = index > current_size in
+    let has_up = index <= @count(tiles) - current_size in
+    (has_left && tiles[index - 1] == Tile.Empty && tile_states[index - 1] == TileState.Revealed) +
+    (has_right && tiles[index + 1] == Tile.Empty && tile_states[index + 1] == TileState.Revealed) +
+    (has_down && tiles[index - current_size] == Tile.Empty && tile_states[index - current_size] == TileState.Revealed) +
+    (has_up && tiles[index + current_size] == Tile.Empty && tile_states[index + current_size] == TileState.Revealed) +
+    (has_left && has_down && tiles[index - 1 - current_size] == Tile.Empty && tile_states[index - 1 - current_size] == TileState.Revealed) +
+    (has_left && has_up && tiles[index - 1 + current_size] == Tile.Empty && tile_states[index - 1 + current_size] == TileState.Revealed) +
+    (has_right && has_down && tiles[index + 1 - current_size] == Tile.Empty && tile_states[index + 1 - current_size] == TileState.Revealed) +
+    (has_right && has_up && tiles[index + 1 + current_size] == Tile.Empty && tile_states[index + 1 + current_size] == TileState.Revealed);
+
+let is_solving_move(move_index: int, move_state: TileState): bool = @min([
+    let state = {index == move_index: move_state, tile_states[index]} in
+    {
+        tiles[index] == Tile.Mine: state == TileState.Flagged,
+        state == TileState.Revealed
+    }
+    for index in [1 ..= @count(tiles)]
+]);
+
+// Utilities
+
+// TODO: generics would be nice here
+let set_item(list: [?], index: int, value: ?): [?] = {
+    [1 ..= @count(list)] == index: value,
+    list
+};
+let insert_item(list: [?], index: int, value: ?): [?] = @join(
+    list[..< index],
+    value,
+    list[index ..],
+);
+
+// Actions
+
+action reset() {
+    mode := Mode.Initial,
+    current_size := board_size,
+    tiles := [Tile.Empty; board_size ** 2],
+    tile_states := [TileState.Hidden; board_size ** 2],
+}
+
+ticker (1000 * tick_seconds) {
+    action tick(),
+}
+
+action tick() {
+    if mode == Mode.Play then {
+        tile_states := {
+            tile_states == TileState.Hidden && count_adjacent_revealed_empty([1 ..= @count(tile_states)]) > 0: TileState.Revealed,
+            tile_states
+        },
+    }
+    else disable,
+}
+
+action reveal(index: int) {
+    tile_states := set_item(tile_states, index, TileState.Revealed),
+    if mode == Mode.Initial then {
+        tiles := populate_tiles(insert_item(
+            @shuffle({
+                [1 ..= @count(tiles)] <= mine_count: Tile.Mine,
+                Tile.Empty
+            }),
+            index,
+            Tile.Empty,
+        )),
+    },
+    mode := {
+        mode == Mode.Initial: Mode.Play,
+        tiles[index] == Tile.Mine: Mode.Loss,
+        is_solving_move(index, TileState.Revealed): Mode.Win,
+        mode
+    },
+}
+
+action flag(index: int) {
+    tile_states := set_item(tile_states, index, TileState.Flagged),
+    mode := {
+        is_solving_move(index, TileState.Flagged): Mode.Win,
+        mode
+    },
+}
+
+action unflag(index: int) {
+    tile_states := set_item(tile_states, index, TileState.Hidden),
+}
+
+action solve() {
+    if mode != Mode.Initial then {
+        tile_states := {
+            tiles == Tile.Mine: TileState.Flagged,
+            TileState.Revealed
+        },
+        mode := Mode.Play,
+    }
+    else disable,
+}
+
+// Public interface
+
+public {
+    "hi i made minesweeper in desmos because of course i did";
+    "below you can set the size and number of mines then start the game";
+    "should hopefully be obvious when you hover over the map but clicking on the right half of a tile flags it. clicking a flag just removes the flag :)";
+    "whenever you reach a blank tile you can run the ticker (press play button on the top bar next to the metronome) to clear the area automatically like real minesweeper. i would not recommend running the ticker all the time it is pretty laggy";
+    "also undo and redo work as you would expect so if you explode and are a dirty cheater you can pretend it never happened";
+    board_size; // TODO: slider
+    "number of mines";
+    mine_count; // TODO: slider
+    "click arrow to start a new game";
+    action reset();
+    "click arrow to cheat and get solution 😱";
+    action solve();
+}
+
+// Display
+
+let grass_colors: [color] = @hsv(140, 0.8, [0.75, 0.8]);
+let dirt_colors: [color] = @hsv(30, 0.3, [0.85, 0.9]);
+let mark_color: color = @hsv(10, 0.7, 0.9);
+
+let tile_colors: [color] =
+    let i = (grid.x + grid.y) % 2 + 1 in
+    {
+        tile_states == TileState.Hidden: grass_colors[i],
+        tile_states == TileState.Revealed: {tiles == Tile.Mine: mark_color, dirt_colors[i]},
+        tile_states == TileState.Flagged: mark_color,
+    };
+
+let width_units: real = 20;
+let height_units: real = 20 * (@height_pixels / @width_pixels);
+let board_units: real = @min(width_units, height_units) * (1 - border_units / 10);
+let tile_units: real = board_units / current_size;
+
+let view(point: (real, real)+): (real, real)+ = board_units * (-0.5, -0.5) + tile_units * (point + (0.5, 0.5));
+
+display {
+    // Board
+    @polygon(
+        view(grid + (0.5, 0.5)),
+        view(grid + (0.5, -0.5)),
+        view(grid + (-0.5, -0.5)),
+        view(grid + (-0.5, 0.5)),
+    ): color(tile_colors), line(1, 1), fill(1);
+
+    // Board debugging
+    // TODO: really need nameof
+    // view(grid): color(0), label("${G_{Tiles}}");
+
+    // Tiles
+    @image(
+        @include_data("images/flag.png"),
+        "flag icon",
+        {tile_states == TileState.Flagged: view(grid)},
+        0.8 * tile_units, 0.8 * tile_units,
+        {mode == Mode.Play: 1, tiles == Tile.Mine: 0, 0.5},
+    );
+    @image(
+        @include_data("images/mine.png"),
+        "mine icon",
+        {tiles == Tile.Mine &&
+            (tile_states == TileState.Flagged || tile_states == TileState.Flagged) &&
+            (mode == Mode.Loss || mode == Mode.Win): view(grid)},
+        0.8 * tile_units, 0.8 * tile_units,
+    );
+    @image(
+        @include_data("images/explosion.png"),
+        "explosion icon",
+        {tiles == Tile.Mine && tile_states == TileState.Revealed: view(grid)},
+        1.2 * tile_units, 1.2 * tile_units,
+    );
+    @image(
+        @include_data("images/one.png"),
+        "1",
+        {tiles == Tile.One && tile_states == TileState.Revealed: view(grid)},
+        0.7 * tile_units, 0.7 * tile_units,
+    );
+    @image(
+        @include_data("images/two.png"),
+        "2",
+        {tiles == Tile.Two && tile_states == TileState.Revealed: view(grid)},
+        0.7 * tile_units, 0.7 * tile_units,
+    );
+    @image(
+        @include_data("images/three.png"),
+        "3",
+        {tiles == Tile.Three && tile_states == TileState.Revealed: view(grid)},
+        0.7 * tile_units, 0.7 * tile_units,
+    );
+    @image(
+        @include_data("images/four.png"),
+        "4",
+        {tiles == Tile.Four && tile_states == TileState.Revealed: view(grid)},
+        0.7 * tile_units, 0.7 * tile_units,
+    );
+    @image(
+        @include_data("images/five.png"),
+        "5",
+        {tiles == Tile.Five && tile_states == TileState.Revealed: view(grid)},
+        0.7 * tile_units, 0.7 * tile_units,
+    );
+    @image(
+        @include_data("images/six.png"),
+        "6",
+        {tiles == Tile.Six && tile_states == TileState.Revealed: view(grid)},
+        0.7 * tile_units, 0.7 * tile_units,
+    );
+    @image(
+        @include_data("images/seven.png"),
+        "7",
+        {tiles == Tile.Seven && tile_states == TileState.Revealed: view(grid)},
+        0.7 * tile_units, 0.7 * tile_units,
+    );
+    @image(
+        @include_data("images/eight.png"),
+        "8",
+        {tiles == Tile.Eight && tile_states == TileState.Revealed: view(grid)},
+        0.7 * tile_units, 0.7 * tile_units,
+    );
+
+    // Interactions
+    @image(
+        @include_data("images/transparent.png"),
+        "reveal tile interaction",
+        {(mode == Mode.Initial || mode == Mode.Play) && tile_states == TileState.Hidden: view(grid)},
+        tile_units, tile_units,
+        0.6,
+    ):
+        hovered(@include_data("images/hover_reveal.png")),
+        pressed(@include_data("images/hover_reveal.png")),
+        click { action reveal(@index) };
+    @image(
+        @include_data("images/transparent.png"),
+        "flag tile interaction",
+        {(mode == Mode.Initial || mode == Mode.Play) && tile_states == TileState.Hidden: view(grid + (0.25, 0))},
+        0.5 * tile_units, tile_units,
+    ):
+        hovered(@include_data("images/hover_flag.png")),
+        pressed(@include_data("images/hover_flag.png")),
+        click { action flag(@index) };
+    @image(
+        @include_data("images/transparent.png"),
+        "unflag tile interaction",
+        {(mode == Mode.Initial || mode == Mode.Play) && tile_states == TileState.Flagged: view(grid)},
+        tile_units, tile_units,
+    ): click { action unflag(@index) };
+
+    // Popup panel
+    @polygon({
+        mode == Mode.Loss || mode == Mode.Win: [(-0.5, -0.25), (-0.5, 0.25), (0.5, 0.25), (0.5, -0.25)] * board_units
+    }): color(@hsv(0, 0, 1)), fill(0.7);
+    // @image(
+    //     @include_data("images/close.png"),
+    //     "close button",
+    //     {mode == Mode.Loss || mode == Mode.Win: (0.4375, 0.1875) * board_units},
+    //     0.0625 * board_size, 0.0625 * board_size,
+    //     0.2,
+    // ): click { mode := Mode.Play };
+
+    // Messages
+    {mode == Mode.Loss: (0, 0)}:
+        color(mark_color),
+        label("`Game\\ over...`", 1, 3, 0, "above");
+    {mode == Mode.Win: (0, 0)}:
+        color(grass_colors[0]),
+        label("`Congratulations!`", 1, 3, 0, "above");
+    {mode == Mode.Loss || mode == Mode.Win: (0, 0)}:
+        color(0),
+        label("Change settings (if desired) and run `A_{Reset}` to start over.", 1, 1, 0, "below");
+}

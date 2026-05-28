@@ -386,7 +386,7 @@ pub enum ExpressionKind {
         identifier_span: crate::Span,
         value_type: Option<Box<TypeExpression>>,
         value: Box<Expression>,
-        expression: Box<Expression>,
+        inner: Box<Expression>,
     },
 }
 
@@ -468,12 +468,12 @@ impl std::fmt::Display for ExpressionKind {
                 }
                 write!(f, "}}")
             }
-            Self::Let { identifier, value_type, value, expression, .. } => {
+            Self::Let { identifier, value_type, value, inner, .. } => {
                 write!(f, "let {identifier}")?;
                 if let Some(value_type) = value_type {
                     write!(f, ": {value_type}")?;
                 }
-                write!(f, " = {value} in {expression}")
+                write!(f, " = {value} in {inner}")
             }
         }
     }
