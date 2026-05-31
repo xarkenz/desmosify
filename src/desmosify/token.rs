@@ -2,7 +2,7 @@ use std::rc::Rc;
 
 pub mod scan;
 
-// TODO: complex
+// TODO: get rid of this and collapse it into TokenKind and ExpressionKind
 #[derive(Clone, PartialEq, Debug)]
 pub enum Literal {
     Identifier(Rc<str>),

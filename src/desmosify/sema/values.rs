@@ -24,6 +24,18 @@ impl std::fmt::Debug for GlobalReference {
 }
 
 #[derive(Clone, PartialEq)]
+pub struct ActionReference {
+    pub identifier: Rc<str>,
+    pub action_type: Type,
+}
+
+impl std::fmt::Debug for ActionReference {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "ActionReference({})", self.identifier)
+    }
+}
+
+#[derive(Clone, PartialEq)]
 pub struct LocalReference {
     pub id: u64,
     pub value_type: Type,
@@ -217,6 +229,7 @@ pub enum ValueKind {
     Image(Box<ImageValue>, Option<ListState>),
     IntrinsicFunction(&'static IntrinsicFunction),
     Global(GlobalReference),
+    Action(ActionReference),
     Local(LocalReference),
     ViewportWidth,
     ViewportHeight,
@@ -397,6 +410,9 @@ impl ValueKind {
             }
             Self::Global(reference) => {
                 reference.value_type.clone()
+            }
+            Self::Action(reference) => {
+                reference.action_type.clone()
             }
             Self::Local(reference) => {
                 reference.value_type.clone()
@@ -606,11 +622,14 @@ impl std::fmt::Debug for ValueKind {
             Self::IntrinsicFunction(function) => {
                 function.fmt(f)
             }
-            Self::Global(global) => {
-                global.fmt(f)
+            Self::Global(reference) => {
+                reference.fmt(f)
             }
-            Self::Local(local) => {
-                local.fmt(f)
+            Self::Action(reference) => {
+                reference.fmt(f)
+            }
+            Self::Local(reference) => {
+                reference.fmt(f)
             }
             Self::ViewportWidth => {
                 write!(f, "ViewportWidth")
@@ -778,6 +797,17 @@ impl Value {
         (self.kind, result_type) = self.kind.coerce_to_arithmetic(constraint, self.span)?;
         Ok((self, result_type))
     }
+
+    pub fn get_const_str(&self) -> crate::Result<Rc<str>> {
+        self.kind
+            .as_const_str()
+            .ok_or_else(|| Box::new(crate::Error {
+                kind: crate::ErrorKind::ExpectedConstant {
+                    type_identifier: Type::Str.to_string(),
+                },
+                span: self.span,
+            }))
+    }
 }
 
 impl PartialEq for Value {
@@ -813,8 +843,7 @@ pub enum ActionValueKind {
         value: Box<Value>,
     },
     ActionCall {
-        identifier: Rc<str>,
-        identifier_span: Option<crate::Span>,
+        action: Box<Value>,
         arguments: Box<[Value]>,
     },
     Conditional {

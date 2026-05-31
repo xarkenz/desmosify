@@ -1,0 +1,5 @@
+public {
+    "Hello world!";
+    @concat("I was compiled with target '", @target, "'. Isn't that cool?");
+    @include_text("include_me.txt");
+}

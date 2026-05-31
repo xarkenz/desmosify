@@ -220,8 +220,7 @@ display {
     ): color(tile_colors), line(1, 1), fill(1);
 
     // Board debugging
-    // TODO: really need nameof
-    // view(grid): color(0), label("${G_{Tiles}}");
+    // view(grid): color(0), label(@concat("${", @target_symbol(tiles), "}"));
 
     // Tiles
     @image(

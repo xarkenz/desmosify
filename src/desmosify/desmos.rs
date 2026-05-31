@@ -586,7 +586,6 @@ impl ToJson for GraphTicker {
 pub struct GraphExpressionList {
     pub entries: Vec<Box<dyn GraphEntry>>,
     pub ticker: Option<GraphTicker>,
-    pub next_local_id: u64,
 }
 
 impl ToJson for GraphExpressionList {

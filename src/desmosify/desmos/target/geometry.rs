@@ -1,16 +1,39 @@
 use std::path::Path;
 use crate::desmos::{GraphFolderEntry, GraphSettings, GraphState, ToJson};
-use crate::desmos::target::GraphExpressionListBuilder;
+use crate::desmos::target::{DesmosTargetInfo, GraphExpressionListBuilder};
 use crate::sema::Program;
 
-pub struct DesmosGeometryTarget;
+#[derive(Debug)]
+pub struct DesmosGeometryTarget {
+    info: DesmosTargetInfo,
+}
+
+impl Default for DesmosGeometryTarget {
+    fn default() -> Self {
+        Self {
+            info: DesmosTargetInfo::new(),
+        }
+    }
+}
 
 impl crate::target::Target for DesmosGeometryTarget {
     fn name(&self) -> &'static str {
         "desmos-geometry"
     }
 
-    fn compile_to(&self, program: &Program, output_path: &Path) -> crate::Result<()> {
+    fn create_local_id(&mut self) -> u64 {
+        self.info.create_local_id()
+    }
+
+    fn get_global_symbol_name(&mut self, identifier: &str) -> String {
+        self.info.get_global_symbol(identifier).to_latex().to_string()
+    }
+
+    fn get_action_symbol_name(&mut self, identifier: &str) -> String {
+        self.info.get_action_symbol(identifier).to_latex().to_string()
+    }
+
+    fn compile_to(&mut self, program: &Program, output_path: &Path) -> crate::Result<()> {
         let mut state = GraphState {
             version: 11,
             graph: GraphSettings {
@@ -23,7 +46,7 @@ impl crate::target::Target for DesmosGeometryTarget {
                 viewport_x_max: 10.0,
                 viewport_y_max: 10.0,
             },
-            expressions: GraphExpressionListBuilder::build_program(program)?,
+            expressions: GraphExpressionListBuilder::build_program(program, &mut self.info)?,
         };
 
         state.expressions.entries.insert(0, Box::new(GraphFolderEntry {

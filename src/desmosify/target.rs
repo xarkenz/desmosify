@@ -1,15 +1,21 @@
 use std::path::Path;
 use crate::sema::Program;
 
-pub trait Target {
+pub trait Target : std::fmt::Debug {
     fn name(&self) -> &'static str;
 
-    fn compile_to(&self, program: &Program, output_path: &Path) -> crate::Result<()>;
+    fn create_local_id(&mut self) -> u64;
+
+    fn get_global_symbol_name(&mut self, identifier: &str) -> String;
+
+    fn get_action_symbol_name(&mut self, identifier: &str) -> String;
+
+    fn compile_to(&mut self, program: &Program, output_path: &Path) -> crate::Result<()>;
 }
 
-pub fn get_target_by_name(name: &str) -> crate::Result<Box<dyn Target>> {
+pub fn new_target_by_name(name: &str) -> crate::Result<Box<dyn Target>> {
     if name.starts_with("desmos") {
-        crate::desmos::target::get_target_by_name(name)
+        crate::desmos::target::new_target_by_name(name)
     }
     else {
         Err(Box::new(crate::Error {

@@ -222,11 +222,17 @@ impl<'a, T: BufRead> Parser<'a, T> {
                 TokenKind::Literal(literal) => {
                     ExpressionKind::Literal(literal.clone())
                 }
+                TokenKind::Action => {
+                    self.consume_token()?; // Action
+                    let (identifier, _) = self.expect_identifier_or_keyword()?;
+
+                    ExpressionKind::ActionIdentifier(identifier)
+                }
                 TokenKind::AtSign => {
                     self.consume_token()?; // AtSign
                     let (identifier, _) = self.expect_identifier_or_keyword()?;
 
-                    ExpressionKind::Intrinsic(identifier)
+                    ExpressionKind::IntrinsicIdentifier(identifier)
                 }
                 TokenKind::ParenLeft => {
                     self.consume_token()?; // ParenLeft
@@ -696,8 +702,10 @@ impl<'a, T: BufRead> Parser<'a, T> {
                 let arguments = self.parse_argument_list()?;
 
                 ActionExpressionKind::ActionCall {
-                    identifier,
-                    identifier_span,
+                    action: Box::new(Expression {
+                        kind: ExpressionKind::ActionIdentifier(identifier),
+                        span: start_span.expand_to(identifier_span),
+                    }),
                     arguments,
                 }
             }
@@ -969,15 +977,6 @@ impl<'a, T: BufRead> Parser<'a, T> {
 
                 while !matches!(self.current_token_kind(), Some(TokenKind::CurlyRight)) {
                     match &self.get_token()?.kind {
-                        TokenKind::Literal(Literal::String(text)) => {
-                            lines.push(PublicLine {
-                                kind: PublicLineKind::Text(text.clone()),
-                                span: self.current_span(),
-                            });
-
-                            self.consume_token()?; // Literal(String)
-                            self.expect_token_from(&[TokenKind::Semicolon, TokenKind::CurlyRight])?;
-                        }
                         TokenKind::Action => {
                             let action = self.parse_action(&[])?;
                             lines.push(PublicLine {

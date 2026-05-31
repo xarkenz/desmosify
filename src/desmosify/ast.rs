@@ -326,7 +326,8 @@ pub struct ExpressionListMapLoop {
 #[derive(Clone, Debug)]
 pub enum ExpressionKind {
     Literal(Literal),
-    Intrinsic(Rc<str>),
+    ActionIdentifier(Rc<str>),
+    IntrinsicIdentifier(Rc<str>),
     Grouping {
         expression: Box<Expression>,
     },
@@ -396,8 +397,11 @@ impl std::fmt::Display for ExpressionKind {
             Self::Literal(literal) => {
                 write!(f, "{literal}")
             }
-            Self::Intrinsic(name) => {
-                write!(f, "@{name}")
+            Self::ActionIdentifier(identifier) => {
+                write!(f, "action {identifier}")
+            }
+            Self::IntrinsicIdentifier(identifier) => {
+                write!(f, "@{identifier}")
             }
             Self::Grouping { expression } => {
                 write!(f, "({expression})")
@@ -503,8 +507,7 @@ pub enum ActionExpressionKind {
         value: Box<Expression>,
     },
     ActionCall {
-        identifier: Rc<str>,
-        identifier_span: crate::Span,
+        action: Box<Expression>,
         arguments: Box<[Expression]>,
     },
     Conditional {
@@ -536,8 +539,8 @@ impl std::fmt::Display for ActionExpressionKind {
             Self::Update { variable, value } => {
                 write!(f, "{variable} := {value}")
             }
-            Self::ActionCall { identifier, arguments, .. } => {
-                write!(f, "action {identifier}(")?;
+            Self::ActionCall { action, arguments, .. } => {
+                write!(f, "{action}(")?;
                 match arguments.as_ref() {
                     [] => {}
                     [first, rest @ ..] => {
@@ -729,7 +732,6 @@ impl std::fmt::Display for TickerDeclaration {
 
 #[derive(Clone, Debug)]
 pub enum PublicLineKind {
-    Text(Rc<str>),
     Expression(Expression),
     Action(ActionExpression),
 }
@@ -737,7 +739,6 @@ pub enum PublicLineKind {
 impl std::fmt::Display for PublicLineKind {
     fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
         match self {
-            Self::Text(text) => write!(f, "{text:?}"),
             Self::Expression(expression) => write!(f, "{expression}"),
             Self::Action(action) => write!(f, "{action}"),
         }

@@ -96,7 +96,6 @@ impl ProgramTicker {
 
 #[derive(Clone, Debug)]
 pub enum ProgramPublicLine {
-    Text(Rc<str>),
     Expression(Value),
     Action(ActionValue),
 }
@@ -120,7 +119,6 @@ pub struct Program {
     ticker: Option<ProgramTicker>,
     public: Option<ProgramPublic>,
     display: Option<ProgramDisplay>,
-    next_local_id: u64,
 }
 
 impl Program {
@@ -146,9 +144,5 @@ impl Program {
 
     pub fn display(&self) -> Option<&ProgramDisplay> {
         self.display.as_ref()
-    }
-
-    pub fn next_local_id(&self) -> u64 {
-        self.next_local_id
     }
 }

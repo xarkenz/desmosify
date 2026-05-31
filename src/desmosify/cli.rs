@@ -21,7 +21,7 @@ pub struct DesmosifyArgs {
 }
 
 pub fn invoke(args: &DesmosifyArgs) -> crate::Result<()> {
-    let target = crate::target::get_target_by_name(&args.target_name)?;
+    let mut target = crate::target::new_target_by_name(&args.target_name)?;
 
     let mut declarations = Vec::new();
 
@@ -38,8 +38,8 @@ pub fn invoke(args: &DesmosifyArgs) -> crate::Result<()> {
 
     println!("Analyzing program...");
 
-    let context = GlobalContext::from_declarations(declarations)?;
-    let program = interpret_program(&args.source_paths, &context)?;
+    let context = GlobalContext::from_declarations(declarations, target.as_ref())?;
+    let program = interpret_program(&args.source_paths, target.as_mut(), &context)?;
 
     println!("Compiling program...");
 

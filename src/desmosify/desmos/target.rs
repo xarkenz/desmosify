@@ -14,11 +14,11 @@ pub use geometry::DesmosGeometryTarget;
 pub use graphing::DesmosGraphingTarget;
 pub use graphing3d::DesmosGraphing3DTarget;
 
-pub fn get_target_by_name(name: &str) -> crate::Result<Box<dyn crate::target::Target>> {
+pub fn new_target_by_name(name: &str) -> crate::Result<Box<dyn crate::target::Target>> {
     match name {
-        "desmos-geometry" => Ok(Box::new(DesmosGeometryTarget)),
-        "desmos-graphing" => Ok(Box::new(DesmosGraphingTarget)),
-        "desmos-graphing3d" => Ok(Box::new(DesmosGraphing3DTarget)),
+        "desmos-geometry" => Ok(Box::new(DesmosGeometryTarget::default())),
+        "desmos-graphing" => Ok(Box::new(DesmosGraphingTarget::default())),
+        "desmos-graphing3d" => Ok(Box::new(DesmosGraphing3DTarget::default())),
         _ => Err(Box::new(crate::Error {
             kind: crate::ErrorKind::UnsupportedTarget {
                 name: name.into(),
@@ -28,22 +28,71 @@ pub fn get_target_by_name(name: &str) -> crate::Result<Box<dyn crate::target::Ta
     }
 }
 
+#[derive(Debug)]
+pub struct DesmosTargetInfo {
+    next_local_id: u64,
+    next_entry_id: u64,
+    global_symbols: SymbolTable,
+    action_symbols: SymbolTable,
+}
+
+impl DesmosTargetInfo {
+    pub fn new() -> Self {
+        Self {
+            next_local_id: 0,
+            next_entry_id: 0,
+            global_symbols: SymbolTable::new(GraphExpression::Letter('G')),
+            action_symbols: SymbolTable::new(GraphExpression::Letter('A')),
+        }
+    }
+
+    pub fn create_local_id(&mut self) -> u64 {
+        let id = self.next_local_id;
+        self.next_local_id += 1;
+        id
+    }
+
+    pub fn create_entry_id(&mut self) -> String {
+        let id = self.next_entry_id;
+        self.next_entry_id += 1;
+        id.to_string()
+    }
+
+    pub fn get_global_symbol(&mut self, identifier: &str) -> GraphExpression {
+        self.global_symbols.get_symbol(identifier)
+    }
+
+    pub fn get_action_symbol(&mut self, identifier: &str) -> GraphExpression {
+        self.action_symbols.get_symbol(identifier)
+    }
+
+    pub fn get_local_symbol(&mut self, id: u64) -> GraphExpression {
+        GraphExpression::Binary {
+            kind: GraphBinaryKind::Subscript,
+            lhs: Box::new(GraphExpression::Letter('l')),
+            rhs: Box::new(GraphExpression::Alphanumeric(id.to_string())),
+        }
+    }
+
+    pub fn create_local_symbol(&mut self) -> GraphExpression {
+        let id = self.create_local_id();
+        self.get_local_symbol(id)
+    }
+}
+
 pub const INTRINSICS_FOLDER_ID: &str = "desmosify_intrinsics";
 pub const GLOBALS_FOLDER_ID: &str = "desmosify_globals";
 pub const ACTIONS_FOLDER_ID: &str = "desmosify_actions";
 pub const DISPLAY_FOLDER_ID: &str = "desmosify_display";
 
-pub struct GraphExpressionListBuilder {
+pub struct GraphExpressionListBuilder<'target> {
+    target_info: &'target mut DesmosTargetInfo,
     ticker: Option<GraphTicker>,
     public_entries: Vec<Box<dyn GraphEntry>>,
     intrinsic_entries: Vec<Box<dyn GraphEntry>>,
     global_entries: Vec<Box<dyn GraphEntry>>,
     action_entries: Vec<Box<dyn GraphEntry>>,
     display_entries: Vec<Box<dyn GraphEntry>>,
-    next_local_id: u64,
-    next_entry_id: u64,
-    global_symbols: SymbolTable,
-    action_symbols: SymbolTable,
     next_dummy_noop_id: u64,
     dummy_unreachable_created: bool,
     intrinsic_range_inclusive_created: bool,
@@ -55,9 +104,16 @@ pub struct GraphExpressionListBuilder {
     intrinsic_index_range_to_exclusive_created: bool,
 }
 
-impl GraphExpressionListBuilder {
-    pub fn new() -> Self {
+impl<'target> GraphExpressionListBuilder<'target> {
+    pub fn build_program(program: &Program, target_info: &'target mut DesmosTargetInfo) -> crate::Result<GraphExpressionList> {
+        let mut builder = Self::new(target_info);
+        builder.set_program(program)?;
+        Ok(builder.finish())
+    }
+
+    pub fn new(target_info: &'target mut DesmosTargetInfo) -> Self {
         Self {
+            target_info,
             ticker: None,
             public_entries: Vec::new(),
             intrinsic_entries: vec![Box::new(GraphFolderEntry {
@@ -84,10 +140,6 @@ impl GraphExpressionListBuilder {
                 collapsed: true,
                 secret: false,
             })],
-            next_local_id: 0,
-            next_entry_id: 0,
-            global_symbols: SymbolTable::new(GraphExpression::Letter('G')),
-            action_symbols: SymbolTable::new(GraphExpression::Letter('A')),
             next_dummy_noop_id: 0,
             dummy_unreachable_created: false,
             intrinsic_range_inclusive_created: false,
@@ -101,11 +153,10 @@ impl GraphExpressionListBuilder {
     }
 
     pub fn finish(mut self) -> GraphExpressionList {
-        let separator_entry = GraphExpressionEntry {
-            id: self.create_entry_id(),
+        self.public_entries.push(Box::new(GraphExpressionEntry {
+            id: self.target_info.create_entry_id(),
             ..Default::default()
-        };
-        self.public_entries.push(Box::new(separator_entry));
+        }));
 
         GraphExpressionList {
             ticker: self.ticker,
@@ -116,48 +167,7 @@ impl GraphExpressionListBuilder {
                 .chain(self.action_entries)
                 .chain(self.display_entries)
                 .collect(),
-            next_local_id: self.next_local_id,
         }
-    }
-
-    pub fn build_program(program: &Program) -> crate::Result<GraphExpressionList> {
-        let mut builder = Self::new();
-        builder.next_local_id = program.next_local_id();
-        builder.set_program(program)?;
-        Ok(builder.finish())
-    }
-
-    pub fn create_entry_id(&mut self) -> String {
-        let id = self.next_entry_id;
-        self.next_entry_id += 1;
-        id.to_string()
-    }
-
-    pub fn create_local_id(&mut self) -> u64 {
-        let id = self.next_local_id;
-        self.next_local_id += 1;
-        id
-    }
-
-    pub fn get_global_symbol(&mut self, identifier: &str) -> GraphExpression {
-        self.global_symbols.get_symbol(identifier)
-    }
-
-    pub fn get_action_symbol(&mut self, identifier: &str) -> GraphExpression {
-        self.action_symbols.get_symbol(identifier)
-    }
-
-    pub fn get_local_symbol(&mut self, id: u64) -> GraphExpression {
-        GraphExpression::Binary {
-            kind: GraphBinaryKind::Subscript,
-            lhs: Box::new(GraphExpression::Letter('l')),
-            rhs: Box::new(GraphExpression::Alphanumeric(id.to_string())),
-        }
-    }
-
-    pub fn create_local_symbol(&mut self) -> GraphExpression {
-        let id = self.create_local_id();
-        self.get_local_symbol(id)
     }
 
     pub fn create_dummy_noop(&mut self) -> GraphExpression {
@@ -169,9 +179,8 @@ impl GraphExpressionListBuilder {
             rhs: Box::new(GraphExpression::Alphanumeric(format!("Noop{dummy_noop_id}"))),
         };
 
-        let id = self.create_entry_id();
         self.intrinsic_entries.push(Box::new(GraphExpressionEntry {
-            id,
+            id: self.target_info.create_entry_id(),
             folder_id: Some(INTRINSICS_FOLDER_ID.into()),
             expression: GraphExpression::Binary {
                 kind: GraphBinaryKind::Equal,
@@ -192,9 +201,8 @@ impl GraphExpressionListBuilder {
         };
 
         if !self.dummy_unreachable_created {
-            let id = self.create_entry_id();
             self.intrinsic_entries.push(Box::new(GraphExpressionEntry {
-                id,
+                id: self.target_info.create_entry_id(),
                 folder_id: Some(INTRINSICS_FOLDER_ID.into()),
                 expression: GraphExpression::Binary {
                     kind: GraphBinaryKind::Equal,
@@ -218,11 +226,9 @@ impl GraphExpressionListBuilder {
         };
 
         if !self.intrinsic_range_inclusive_created {
-            let entry_id = self.create_entry_id();
-
-            let local_a = self.create_local_symbol();
-            let local_b = self.create_local_symbol();
-            let local_s = self.create_local_symbol();
+            let local_a = self.target_info.create_local_symbol();
+            let local_b = self.target_info.create_local_symbol();
+            let local_s = self.target_info.create_local_symbol();
 
             // range_inc(a, b, s) = {
             //     a sign(s) > b sign(s): [],
@@ -309,7 +315,7 @@ impl GraphExpressionListBuilder {
             };
 
             self.intrinsic_entries.push(Box::new(GraphExpressionEntry {
-                id: entry_id,
+                id: self.target_info.create_entry_id(),
                 folder_id: Some(INTRINSICS_FOLDER_ID.into()),
                 expression,
                 ..Default::default()
@@ -329,12 +335,10 @@ impl GraphExpressionListBuilder {
         };
 
         if !self.intrinsic_range_exclusive_created {
-            let entry_id = self.create_entry_id();
-
-            let local_a = self.create_local_symbol();
-            let local_b = self.create_local_symbol();
-            let local_s = self.create_local_symbol();
-            let local_x = self.create_local_symbol();
+            let local_a = self.target_info.create_local_symbol();
+            let local_b = self.target_info.create_local_symbol();
+            let local_s = self.target_info.create_local_symbol();
+            let local_x = self.target_info.create_local_symbol();
 
             // range_exc(a, b, s) = x[{x = b, 0} = 0] with x = range_inc(a, b, s)
             // This is also terrible, but not nearly as bad.
@@ -393,7 +397,7 @@ impl GraphExpressionListBuilder {
             };
 
             self.intrinsic_entries.push(Box::new(GraphExpressionEntry {
-                id: entry_id,
+                id: self.target_info.create_entry_id(),
                 folder_id: Some(INTRINSICS_FOLDER_ID.into()),
                 expression,
                 ..Default::default()
@@ -413,13 +417,11 @@ impl GraphExpressionListBuilder {
         };
 
         if !self.intrinsic_index_range_inclusive_created {
-            let entry_id = self.create_entry_id();
-
-            let local_l = self.create_local_symbol();
-            let local_a = self.create_local_symbol();
-            let local_b = self.create_local_symbol();
-            let local_s = self.create_local_symbol();
-            let local_i = self.create_local_symbol();
+            let local_l = self.target_info.create_local_symbol();
+            let local_a = self.target_info.create_local_symbol();
+            let local_b = self.target_info.create_local_symbol();
+            let local_s = self.target_info.create_local_symbol();
+            let local_i = self.target_info.create_local_symbol();
 
             // idx_range_inc(l, a, b, s) = [l[i] for i = range_inc(a, b, s)]
             let expression = GraphExpression::Binary {
@@ -465,7 +467,7 @@ impl GraphExpressionListBuilder {
             };
 
             self.intrinsic_entries.push(Box::new(GraphExpressionEntry {
-                id: entry_id,
+                id: self.target_info.create_entry_id(),
                 folder_id: Some(INTRINSICS_FOLDER_ID.into()),
                 expression,
                 ..Default::default()
@@ -485,13 +487,11 @@ impl GraphExpressionListBuilder {
         };
 
         if !self.intrinsic_index_range_exclusive_created {
-            let entry_id = self.create_entry_id();
-
-            let local_l = self.create_local_symbol();
-            let local_a = self.create_local_symbol();
-            let local_b = self.create_local_symbol();
-            let local_s = self.create_local_symbol();
-            let local_i = self.create_local_symbol();
+            let local_l = self.target_info.create_local_symbol();
+            let local_a = self.target_info.create_local_symbol();
+            let local_b = self.target_info.create_local_symbol();
+            let local_s = self.target_info.create_local_symbol();
+            let local_i = self.target_info.create_local_symbol();
 
             // idx_range_exc(l, a, b, s) = [l[i] for i = range_exc(a, b, s)]
             let expression = GraphExpression::Binary {
@@ -537,7 +537,7 @@ impl GraphExpressionListBuilder {
             };
 
             self.intrinsic_entries.push(Box::new(GraphExpressionEntry {
-                id: entry_id,
+                id: self.target_info.create_entry_id(),
                 folder_id: Some(INTRINSICS_FOLDER_ID.into()),
                 expression,
                 ..Default::default()
@@ -557,11 +557,9 @@ impl GraphExpressionListBuilder {
         };
 
         if !self.intrinsic_index_range_from_created {
-            let entry_id = self.create_entry_id();
-
-            let local_l = self.create_local_symbol();
-            let local_a = self.create_local_symbol();
-            let local_s = self.create_local_symbol();
+            let local_l = self.target_info.create_local_symbol();
+            let local_a = self.target_info.create_local_symbol();
+            let local_s = self.target_info.create_local_symbol();
 
             // idx_range_from(l, a, s) = idx_range_inc(l, a, count(l), s)
             let expression = GraphExpression::Binary {
@@ -596,7 +594,7 @@ impl GraphExpressionListBuilder {
             };
 
             self.intrinsic_entries.push(Box::new(GraphExpressionEntry {
-                id: entry_id,
+                id: self.target_info.create_entry_id(),
                 folder_id: Some(INTRINSICS_FOLDER_ID.into()),
                 expression,
                 ..Default::default()
@@ -616,10 +614,8 @@ impl GraphExpressionListBuilder {
         };
 
         if !self.intrinsic_index_range_to_inclusive_created {
-            let entry_id = self.create_entry_id();
-
-            let local_l = self.create_local_symbol();
-            let local_b = self.create_local_symbol();
+            let local_l = self.target_info.create_local_symbol();
+            let local_b = self.target_info.create_local_symbol();
 
             // idx_range_to_inc(l, b) = idx_range_inc(l, 1, b, 1)
             let expression = GraphExpression::Binary {
@@ -649,7 +645,7 @@ impl GraphExpressionListBuilder {
             };
 
             self.intrinsic_entries.push(Box::new(GraphExpressionEntry {
-                id: entry_id,
+                id: self.target_info.create_entry_id(),
                 folder_id: Some(INTRINSICS_FOLDER_ID.into()),
                 expression,
                 ..Default::default()
@@ -669,10 +665,8 @@ impl GraphExpressionListBuilder {
         };
 
         if !self.intrinsic_index_range_to_exclusive_created {
-            let entry_id = self.create_entry_id();
-
-            let local_l = self.create_local_symbol();
-            let local_b = self.create_local_symbol();
+            let local_l = self.target_info.create_local_symbol();
+            let local_b = self.target_info.create_local_symbol();
 
             // idx_range_to_exc(l, b) = idx_range_exc(l, 1, b, 1)
             let expression = GraphExpression::Binary {
@@ -702,7 +696,7 @@ impl GraphExpressionListBuilder {
             };
 
             self.intrinsic_entries.push(Box::new(GraphExpressionEntry {
-                id: entry_id,
+                id: self.target_info.create_entry_id(),
                 folder_id: Some(INTRINSICS_FOLDER_ID.into()),
                 expression,
                 ..Default::default()
@@ -770,10 +764,13 @@ impl GraphExpressionListBuilder {
                 Ok(GraphExpression::Integer(*variant_ordinal))
             }
             ValueKind::Global(reference) => {
-                Ok(self.get_global_symbol(&reference.identifier))
+                Ok(self.target_info.get_global_symbol(&reference.identifier))
+            }
+            ValueKind::Action(reference) => {
+                Ok(self.target_info.get_action_symbol(&reference.identifier))
             }
             ValueKind::Local(reference) => {
-                Ok(self.get_local_symbol(reference.id))
+                Ok(self.target_info.get_local_symbol(reference.id))
             }
             ValueKind::ViewportWidth => {
                 Ok(GraphExpression::OperatorName("width".into()))
@@ -940,7 +937,7 @@ impl GraphExpressionListBuilder {
                                 .rev()
                                 .map(|map_loop| Ok(GraphExpression::Binary {
                                     kind: GraphBinaryKind::Equal,
-                                    lhs: Box::new(self.get_local_symbol(map_loop.local.id)),
+                                    lhs: Box::new(self.target_info.get_local_symbol(map_loop.local.id)),
                                     rhs: Box::new(self.translate_value(&map_loop.list)?),
                                 }))
                                 .collect::<crate::Result<_>>()?,
@@ -1775,14 +1772,14 @@ impl GraphExpressionListBuilder {
             ActionValueKind::Update { variable, value, .. } => {
                 Ok(GraphExpression::Binary {
                     kind: GraphBinaryKind::RightArrow,
-                    lhs: Box::new(self.get_global_symbol(&variable.identifier)),
+                    lhs: Box::new(self.target_info.get_global_symbol(&variable.identifier)),
                     rhs: Box::new(self.translate_value(value)?),
                 })
             }
-            ActionValueKind::ActionCall { identifier, arguments, .. } => {
+            ActionValueKind::ActionCall { action, arguments, .. } => {
                 Ok(GraphExpression::Binary {
                     kind: GraphBinaryKind::Call,
-                    lhs: Box::new(self.get_action_symbol(identifier)),
+                    lhs: Box::new(self.translate_value(action)?),
                     rhs: Box::new(GraphExpression::Sequence {
                         elements: arguments
                             .iter()
@@ -1815,29 +1812,28 @@ impl GraphExpressionListBuilder {
     }
 
     pub fn add_program_let(&mut self, program_let: &ProgramLet) -> crate::Result<()> {
-        let id = self.create_entry_id();
-        let expression = GraphExpression::Binary {
-            kind: GraphBinaryKind::Equal,
-            lhs: Box::new(match program_let.parameters() {
-                Some(parameters) => GraphExpression::Binary {
-                    kind: GraphBinaryKind::Call,
-                    lhs: Box::new(self.get_global_symbol(&program_let.identifier())),
-                    rhs: Box::new(GraphExpression::Sequence {
-                        elements: parameters
-                            .iter()
-                            .map(|parameter| self.get_local_symbol(parameter.id))
-                            .collect(),
-                    }),
-                },
-                None => self.get_global_symbol(&program_let.identifier()),
-            }),
-            rhs: Box::new(self.translate_value(program_let.value())?),
-        };
+        let value = self.translate_value(program_let.value())?;
 
         self.global_entries.push(Box::new(GraphExpressionEntry {
-            id,
+            id: self.target_info.create_entry_id(),
             folder_id: Some(GLOBALS_FOLDER_ID.into()),
-            expression,
+            expression: GraphExpression::Binary {
+                kind: GraphBinaryKind::Equal,
+                lhs: Box::new(match program_let.parameters() {
+                    Some(parameters) => GraphExpression::Binary {
+                        kind: GraphBinaryKind::Call,
+                        lhs: Box::new(self.target_info.get_global_symbol(&program_let.identifier())),
+                        rhs: Box::new(GraphExpression::Sequence {
+                            elements: parameters
+                                .iter()
+                                .map(|parameter| self.target_info.get_local_symbol(parameter.id))
+                                .collect(),
+                        }),
+                    },
+                    None => self.target_info.get_global_symbol(&program_let.identifier()),
+                }),
+                rhs: Box::new(value),
+            },
             ..Default::default()
         }));
 
@@ -1845,26 +1841,24 @@ impl GraphExpressionListBuilder {
     }
 
     pub fn add_program_variable(&mut self, program_variable: &ProgramVariable) -> crate::Result<()> {
-        let id = self.create_entry_id();
-        let expression = GraphExpression::Binary {
-            kind: GraphBinaryKind::Equal,
-            lhs: Box::new(self.get_global_symbol(&program_variable.identifier())),
-            rhs: Box::new(self.translate_value(program_variable.value())?),
-        };
-        let slider = match program_variable.kind() {
-            ProgramVariableKind::Default => None,
-            ProgramVariableKind::Timer => Some(GraphSlider {
-                loop_mode: GraphSliderLoopMode::PlayIndefinitely,
-                is_playing: true,
-                ..Default::default()
-            }),
-        };
+        let value = self.translate_value(program_variable.value())?;
 
         self.global_entries.push(Box::new(GraphExpressionEntry {
-            id,
+            id: self.target_info.create_entry_id(),
             folder_id: Some(GLOBALS_FOLDER_ID.into()),
-            expression,
-            slider,
+            expression: GraphExpression::Binary {
+                kind: GraphBinaryKind::Equal,
+                lhs: Box::new(self.target_info.get_global_symbol(&program_variable.identifier())),
+                rhs: Box::new(value),
+            },
+            slider: match program_variable.kind() {
+                ProgramVariableKind::Default => None,
+                ProgramVariableKind::Timer => Some(GraphSlider {
+                    loop_mode: GraphSliderLoopMode::PlayIndefinitely,
+                    is_playing: true,
+                    ..Default::default()
+                }),
+            },
             ..Default::default()
         }));
 
@@ -1872,27 +1866,26 @@ impl GraphExpressionListBuilder {
     }
 
     pub fn add_program_action(&mut self, program_action: &ProgramAction) -> crate::Result<()> {
-        let id = self.create_entry_id();
-        let expression = GraphExpression::Binary {
-            kind: GraphBinaryKind::Equal,
-            lhs: Box::new(GraphExpression::Binary {
-                kind: GraphBinaryKind::Call,
-                lhs: Box::new(self.get_action_symbol(&program_action.identifier())),
-                rhs: Box::new(GraphExpression::Sequence {
-                    elements: program_action
-                        .parameters()
-                        .iter()
-                        .map(|parameter| self.get_local_symbol(parameter.id))
-                        .collect(),
-                }),
-            }),
-            rhs: Box::new(self.translate_action_value(program_action.action())?),
-        };
+        let action = self.translate_action_value(program_action.action())?;
 
         self.action_entries.push(Box::new(GraphExpressionEntry {
-            id,
+            id: self.target_info.create_entry_id(),
             folder_id: Some(ACTIONS_FOLDER_ID.into()),
-            expression,
+            expression: GraphExpression::Binary {
+                kind: GraphBinaryKind::Equal,
+                lhs: Box::new(GraphExpression::Binary {
+                    kind: GraphBinaryKind::Call,
+                    lhs: Box::new(self.target_info.get_action_symbol(&program_action.identifier())),
+                    rhs: Box::new(GraphExpression::Sequence {
+                        elements: program_action
+                            .parameters()
+                            .iter()
+                            .map(|parameter| self.target_info.get_local_symbol(parameter.id))
+                            .collect(),
+                    }),
+                }),
+                rhs: Box::new(action),
+            },
             ..Default::default()
         }));
 
@@ -1916,30 +1909,32 @@ impl GraphExpressionListBuilder {
     }
 
     pub fn add_public_line(&mut self, public_line: &ProgramPublicLine) -> crate::Result<()> {
-        let id = self.create_entry_id();
+        let id = self.target_info.create_entry_id();
         let entry: Box<dyn GraphEntry> = match public_line {
-            ProgramPublicLine::Text(text) => {
-                let text = text.trim();
-                if text.is_empty() {
+            ProgramPublicLine::Expression(value) => match &value.kind {
+                ValueKind::Str(text) => {
+                    let text = text.trim();
+                    if text.is_empty() {
+                        Box::new(GraphExpressionEntry {
+                            id,
+                            ..Default::default()
+                        })
+                    }
+                    else {
+                        Box::new(GraphTextEntry {
+                            id,
+                            folder_id: None,
+                            text: text.to_string(),
+                        })
+                    }
+                }
+                _ => {
                     Box::new(GraphExpressionEntry {
                         id,
+                        expression: self.translate_value(value)?,
                         ..Default::default()
                     })
                 }
-                else {
-                    Box::new(GraphTextEntry {
-                        id,
-                        folder_id: None,
-                        text: text.to_string(),
-                    })
-                }
-            }
-            ProgramPublicLine::Expression(value) => {
-                Box::new(GraphExpressionEntry {
-                    id,
-                    expression: self.translate_value(value)?,
-                    ..Default::default()
-                })
             }
             ProgramPublicLine::Action(action) => {
                 Box::new(GraphExpressionEntry {
@@ -1967,7 +1962,7 @@ impl GraphExpressionListBuilder {
 
     fn add_image_display_element(&mut self, element: &ProgramDisplayElement, image: &ImageValue) -> crate::Result<()> {
         let mut entry = GraphImageEntry {
-            id: self.create_entry_id(),
+            id: self.target_info.create_entry_id(),
             folder_id: Some(DISPLAY_FOLDER_ID.into()),
             image_url: image.url.to_string(),
             name: image.name.to_string(),
@@ -2006,7 +2001,7 @@ impl GraphExpressionListBuilder {
 
     fn add_expression_display_element(&mut self, element: &ProgramDisplayElement) -> crate::Result<()> {
         let mut entry = GraphExpressionEntry {
-            id: self.create_entry_id(),
+            id: self.target_info.create_entry_id(),
             folder_id: Some(DISPLAY_FOLDER_ID.into()),
             expression: self.translate_value(&element.value)?,
             ..Default::default()

@@ -53,6 +53,7 @@ pub fn to_subscript(identifier: &str) -> String {
     subscript
 }
 
+#[derive(Debug)]
 pub struct SymbolTable {
     symbol_prefix: GraphExpression,
     next_symbol_versions: HashMap<Box<str>, u64>,

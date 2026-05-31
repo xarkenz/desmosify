@@ -5,15 +5,14 @@ use crate::sema::{Program, ProgramAction, ProgramLet, ProgramPublic, ProgramPubl
 use crate::sema::context::{GlobalContext, LocalContext};
 use crate::sema::display::{DragMode, LabelOrientation, LineStyle, PointStyle, ProgramDisplay, ProgramDisplayAttribute, ProgramDisplayAttributeKind, ProgramDisplayElement};
 use crate::sema::types::{ListState, Type};
-use crate::sema::values::{ActionValue, ActionValueKind, GlobalReference, LocalReference, Value, IndexKind, ValueKind, ListMapLoop, BinaryKind, UnaryKind};
+use crate::sema::values::{ActionValue, ActionValueKind, GlobalReference, LocalReference, Value, IndexKind, ValueKind, ListMapLoop, BinaryKind, UnaryKind, ActionReference};
+use crate::target::Target;
 use crate::token::Literal;
 
-pub fn interpret_program(source_paths: &[PathBuf], context: &GlobalContext) -> crate::Result<Program> {
+pub fn interpret_program(source_paths: &[PathBuf], target: &mut dyn Target, context: &GlobalContext) -> crate::Result<Program> {
     let mut lets = Vec::new();
     let mut variables = Vec::new();
     let mut actions = Vec::new();
-
-    let mut next_local_id = 0;
 
     for (identifier, definition) in context.definitions().chain(context.action_definitions()) {
         let local_context = LocalContext::new(&source_paths[definition.definition.span.source_id]);
@@ -21,8 +20,8 @@ pub fn interpret_program(source_paths: &[PathBuf], context: &GlobalContext) -> c
         match &definition.definition.kind {
             DefinitionKind::Value(ValueDefinition::Let { parameters, value, .. }) => {
                 lets.push(interpret_let_definition(
+                    target,
                     context,
-                    &mut next_local_id,
                     local_context,
                     identifier.clone(),
                     parameters.as_ref(),
@@ -32,8 +31,8 @@ pub fn interpret_program(source_paths: &[PathBuf], context: &GlobalContext) -> c
             }
             DefinitionKind::Value(ValueDefinition::Variable { kind, value, .. }) => {
                 variables.push(interpret_variable_definition(
+                    target,
                     context,
-                    &mut next_local_id,
                     local_context,
                     identifier.clone(),
                     kind,
@@ -43,8 +42,8 @@ pub fn interpret_program(source_paths: &[PathBuf], context: &GlobalContext) -> c
             }
             DefinitionKind::Value(ValueDefinition::Action { parameters, action }) => {
                 actions.push(interpret_action_definition(
+                    target,
                     context,
-                    &mut next_local_id,
                     local_context,
                     identifier.clone(),
                     parameters,
@@ -60,16 +59,15 @@ pub fn interpret_program(source_paths: &[PathBuf], context: &GlobalContext) -> c
         lets: lets.into_boxed_slice(),
         variables: variables.into_boxed_slice(),
         actions: actions.into_boxed_slice(),
-        ticker: interpret_ticker_declarations(source_paths, context, &mut next_local_id)?,
-        public: interpret_public_declarations(source_paths, context, &mut next_local_id)?,
-        display: interpret_display_declarations(source_paths, context, &mut next_local_id)?,
-        next_local_id,
+        ticker: interpret_ticker_declarations(source_paths, target, context)?,
+        public: interpret_public_declarations(source_paths, target, context)?,
+        display: interpret_display_declarations(source_paths, target, context)?,
     })
 }
 
 pub fn interpret_let_definition(
+    target: &mut dyn Target,
     context: &GlobalContext,
-    next_local_id: &mut u64,
     mut local_context: LocalContext,
     identifier: Rc<str>,
     parameters: Option<&ParameterList>,
@@ -81,7 +79,7 @@ pub fn interpret_let_definition(
             panic!("parameter list is present but value type is not a function")
         };
 
-        let typed_parameters = process_parameters(next_local_id, &mut local_context, parameters, &signature.parameter_types);
+        let typed_parameters = process_parameters(target, &mut local_context, parameters, &signature.parameter_types);
 
         (Some(typed_parameters), &signature.return_type)
     }
@@ -89,7 +87,7 @@ pub fn interpret_let_definition(
         (None, value_type)
     };
 
-    let value = interpret_expression(context, next_local_id, &local_context, value)?
+    let value = interpret_expression(target, context, &local_context, value)?
         .coerce_to(expected_type, false)?;
 
     Ok(ProgramLet {
@@ -100,8 +98,8 @@ pub fn interpret_let_definition(
 }
 
 pub fn interpret_variable_definition(
+    target: &mut dyn Target,
     context: &GlobalContext,
-    next_local_id: &mut u64,
     local_context: LocalContext,
     identifier: Rc<str>,
     kind: &VariableKind,
@@ -113,7 +111,7 @@ pub fn interpret_variable_definition(
         VariableKind::Timer => ProgramVariableKind::Timer,
     };
 
-    let value = interpret_expression(context, next_local_id, &local_context, value)?
+    let value = interpret_expression(target, context, &local_context, value)?
         .coerce_to(value_type, false)?;
 
     Ok(ProgramVariable {
@@ -124,8 +122,8 @@ pub fn interpret_variable_definition(
 }
 
 pub fn interpret_action_definition(
+    target: &mut dyn Target,
     context: &GlobalContext,
-    next_local_id: &mut u64,
     mut local_context: LocalContext,
     identifier: Rc<str>,
     parameters: &ParameterList,
@@ -135,9 +133,9 @@ pub fn interpret_action_definition(
     let Type::Action { parameter_types } = action_type else {
         panic!("action definition has invalid type")
     };
-    let typed_parameters = process_parameters(next_local_id, &mut local_context, parameters, parameter_types);
+    let typed_parameters = process_parameters(target, &mut local_context, parameters, parameter_types);
 
-    let action = interpret_action_expression(context, next_local_id, &local_context, action)?;
+    let action = interpret_action_expression(target, context, &local_context, action)?;
 
     Ok(ProgramAction {
         identifier,
@@ -147,22 +145,22 @@ pub fn interpret_action_definition(
 }
 
 pub fn process_parameters(
-    next_local_id: &mut u64,
+    target: &mut dyn Target,
     local_context: &mut LocalContext,
     parameters: &ParameterList,
     parameter_types: &[Type],
 ) -> Box<[LocalReference]> {
     std::iter::zip(&parameters.0, parameter_types)
         .map(|(parameter, parameter_type)| {
-            local_context.add_local_variable(parameter.identifier.clone(), next_local_id, parameter_type.clone())
+            local_context.add_local_variable(parameter.identifier.clone(), target.create_local_id(), parameter_type.clone())
         })
         .collect()
 }
 
 pub fn interpret_ticker_declarations(
     source_paths: &[PathBuf],
+    target: &mut dyn Target,
     context: &GlobalContext,
-    next_local_id: &mut u64,
 ) -> crate::Result<Option<ProgramTicker>> {
     let mut tick_actions = Vec::with_capacity(context.ticker_declarations().len());
 
@@ -176,7 +174,7 @@ pub fn interpret_ticker_declarations(
                 let mut local_context = LocalContext::new(&source_paths[declaration.span.source_id]);
 
                 let new_interval_ms = match declaration.interval_ms.as_ref() {
-                    Some(interval_expression) => Some(interpret_expression(context, next_local_id, &local_context, interval_expression)?),
+                    Some(interval_expression) => Some(interpret_expression(target, context, &local_context, interval_expression)?),
                     None => None,
                 };
                 if index != 0 && new_interval_ms != interval_ms {
@@ -188,7 +186,7 @@ pub fn interpret_ticker_declarations(
 
                 local_context.add_scoped_intrinsic("dt", ValueKind::TickerDt);
 
-                let new_tick_action = interpret_action_expression(context, next_local_id, &local_context, &declaration.tick_action)?;
+                let new_tick_action = interpret_action_expression(target, context, &local_context, &declaration.tick_action)?;
                 tick_actions.push(new_tick_action);
 
                 Ok(new_interval_ms)
@@ -216,8 +214,8 @@ pub fn interpret_ticker_declarations(
 
 pub fn interpret_public_declarations(
     source_paths: &[PathBuf],
+    target: &mut dyn Target,
     context: &GlobalContext,
-    next_local_id: &mut u64,
 ) -> crate::Result<Option<ProgramPublic>> {
     let mut lines = Vec::new();
 
@@ -226,14 +224,11 @@ pub fn interpret_public_declarations(
 
         for line in &declaration.lines {
             lines.push(match &line.kind {
-                PublicLineKind::Text(text) => {
-                    ProgramPublicLine::Text(text.clone())
-                }
                 PublicLineKind::Expression(expression) => {
-                    ProgramPublicLine::Expression(interpret_expression(context, next_local_id, &local_context, expression)?)
+                    ProgramPublicLine::Expression(interpret_expression(target, context, &local_context, expression)?)
                 }
                 PublicLineKind::Action(action) => {
-                    ProgramPublicLine::Action(interpret_action_expression(context, next_local_id, &local_context, action)?)
+                    ProgramPublicLine::Action(interpret_action_expression(target, context, &local_context, action)?)
                 }
             });
         }
@@ -251,8 +246,8 @@ pub fn interpret_public_declarations(
 
 pub fn interpret_display_declarations(
     source_paths: &[PathBuf],
+    target: &mut dyn Target,
     context: &GlobalContext,
-    next_local_id: &mut u64,
 ) -> crate::Result<Option<ProgramDisplay>> {
     fn prevent_duplicate(attribute: &DisplayAttribute, has_attribute: &mut bool) -> crate::Result<()> {
         if std::mem::replace(has_attribute, true) {
@@ -317,7 +312,7 @@ pub fn interpret_display_declarations(
             ($opt:expr, $t:expr) => {
                 (($opt)
                     .map(|expression| {
-                        interpret_expression(context, next_local_id, &local_context, expression)?
+                        interpret_expression(target, context, &local_context, expression)?
                             .coerce_to($t, true)
                     })
                     .transpose())
@@ -328,7 +323,7 @@ pub fn interpret_display_declarations(
             ($opt:expr, $e:ty) => {
                 (($opt)
                     .map_or(Ok(Default::default()), |expression| {
-                        let value = interpret_expression(context, next_local_id, &local_context, expression)?;
+                        let value = interpret_expression(target, context, &local_context, expression)?;
                         value.kind
                             .as_const_str()
                             .and_then(|name| <$e>::from_name(&name))
@@ -350,32 +345,16 @@ pub fn interpret_display_declarations(
             ($opt:expr, $default:expr) => {
                 (($opt)
                     .map_or(Ok($default), |expression| {
-                        let value = interpret_expression(context, next_local_id, &local_context, expression)?;
+                        let value = interpret_expression(target, context, &local_context, expression)?;
                         value.kind
                             .as_const_bool()
                             .ok_or_else(|| Box::new(crate::Error {
                                 kind: crate::ErrorKind::ExpectedConstant {
-                                    type_name: Type::Bool.to_string(),
+                                    type_identifier: Type::Bool.to_string(),
                                 },
                                 span: value.span,
                             }))
                     }))
-            };
-        }
-
-        macro_rules! interpret_str {
-            ($expr:expr) => {
-                ({
-                    let value = interpret_expression(context, next_local_id, &local_context, $expr)?;
-                    value.kind
-                        .as_const_str()
-                        .ok_or_else(|| Box::new(crate::Error {
-                                kind: crate::ErrorKind::ExpectedConstant {
-                                    type_name: Type::Str.to_string(),
-                                },
-                            span: value.span,
-                        }))
-                })
             };
         }
 
@@ -401,7 +380,7 @@ pub fn interpret_display_declarations(
                         let arguments = require_arguments(attribute, 1, 1)?;
 
                         ProgramDisplayAttributeKind::Color {
-                            value: interpret_expression(context, next_local_id, &local_context, &arguments[0])?
+                            value: interpret_expression(target, context, &local_context, &arguments[0])?
                                 .coerce_to(&Type::Color, true)?,
                         }
                     }
@@ -433,7 +412,8 @@ pub fn interpret_display_declarations(
                         let arguments = require_arguments(attribute, 1, 6)?;
 
                         ProgramDisplayAttributeKind::Label {
-                            text: interpret_str!(&arguments[0])?,
+                            text: interpret_expression(target, context, &local_context, &arguments[0])?
+                                .get_const_str()?,
                             opacity: interpret_option!(arguments.get(1), &Type::Real)?,
                             size: interpret_option!(arguments.get(2), &Type::Real)?,
                             angle: interpret_option!(arguments.get(3), &Type::Real)?,
@@ -472,7 +452,7 @@ pub fn interpret_display_declarations(
                         action_context.add_scoped_intrinsic("index", ValueKind::ClickIndex);
 
                         ProgramDisplayAttributeKind::Click {
-                            action: interpret_action_expression(context, next_local_id, &action_context, action)?,
+                            action: interpret_action_expression(target, context, &action_context, action)?,
                         }
                     }
                     "hovered" => {
@@ -481,7 +461,8 @@ pub fn interpret_display_declarations(
                         let arguments = require_arguments(attribute, 1, 1)?;
 
                         ProgramDisplayAttributeKind::Hovered {
-                            url: interpret_str!(&arguments[0])?,
+                            url: interpret_expression(target, context, &local_context, &arguments[0])?
+                                .get_const_str()?,
                         }
                     }
                     "pressed" => {
@@ -490,7 +471,8 @@ pub fn interpret_display_declarations(
                         let arguments = require_arguments(attribute, 1, 1)?;
 
                         ProgramDisplayAttributeKind::Pressed {
-                            url: interpret_str!(&arguments[0])?,
+                            url: interpret_expression(target, context, &local_context, &arguments[0])?
+                                .get_const_str()?,
                         }
                     }
                     "description" => {
@@ -499,7 +481,8 @@ pub fn interpret_display_declarations(
                         let arguments = require_arguments(attribute, 1, 1)?;
 
                         ProgramDisplayAttributeKind::Description {
-                            text: interpret_str!(&arguments[0])?,
+                            text: interpret_expression(target, context, &local_context, &arguments[0])?
+                                .get_const_str()?,
                         }
                     }
                     _ => {
@@ -519,7 +502,7 @@ pub fn interpret_display_declarations(
             }
 
             elements.push(ProgramDisplayElement {
-                value: interpret_expression(context, next_local_id, &local_context, &element.expression)?,
+                value: interpret_expression(target, context, &local_context, &element.expression)?,
                 span: Some(element.span),
                 attributes: attributes.into_boxed_slice(),
             });
@@ -538,8 +521,8 @@ pub fn interpret_display_declarations(
 
 // TODO: detect multiple updates of same variable
 pub fn interpret_action_expression(
+    target: &mut dyn Target,
     context: &GlobalContext,
-    next_local_id: &mut u64,
     local_context: &LocalContext,
     action: &ActionExpression,
 ) -> crate::Result<ActionValue> {
@@ -552,7 +535,7 @@ pub fn interpret_action_expression(
                 actions: actions
                     .iter()
                     .map(|action| {
-                        interpret_action_expression(context, next_local_id, local_context, action)
+                        interpret_action_expression(target, context, local_context, action)
                     })
                     .collect::<crate::Result<_>>()?,
             }
@@ -563,7 +546,7 @@ pub fn interpret_action_expression(
                 span: Some(variable.span),
             });
 
-            let variable = interpret_expression(context, next_local_id, &local_context, variable)?;
+            let variable = interpret_expression(target, context, &local_context, variable)?;
             let variable_span = variable.span;
             let ValueKind::Global(variable) = variable.kind else {
                 return Err(invalid_update_lhs_error());
@@ -572,7 +555,7 @@ pub fn interpret_action_expression(
                 return Err(invalid_update_lhs_error());
             };
 
-            let value = interpret_expression(context, next_local_id, &local_context, value)?
+            let value = interpret_expression(target, context, &local_context, value)?
                 .coerce_to(&variable.value_type, false)?;
 
             ActionValueKind::Update {
@@ -581,17 +564,14 @@ pub fn interpret_action_expression(
                 value: Box::new(value),
             }
         }
-        ActionExpressionKind::ActionCall { identifier, identifier_span, arguments } => {
-            let Some(definition) = context.find_action_definition(identifier) else {
+        ActionExpressionKind::ActionCall { action: callee, arguments } => {
+            let callee = interpret_expression(target, context, &local_context, callee)?;
+
+            let Type::Action { parameter_types } = callee.get_type() else {
                 return Err(Box::new(crate::Error {
-                    kind: crate::ErrorKind::UndefinedAction {
-                        identifier: identifier.as_ref().into(),
-                    },
-                    span: Some(action.span),
-                }));
-            };
-            let Type::Action { parameter_types } = &definition.value_type else {
-                panic!("action definition has invalid type")
+                    kind: crate::ErrorKind::ExpectedAction,
+                    span: callee.span,
+                }))
             };
 
             if arguments.len() != parameter_types.len() {
@@ -605,11 +585,10 @@ pub fn interpret_action_expression(
             }
 
             ActionValueKind::ActionCall {
-                identifier: identifier.clone(),
-                identifier_span: Some(*identifier_span),
-                arguments: std::iter::zip(arguments, parameter_types)
+                action: Box::new(callee),
+                arguments: std::iter::zip(arguments, &parameter_types)
                     .map(|(argument, parameter_type)| {
-                        interpret_expression(context, next_local_id, local_context, argument)?
+                        interpret_expression(target, context, local_context, argument)?
                             .coerce_to(parameter_type, false)
                     })
                     .collect::<crate::Result<_>>()?,
@@ -620,16 +599,16 @@ pub fn interpret_action_expression(
                 condition_consequents: condition_consequents
                     .iter()
                     .map(|(condition, consequent)| {
-                        let condition = interpret_expression(context, next_local_id, local_context, condition)?
+                        let condition = interpret_expression(target, context, local_context, condition)?
                             .coerce_to(&Type::Bool, false)?;
-                        let consequent = interpret_action_expression(context, next_local_id, local_context, consequent)?;
+                        let consequent = interpret_action_expression(target, context, local_context, consequent)?;
 
                         Ok((condition, consequent))
                     })
                     .collect::<crate::Result<_>>()?,
                 alternative: match alternative {
                     Some(alternative) => {
-                        Box::new(interpret_action_expression(context, next_local_id, local_context, alternative)?)
+                        Box::new(interpret_action_expression(target, context, local_context, alternative)?)
                     }
                     None => {
                         Box::new(ActionValueKind::empty().into())
@@ -646,8 +625,8 @@ pub fn interpret_action_expression(
 }
 
 pub fn interpret_expression(
+    target: &mut dyn Target,
     context: &GlobalContext,
-    next_local_id: &mut u64,
     local_context: &LocalContext,
     expression: &Expression,
 ) -> crate::Result<Value> {
@@ -688,7 +667,23 @@ pub fn interpret_expression(
         ExpressionKind::Literal(Literal::String(value)) => {
             ValueKind::Str(value.clone())
         }
-        ExpressionKind::Intrinsic(identifier) => {
+        ExpressionKind::ActionIdentifier(identifier) => {
+            if let Some(definition) = context.find_action_definition(identifier) {
+                ValueKind::Action(ActionReference {
+                    identifier: identifier.clone(),
+                    action_type: definition.value_type.clone(),
+                })
+            }
+            else {
+                return Err(Box::new(crate::Error {
+                    kind: crate::ErrorKind::UndefinedAction {
+                        identifier: identifier.as_ref().into(),
+                    },
+                    span: Some(expression.span),
+                }));
+            }
+        }
+        ExpressionKind::IntrinsicIdentifier(identifier) => {
             if let Some(intrinsic) = local_context.find_scoped_intrinsic(identifier) {
                 intrinsic.clone()
             }
@@ -705,17 +700,17 @@ pub fn interpret_expression(
             }
         }
         ExpressionKind::Grouping { expression } => {
-            interpret_expression(context, next_local_id, local_context, expression)?.kind
+            interpret_expression(target, context, local_context, expression)?.kind
         }
         ExpressionKind::Unary { operation, operand } => {
-            interpret_unary_operation(context, next_local_id, local_context, *operation, operand)?
+            interpret_unary_operation(target, context, local_context, *operation, operand)?
         }
         ExpressionKind::Binary { operation, lhs, rhs } => {
-            interpret_binary_operation(context, next_local_id, local_context, *operation, lhs, rhs, Some(expression.span))?
+            interpret_binary_operation(target, context, local_context, *operation, lhs, rhs, Some(expression.span))?
         }
         ExpressionKind::Point2 { x, y } => {
-            let x = interpret_expression(context, next_local_id, local_context, x)?;
-            let y = interpret_expression(context, next_local_id, local_context, y)?;
+            let x = interpret_expression(target, context, local_context, x)?;
+            let y = interpret_expression(target, context, local_context, y)?;
 
             let (x_list, x_type) = x.get_type().into_flatten_list();
             let (y_list, y_type) = y.get_type().into_flatten_list();
@@ -730,9 +725,9 @@ pub fn interpret_expression(
             }
         }
         ExpressionKind::Point3 { x, y, z } => {
-            let x = interpret_expression(context, next_local_id, local_context, x)?;
-            let y = interpret_expression(context, next_local_id, local_context, y)?;
-            let z = interpret_expression(context, next_local_id, local_context, z)?;
+            let x = interpret_expression(target, context, local_context, x)?;
+            let y = interpret_expression(target, context, local_context, y)?;
+            let z = interpret_expression(target, context, local_context, z)?;
 
             let (x_list, x_type) = x.get_type().into_flatten_list();
             let (y_list, y_type) = y.get_type().into_flatten_list();
@@ -752,7 +747,7 @@ pub fn interpret_expression(
         ExpressionKind::List { items } => {
             let items: Vec<_> = items
                 .iter()
-                .map(|item| interpret_expression(context, next_local_id, local_context, item))
+                .map(|item| interpret_expression(target, context, local_context, item))
                 .collect::<crate::Result<_>>()?;
 
             let item_type = items
@@ -771,10 +766,10 @@ pub fn interpret_expression(
             }
         }
         ExpressionKind::ListRange { kind, start, end, step } => {
-            let start = interpret_expression(context, next_local_id, local_context, start)?;
-            let end = interpret_expression(context, next_local_id, local_context, end)?;
+            let start = interpret_expression(target, context, local_context, start)?;
+            let end = interpret_expression(target, context, local_context, end)?;
             let step = match step {
-                Some(step) => interpret_expression(context, next_local_id, local_context, step)?,
+                Some(step) => interpret_expression(target, context, local_context, step)?,
                 None => ValueKind::Int(1).into(),
             };
 
@@ -793,8 +788,8 @@ pub fn interpret_expression(
             }
         }
         ExpressionKind::ListFill { value, count } => {
-            let value = interpret_expression(context, next_local_id, local_context, value)?;
-            let count = interpret_expression(context, next_local_id, local_context, count)?
+            let value = interpret_expression(target, context, local_context, value)?;
+            let count = interpret_expression(target, context, local_context, count)?
                 .coerce_to(&Type::Int, false)?;
 
             ValueKind::ListFill {
@@ -808,19 +803,19 @@ pub fn interpret_expression(
             let loops = loops
                 .iter()
                 .map(|map_loop| {
-                    let list = interpret_expression(context, next_local_id, local_context, &map_loop.list)?;
+                    let list = interpret_expression(target, context, local_context, &map_loop.list)?;
                     let item_type = list.get_type().require_flatten_list()
                         .map_err(|error| error.with_span(Some(expression.span)))?;
 
                     Ok(ListMapLoop {
-                        local: map_context.add_local_variable(map_loop.identifier.clone(), next_local_id, item_type),
+                        local: map_context.add_local_variable(map_loop.identifier.clone(), target.create_local_id(), item_type),
                         local_span: Some(map_loop.identifier_span),
                         list,
                     })
                 })
                 .collect::<crate::Result<_>>()?;
 
-            let value = interpret_expression(context, next_local_id, &map_context, map_expression)?;
+            let value = interpret_expression(target, context, &map_context, map_expression)?;
 
             ValueKind::ListMap {
                 loops,
@@ -828,11 +823,11 @@ pub fn interpret_expression(
             }
         }
         ExpressionKind::ListFilter { list, condition } => {
-            let list = interpret_expression(context, next_local_id, local_context, list)?;
+            let list = interpret_expression(target, context, local_context, list)?;
             let item_type = list.get_type().require_flatten_list()
                 .map_err(|error| error.with_span(Some(expression.span)))?;
 
-            let condition = interpret_expression(context, next_local_id, local_context, condition)?
+            let condition = interpret_expression(target, context, local_context, condition)?
                 .coerce_to(&Type::Bool, true)?;
 
             ValueKind::ListFilter {
@@ -842,11 +837,11 @@ pub fn interpret_expression(
             }
         }
         ExpressionKind::Index { list, operation } => {
-            let list = interpret_expression(context, next_local_id, local_context, list)?;
+            let list = interpret_expression(target, context, local_context, list)?;
             let item_type = list.get_type().require_flatten_list()
                 .map_err(|error| error.with_span(Some(expression.span)))?;
 
-            let operation = interpret_index_operation(context, next_local_id, local_context, operation)?;
+            let operation = interpret_index_operation(target, context, local_context, operation)?;
 
             ValueKind::Index {
                 list: Box::new(list),
@@ -855,15 +850,15 @@ pub fn interpret_expression(
             }
         }
         ExpressionKind::FunctionCall { function, arguments } => {
-            let function = interpret_expression(context, next_local_id, local_context, function)?;
+            let function = interpret_expression(target, context, local_context, function)?;
             let arguments: Box<[_]> = arguments
                 .iter()
-                .map(|argument| interpret_expression(context, next_local_id, local_context, argument))
+                .map(|argument| interpret_expression(target, context, local_context, argument))
                 .collect::<crate::Result<_>>()?;
 
             match function.get_type() {
                 Type::IntrinsicFunction(intrinsic_function) => {
-                    intrinsic_function.interpret_call(context, local_context, function.span, arguments)?
+                    intrinsic_function.interpret_call(target, context, local_context, function.span, arguments)?
                 }
                 Type::UserFunction { signature } => {
                     if arguments.len() != signature.parameter_types.len() {
@@ -915,13 +910,13 @@ pub fn interpret_expression(
             let condition_consequents: Box<[_]> = condition_consequents
                 .iter()
                 .map(|(condition, consequent)| {
-                    let condition = interpret_expression(context, next_local_id, local_context, condition)?
+                    let condition = interpret_expression(target, context, local_context, condition)?
                         .coerce_to(&Type::Bool, true)?;
                     // A list condition should cause the whole expression to broadcast
                     let (result_list, inner_type) = result_type.flatten_list();
                     result_type = inner_type.clone().unflatten_list(ListState::merge(result_list, condition.get_type().list_state()));
 
-                    let consequent = interpret_expression(context, next_local_id, local_context, consequent)?;
+                    let consequent = interpret_expression(target, context, local_context, consequent)?;
                     result_type = result_type.merge(&consequent.get_type())
                         .map_err(|error| error.with_span(consequent.span))?;
 
@@ -932,7 +927,7 @@ pub fn interpret_expression(
             let alternative = alternative
                 .as_ref()
                 .map_or(Ok(ValueKind::Undefined(result_type.clone()).into()), |alternative| {
-                    let alternative = interpret_expression(context, next_local_id, local_context, alternative)?;
+                    let alternative = interpret_expression(target, context, local_context, alternative)?;
                     result_type = result_type.merge(&alternative.get_type())
                         .map_err(|error| error.with_span(alternative.span))?;
 
@@ -954,7 +949,7 @@ pub fn interpret_expression(
             }
         }
         ExpressionKind::Let { identifier, value_type, value, inner, .. } => {
-            let mut value = interpret_expression(context, next_local_id, local_context, value)?;
+            let mut value = interpret_expression(target, context, local_context, value)?;
 
             if let Some(value_type) = value_type {
                 let value_type = context.resolve_type(value_type, true)?;
@@ -964,7 +959,7 @@ pub fn interpret_expression(
             let mut inner_context = local_context.new_inner();
             inner_context.add_local(identifier.clone(), value.kind);
 
-            interpret_expression(context, next_local_id, &inner_context, inner)?.kind
+            interpret_expression(target, context, &inner_context, inner)?.kind
         }
         _ => {
             return Err(Box::new(crate::Error {
@@ -981,8 +976,8 @@ pub fn interpret_expression(
 }
 
 pub fn interpret_unary_operation(
+    target: &mut dyn Target,
     context: &GlobalContext,
-    next_local_id: &mut u64,
     local_context: &LocalContext,
     operation: UnaryOperation,
     operand: &Expression,
@@ -993,7 +988,7 @@ pub fn interpret_unary_operation(
         UnaryOperation::LogicalNot => UnaryKind::LogicalNot,
     };
 
-    let mut operand = interpret_expression(context, next_local_id, local_context, operand)?;
+    let mut operand = interpret_expression(target, context, local_context, operand)?;
     let (operand_list, mut operand_type) = operand.get_type().into_flatten_list();
 
     let result_type = match kind {
@@ -1018,8 +1013,8 @@ pub fn interpret_unary_operation(
 }
 
 pub fn interpret_binary_operation(
+    target: &mut dyn Target,
     context: &GlobalContext,
-    next_local_id: &mut u64,
     local_context: &LocalContext,
     operation: BinaryOperation,
     lhs: &Expression,
@@ -1029,7 +1024,7 @@ pub fn interpret_binary_operation(
     let kind = match operation {
         BinaryOperation::MemberAccess => {
             // Handle this operation separately since its right hand side is not a value
-            return interpret_access_operation(context, next_local_id, local_context, lhs, rhs)
+            return interpret_access_operation(target, context, local_context, lhs, rhs)
         }
         BinaryOperation::Exponent => BinaryKind::Exponent,
         BinaryOperation::Multiply => BinaryKind::Multiply,
@@ -1047,8 +1042,8 @@ pub fn interpret_binary_operation(
         BinaryOperation::LogicalOr => BinaryKind::LogicalOr,
     };
 
-    let mut lhs = interpret_expression(context, next_local_id, local_context, lhs)?;
-    let mut rhs = interpret_expression(context, next_local_id, local_context, rhs)?;
+    let mut lhs = interpret_expression(target, context, local_context, lhs)?;
+    let mut rhs = interpret_expression(target, context, local_context, rhs)?;
     let (lhs_list, mut lhs_type) = lhs.get_type().into_flatten_list();
     let (rhs_list, mut rhs_type) = rhs.get_type().into_flatten_list();
 
@@ -1171,13 +1166,13 @@ pub fn interpret_binary_operation(
 }
 
 fn interpret_access_operation(
+    target: &mut dyn Target,
     context: &GlobalContext,
-    next_local_id: &mut u64,
     local_context: &LocalContext,
     lhs: &Expression,
     rhs: &Expression,
 ) -> crate::Result<ValueKind> {
-    let lhs = interpret_expression(context, next_local_id, local_context, lhs)?;
+    let lhs = interpret_expression(target, context, local_context, lhs)?;
     let (lhs_list, lhs_type) = lhs.get_type().into_flatten_list();
 
     let ExpressionKind::Literal(Literal::Identifier(member_identifier)) = &rhs.kind else {
@@ -1265,14 +1260,14 @@ fn interpret_access_operation(
 }
 
 pub fn interpret_index_operation(
+    target: &mut dyn Target,
     context: &GlobalContext,
-    next_local_id: &mut u64,
     local_context: &LocalContext,
     operation: &ExpressionIndexOperation,
 ) -> crate::Result<IndexKind> {
     match operation {
         ExpressionIndexOperation::Single { index } => {
-            let index = interpret_expression(context, next_local_id, local_context, index)?
+            let index = interpret_expression(target, context, local_context, index)?
                 .coerce_to(&Type::Int, true)?;
 
             Ok(IndexKind::Single {
@@ -1280,12 +1275,12 @@ pub fn interpret_index_operation(
             })
         }
         ExpressionIndexOperation::Range { kind, from_index, to_index, step } => {
-            let from_index = interpret_expression(context, next_local_id, local_context, from_index)?
+            let from_index = interpret_expression(target, context, local_context, from_index)?
                 .coerce_to(&Type::Int, false)?;
-            let to_index = interpret_expression(context, next_local_id, local_context, to_index)?
+            let to_index = interpret_expression(target, context, local_context, to_index)?
                 .coerce_to(&Type::Int, false)?;
             let step = match step {
-                Some(step) => interpret_expression(context, next_local_id, local_context, step)?
+                Some(step) => interpret_expression(target, context, local_context, step)?
                     .coerce_to(&Type::Int, false)?,
                 None => ValueKind::Int(1).into(),
             };
@@ -1298,10 +1293,10 @@ pub fn interpret_index_operation(
             })
         }
         ExpressionIndexOperation::RangeFrom { from_index, step } => {
-            let from_index = interpret_expression(context, next_local_id, local_context, from_index)?
+            let from_index = interpret_expression(target, context, local_context, from_index)?
                 .coerce_to(&Type::Int, false)?;
             let step = match step {
-                Some(step) => interpret_expression(context, next_local_id, local_context, step)?
+                Some(step) => interpret_expression(target, context, local_context, step)?
                     .coerce_to(&Type::Int, false)?,
                 None => ValueKind::Int(1).into(),
             };
@@ -1312,7 +1307,7 @@ pub fn interpret_index_operation(
             })
         }
         ExpressionIndexOperation::RangeTo { kind, to_index } => {
-            let to_index = interpret_expression(context, next_local_id, local_context, to_index)?
+            let to_index = interpret_expression(target, context, local_context, to_index)?
                 .coerce_to(&Type::Int, false)?;
 
             Ok(IndexKind::RangeTo {

@@ -270,11 +270,13 @@ pub enum ErrorKind {
         got: usize,
     },
     ExpectedConstant {
-        type_name: String,
+        type_identifier: String,
     },
     ExpectedConstantStrFromList {
         allowed: Vec<Box<str>>,
     },
+    ExpectedAction,
+    ExpectedGlobalOrActionReference,
 }
 
 impl std::fmt::Display for ErrorKind {
@@ -494,8 +496,8 @@ impl std::fmt::Display for ErrorKind {
                     write!(f, "display attribute '{key}' expects between {min} and {max} arguments but received {got}")
                 }
             }
-            Self::ExpectedConstant { type_name } => {
-                write!(f, "expected a constant value of type '{type_name}'")
+            Self::ExpectedConstant { type_identifier } => {
+                write!(f, "expected a constant value of type '{type_identifier}'")
             }
             Self::ExpectedConstantStrFromList { allowed } => {
                 write!(f, "expected a constant string from {:?}", &allowed[0])?;
@@ -503,6 +505,12 @@ impl std::fmt::Display for ErrorKind {
                     write!(f, ", {string:?}")?;
                 }
                 Ok(())
+            }
+            Self::ExpectedAction => {
+                write!(f, "expected an action")
+            }
+            Self::ExpectedGlobalOrActionReference => {
+                write!(f, "expected a global or action referenced by identifier")
             }
         }
     }
@@ -534,6 +542,7 @@ impl Error {
         self
     }
 
+    // TODO: convert this into a separate struct with a Display impl
     pub fn to_string_with_context(&self, paths: &[PathBuf]) -> String {
         if let Some(span) = self.span {
             let path = &paths[span.source_id];

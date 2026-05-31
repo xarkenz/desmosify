@@ -5,6 +5,7 @@ use crate::ast::{Declaration, Definition, DefinitionKind, DisplayDeclaration, Pu
 use crate::sema::intrinsic::get_core_intrinsics;
 use crate::sema::types::{Type, FunctionSignature, ListState};
 use crate::sema::values::{LocalReference, ValueKind};
+use crate::target::Target;
 
 #[derive(Clone, Debug)]
 pub struct TypedDefinition {
@@ -25,13 +26,13 @@ pub struct GlobalContext {
 }
 
 impl GlobalContext {
-    pub fn from_declarations(mut declarations: Vec<Declaration>) -> crate::Result<Self> {
+    pub fn from_declarations(mut declarations: Vec<Declaration>, target: &dyn Target) -> crate::Result<Self> {
         let mut context = Self {
             definitions: HashMap::new(),
             definitions_order: Vec::new(),
             action_definitions: HashMap::new(),
             action_definitions_order: Vec::new(),
-            intrinsics: get_core_intrinsics().collect(),
+            intrinsics: get_core_intrinsics(target).collect(),
             ticker_declarations: Vec::new(),
             public_declarations: Vec::new(),
             display_declarations: Vec::new(),
@@ -354,14 +355,12 @@ impl<'a> LocalContext<'a> {
         self.locals.insert(identifier, value);
     }
 
-    pub fn add_local_variable(&mut self, identifier: Rc<str>, next_local_id: &mut u64, value_type: Type) -> LocalReference {
+    pub fn add_local_variable(&mut self, identifier: Rc<str>, id: u64, value_type: Type) -> LocalReference {
         let local_reference = LocalReference {
-            id: *next_local_id,
+            id,
             value_type,
         };
         self.add_local(identifier, ValueKind::Local(local_reference.clone()));
-        *next_local_id += 1;
-
         local_reference
     }
 

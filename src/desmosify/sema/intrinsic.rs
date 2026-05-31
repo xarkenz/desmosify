@@ -4,6 +4,23 @@ use crate::sema::context::{GlobalContext, LocalContext};
 use crate::sema::display::ImageValue;
 use crate::sema::types::{ListState, Type};
 use crate::sema::values::{BinaryKind, ColorKind, MathematicalConstant, ReducerKind, UnaryKind, Value, ValueKind};
+use crate::target::Target;
+
+pub fn get_core_intrinsics(target: &dyn Target) -> impl Iterator<Item = (&'static str, ValueKind)> {
+    CORE_INTRINSIC_FUNCTIONS
+        .iter()
+        .map(|&function| {
+            (function.identifier, ValueKind::IntrinsicFunction(function))
+        })
+        .chain([
+            ("PI", ValueKind::Mathematical(MathematicalConstant::Pi)),
+            ("TAU", ValueKind::Mathematical(MathematicalConstant::Tau)),
+            ("E", ValueKind::Mathematical(MathematicalConstant::E)),
+            ("width_pixels", ValueKind::ViewportWidth),
+            ("height_pixels", ValueKind::ViewportHeight),
+            ("target", ValueKind::Str(target.name().into())),
+        ])
+}
 
 #[derive(Clone)]
 pub struct IntrinsicFunction {
@@ -11,6 +28,7 @@ pub struct IntrinsicFunction {
     pub min_arity: usize,
     pub max_arity: Option<usize>,
     pub interpret_call: fn(
+        target: &mut dyn Target,
         context: &GlobalContext,
         local_context: &LocalContext,
         arguments: Box<[Value]>,
@@ -20,6 +38,7 @@ pub struct IntrinsicFunction {
 impl IntrinsicFunction {
     pub fn interpret_call(
         &self,
+        target: &mut dyn Target,
         context: &GlobalContext,
         local_context: &LocalContext,
         span: Option<crate::Span>,
@@ -27,7 +46,7 @@ impl IntrinsicFunction {
     ) -> crate::Result<ValueKind> {
         self.check_arity(arguments.len(), span)?;
 
-        (self.interpret_call)(context, local_context, arguments)
+        (self.interpret_call)(target, context, local_context, arguments)
     }
 
     pub fn check_arity(&self, argument_count: usize, span: Option<crate::Span>) -> crate::Result<()> {
@@ -73,22 +92,6 @@ impl std::fmt::Debug for IntrinsicFunction {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "IntrinsicFunction(@{})", self.identifier)
     }
-}
-
-// TODO: per target
-pub fn get_core_intrinsics() -> impl Iterator<Item = (&'static str, ValueKind)> {
-    CORE_INTRINSIC_FUNCTIONS
-        .iter()
-        .map(|&function| {
-            (function.identifier, ValueKind::IntrinsicFunction(function))
-        })
-        .chain([
-            ("PI", ValueKind::Mathematical(MathematicalConstant::Pi)),
-            ("TAU", ValueKind::Mathematical(MathematicalConstant::Tau)),
-            ("E", ValueKind::Mathematical(MathematicalConstant::E)),
-            ("width_pixels", ValueKind::ViewportWidth),
-            ("height_pixels", ValueKind::ViewportHeight),
-        ])
 }
 
 pub const CORE_INTRINSIC_FUNCTIONS: &[&IntrinsicFunction] = &[
@@ -232,6 +235,8 @@ pub const CORE_INTRINSIC_FUNCTIONS: &[&IntrinsicFunction] = &[
     &INCLUDE_TEXT,
     &INCLUDE_DATA,
     &IMAGE,
+    &CONCAT,
+    &TARGET_SYMBOL,
 ];
 
 pub fn interpret_trig_call(
@@ -255,7 +260,7 @@ macro_rules! trig_intrinsic {
             identifier: $id,
             min_arity: 1,
             max_arity: Some(1),
-            interpret_call: |_, _, arguments| {
+            interpret_call: |_, _, _, arguments| {
                 interpret_trig_call(UnaryKind::$kind, arguments)
             },
         }
@@ -314,7 +319,7 @@ macro_rules! reducer_intrinsic {
             identifier: $id,
             min_arity: 1,
             max_arity: None,
-            interpret_call: |_, _, arguments| {
+            interpret_call: |_, _, _, arguments| {
                 interpret_reducer_call(ReducerKind::$kind, $chk, $res, arguments)
             },
         }
@@ -355,7 +360,7 @@ macro_rules! color_intrinsic {
             identifier: $id,
             min_arity: 3,
             max_arity: Some(3),
-            interpret_call: |_, _, arguments| {
+            interpret_call: |_, _, _, arguments| {
                 interpret_color_call(ColorKind::$kind, arguments)
             },
         }
@@ -367,7 +372,7 @@ pub fn read_file_bytes(local_context: &LocalContext, path_value: &Value) -> crat
         .as_const_str()
         .ok_or_else(|| Box::new(crate::Error {
             kind: crate::ErrorKind::ExpectedConstant {
-                type_name: Type::Str.to_string(),
+                type_identifier: Type::Str.to_string(),
             },
             span: path_value.span,
         }))?;
@@ -443,7 +448,7 @@ pub static JOIN: IntrinsicFunction = IntrinsicFunction {
     identifier: "join",
     min_arity: 2,
     max_arity: None,
-    interpret_call: |_, _, arguments| {
+    interpret_call: |_, _, _, arguments| {
         let item_type = arguments[1..].iter().try_fold(
             arguments[0].get_type().into_flatten_list().1,
             |current_type, argument| {
@@ -462,7 +467,7 @@ pub static SORT: IntrinsicFunction = IntrinsicFunction {
     identifier: "sort",
     min_arity: 1,
     max_arity: Some(2),
-    interpret_call: |_, _, arguments| {
+    interpret_call: |_, _, _, arguments| {
         let mut arguments = arguments.into_iter();
 
         let mut list = arguments.next().unwrap();
@@ -494,7 +499,7 @@ pub static SHUFFLE: IntrinsicFunction = IntrinsicFunction {
     identifier: "shuffle",
     min_arity: 1,
     max_arity: Some(2),
-    interpret_call: |_, _, arguments| {
+    interpret_call: |_, _, _, arguments| {
         let mut arguments = arguments.into_iter();
 
         let list = arguments.next().unwrap();
@@ -516,7 +521,7 @@ pub static UNIQUE: IntrinsicFunction = IntrinsicFunction {
     identifier: "unique",
     min_arity: 1,
     max_arity: Some(1),
-    interpret_call: |_, _, arguments| {
+    interpret_call: |_, _, _, arguments| {
         // It seems like unique() accepts basically any type, so don't bother checking the item type
         // TODO: check if any types can go in a list but cannot be uniqued
         let list = arguments.into_iter().next().unwrap();
@@ -574,7 +579,7 @@ pub static SEGMENT: IntrinsicFunction = IntrinsicFunction {
     identifier: "segment",
     min_arity: 2,
     max_arity: Some(2),
-    interpret_call: |_, _, arguments| {
+    interpret_call: |_, _, _, arguments| {
         // TODO: check types
         let mut arguments = arguments.into_iter();
         let point_1 = arguments.next().unwrap();
@@ -636,7 +641,7 @@ pub static ROTATE: IntrinsicFunction = IntrinsicFunction {
     identifier: "rotate",
     min_arity: 3,
     max_arity: Some(3),
-    interpret_call: |_, _, arguments| {
+    interpret_call: |_, _, _, arguments| {
         // TODO: check types better
         let mut arguments = arguments.into_iter();
         let object = arguments.next().unwrap();
@@ -707,7 +712,7 @@ pub static ENUM_VALUES: IntrinsicFunction = IntrinsicFunction {
     identifier: "enum_values",
     min_arity: 1,
     max_arity: Some(1),
-    interpret_call: |context, _, arguments| {
+    interpret_call: |_, context, _, arguments| {
         let enum_type = arguments.into_iter().next().unwrap();
         let Type::Meta { identifier } = enum_type.get_type() else {
             return Err(Box::new(crate::Error {
@@ -745,7 +750,7 @@ pub static ENUM_VALUE: IntrinsicFunction = IntrinsicFunction {
     identifier: "enum_value",
     min_arity: 2,
     max_arity: Some(2),
-    interpret_call: |context, _, arguments| {
+    interpret_call: |_, context, _, arguments| {
         let mut arguments = arguments.into_iter();
 
         let enum_type = arguments.next().unwrap();
@@ -783,7 +788,7 @@ pub static INCLUDE_TEXT: IntrinsicFunction = IntrinsicFunction {
     identifier: "include_text",
     min_arity: 1,
     max_arity: Some(1),
-    interpret_call: |_, local_context, arguments| {
+    interpret_call: |_, _, local_context, arguments| {
         // TODO: allow user to specify encoding; better error handling
         let path_value = arguments.into_iter().next().unwrap();
         let (path, bytes) = read_file_bytes(local_context, &path_value)?;
@@ -804,19 +809,12 @@ pub static INCLUDE_DATA: IntrinsicFunction = IntrinsicFunction {
     identifier: "include_data",
     min_arity: 1,
     max_arity: Some(2),
-    interpret_call: |_, local_context, arguments| {
+    interpret_call: |_, _, local_context, arguments| {
         let mut arguments = arguments.into_iter();
 
         let path_value = arguments.next().unwrap();
         let media_type = arguments.next()
-            .map(|media_type_value| media_type_value.kind
-                .as_const_str()
-                .ok_or_else(|| Box::new(crate::Error {
-                    kind: crate::ErrorKind::ExpectedConstant {
-                        type_name: Type::Str.to_string(),
-                    },
-                    span: media_type_value.span,
-                })))
+            .map(|media_type_value| media_type_value.get_const_str())
             .transpose()?;
 
         let (path, bytes) = read_file_bytes(local_context, &path_value)?;
@@ -842,27 +840,13 @@ pub static IMAGE: IntrinsicFunction = IntrinsicFunction {
     identifier: "image",
     min_arity: 5,
     max_arity: Some(8),
-    interpret_call: |_, _, arguments| {
+    interpret_call: |_, _, _, arguments| {
         let mut arguments = arguments.into_iter();
 
         let url_value = arguments.next().unwrap();
-        let url = url_value.kind
-            .as_const_str()
-            .ok_or_else(|| Box::new(crate::Error {
-                kind: crate::ErrorKind::ExpectedConstant {
-                    type_name: Type::Str.to_string(),
-                },
-                span: url_value.span,
-            }))?;
+        let url = url_value.get_const_str()?;
         let name_value = arguments.next().unwrap();
-        let name = name_value.kind
-            .as_const_str()
-            .ok_or_else(|| Box::new(crate::Error {
-                kind: crate::ErrorKind::ExpectedConstant {
-                    type_name: Type::Str.to_string(),
-                },
-                span: name_value.span,
-            }))?;
+        let name = name_value.get_const_str()?;
         let center = arguments.next().unwrap()
             .coerce_to(&Type::Point2 {
                 x_type: Box::new(Type::Real),
@@ -884,7 +868,7 @@ pub static IMAGE: IntrinsicFunction = IntrinsicFunction {
                     .as_const_bool()
                     .ok_or_else(|| Box::new(crate::Error {
                         kind: crate::ErrorKind::ExpectedConstant {
-                            type_name: Type::Bool.to_string(),
+                            type_identifier: Type::Bool.to_string(),
                         },
                         span: background_value.span,
                     }))
@@ -909,5 +893,42 @@ pub static IMAGE: IntrinsicFunction = IntrinsicFunction {
             }),
             list_state,
         ))
+    },
+};
+pub static CONCAT: IntrinsicFunction = IntrinsicFunction {
+    identifier: "concat",
+    min_arity: 0,
+    max_arity: None,
+    interpret_call: |_, _, _, arguments| {
+        let mut result = String::new();
+
+        for argument in arguments {
+            result.push_str(argument.get_const_str()?.as_ref());
+        }
+
+        Ok(ValueKind::Str(result.into()))
+    },
+};
+pub static TARGET_SYMBOL: IntrinsicFunction = IntrinsicFunction {
+    identifier: "target_symbol",
+    min_arity: 1,
+    max_arity: Some(1),
+    interpret_call: |target, _, _, arguments| {
+        let argument = arguments.into_iter().next().unwrap();
+
+        let symbol_name = match &argument.kind {
+            ValueKind::Global(reference) => {
+                target.get_global_symbol_name(&reference.identifier)
+            }
+            ValueKind::Action(reference) => {
+                target.get_action_symbol_name(&reference.identifier)
+            }
+            _ => return Err(Box::new(crate::Error {
+                kind: crate::ErrorKind::ExpectedGlobalOrActionReference,
+                span: argument.span,
+            }))
+        };
+
+        Ok(ValueKind::Str(symbol_name.into()))
     },
 };

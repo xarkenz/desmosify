@@ -528,12 +528,25 @@ display {
     piece_labels(Piece.BLUE_GENERAL): color(blue_label_color), label("`2`", label_opacity, label_size);
     piece_labels(Piece.BLUE_MARSHAL): color(blue_label_color), label("`1`", label_opacity, label_size);
 
-    {mode == Mode.SETUP && player == Player.RED: (0, 0)}: color(red_color), label("Red's Turn - Initial Setup", next_turn_message_opacity, 2.5);
-    {mode == Mode.SETUP && player == Player.BLUE: (0, 0)}: color(blue_color), label("Blue's Turn - Initial Setup", next_turn_message_opacity, 2.5);
-    {mode == Mode.PLAY && player == Player.RED: (0, 0)}: color(red_color), label("Red's Turn", next_turn_message_opacity, 2.5);
-    {mode == Mode.PLAY && player == Player.BLUE: (0, 0)}: color(blue_color), label("Blue's Turn", next_turn_message_opacity, 2.5);
-    // TODO: template strings
-    {mode == Mode.SETUP: (0, 0)}: color(text_color), label("Run `A_{EndTurn}` when finished.", turn_info_message_opacity, 2);
-    {mode == Mode.PLAY: (0, 0)}: color(text_color), label("Run `A_{StartTurn}` to start your turn.", before_turn_message_opacity, 2);
-    {mode == Mode.PLAY: (0, 0)}: color(text_color), label("Run `A_{EndTurn}` to end your turn.", turn_info_message_opacity, 2);
+    {mode == Mode.SETUP && player == Player.RED: (0, 0)}:
+        color(red_color),
+        label("Red's Turn - Initial Setup", next_turn_message_opacity, 2.5);
+    {mode == Mode.SETUP && player == Player.BLUE: (0, 0)}:
+        color(blue_color),
+        label("Blue's Turn - Initial Setup", next_turn_message_opacity, 2.5);
+    {mode == Mode.PLAY && player == Player.RED: (0, 0)}:
+        color(red_color),
+        label("Red's Turn", next_turn_message_opacity, 2.5);
+    {mode == Mode.PLAY && player == Player.BLUE: (0, 0)}:
+        color(blue_color),
+        label("Blue's Turn", next_turn_message_opacity, 2.5);
+    {mode == Mode.SETUP: (0, 0)}:
+        color(text_color),
+        label(@concat("Run `", @target_symbol(action end_turn), "` when finished."), turn_info_message_opacity, 2);
+    {mode == Mode.PLAY: (0, 0)}:
+        color(text_color),
+        label(@concat("Run `", @target_symbol(action start_turn), "` to start your turn."), before_turn_message_opacity, 2);
+    {mode == Mode.PLAY: (0, 0)}:
+        color(text_color),
+        label(@concat("Run `", @target_symbol(action end_turn), "` to end your turn."), turn_info_message_opacity, 2);
 }
