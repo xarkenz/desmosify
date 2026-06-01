@@ -96,11 +96,11 @@ let is_solving_move(move_index: int, move_state: TileState): bool = @min([
 // Utilities
 
 // TODO: generics would be nice here
-let set_item(list: [?], index: int, value: ?): [?] = {
+let set_item(list: [any], index: int, value: any): [any] = {
     [1 ..= @count(list)] == index: value,
     list
 };
-let insert_item(list: [?], index: int, value: ?): [?] = @join(
+let insert_item(list: [any], index: int, value: any): [any] = @join(
     list[..< index],
     value,
     list[index ..],

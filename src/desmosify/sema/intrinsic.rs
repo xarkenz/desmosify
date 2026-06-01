@@ -13,9 +13,9 @@ pub fn get_core_intrinsics(target: &dyn Target) -> impl Iterator<Item = (&'stati
             (function.identifier, ValueKind::IntrinsicFunction(function))
         })
         .chain([
-            ("PI", ValueKind::Mathematical(MathematicalConstant::Pi)),
-            ("TAU", ValueKind::Mathematical(MathematicalConstant::Tau)),
-            ("E", ValueKind::Mathematical(MathematicalConstant::E)),
+            ("pi", ValueKind::Mathematical(MathematicalConstant::Pi)),
+            ("tau", ValueKind::Mathematical(MathematicalConstant::Tau)),
+            ("e", ValueKind::Mathematical(MathematicalConstant::E)),
             ("width_pixels", ValueKind::ViewportWidth),
             ("height_pixels", ValueKind::ViewportHeight),
             ("target", ValueKind::Str(target.name().into())),
@@ -484,6 +484,7 @@ pub static SORT: IntrinsicFunction = IntrinsicFunction {
             })
             .transpose()?;
 
+        // FIXME: the types here are busted
         if key_list.is_none() {
             // The values in the original list are used as keys
             list = list.coerce_to(&Type::Real, true)?;

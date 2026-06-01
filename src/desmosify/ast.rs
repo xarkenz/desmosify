@@ -5,7 +5,6 @@ pub mod parse;
 
 #[derive(Clone, Debug)]
 pub enum TypeExpressionKind {
-    Any,
     Identifier(Rc<str>),
     Grouping {
         expression: Box<TypeExpression>,
@@ -30,9 +29,6 @@ pub enum TypeExpressionKind {
 impl std::fmt::Display for TypeExpressionKind {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            Self::Any => {
-                write!(f, "?")
-            }
             Self::Identifier(identifier) => {
                 write!(f, "{identifier}")
             }

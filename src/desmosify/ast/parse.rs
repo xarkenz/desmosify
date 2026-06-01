@@ -108,9 +108,6 @@ impl<'a, T: BufRead> Parser<'a, T> {
         let start_span = start_token.span;
 
         let mut expression_kind = match &start_token.kind {
-            TokenKind::Question => {
-                TypeExpressionKind::Any
-            }
             TokenKind::Literal(Literal::Identifier(identifier)) => {
                 TypeExpressionKind::Identifier(identifier.clone())
             }

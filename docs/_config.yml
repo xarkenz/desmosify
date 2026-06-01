@@ -1,0 +1,23 @@
+title: Desmosify
+description: The official documentation for the Desmosify language
+
+theme: just-the-docs
+
+aux_links_new_tab: true
+aux_links:
+    GitHub Repository: https://github.com/xarkenz/desmosify
+
+callouts:
+    note:
+        title: Note
+        color: blue
+    compatibility-note:
+        title: Compatibility Note
+        color: yellow
+    warning:
+        title: Warning
+        color: red
+
+url: https://xarkenz.github.io/desmosify
+desmos_url: https://www.desmos.com
+toc_header: Table of Contents

@@ -126,12 +126,12 @@ let possible_moves: [int] = {
     []
 };
 
-let indices(l: [?]): [int] = {
+let indices(l: [any]): [int] = {
     @count(l) > 0: [1 ..= @count(l)],
     []
 };
 
-let poke(l: [?], i: int, x: ?): [?] = {
+let poke(l: [any], i: int, x: any): [any] = {
     indices(l) == i: x,
     l
 };
@@ -243,7 +243,7 @@ let ease_out(t: real): real = {
     1
 };
 
-let board_angle: real = @PI * ((player + 1) - ease_out(turn_seconds));
+let board_angle: real = @pi * ((player + 1) - ease_out(turn_seconds));
 
 let label_opacity: [real] = @join(
     {

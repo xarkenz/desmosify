@@ -1,0 +1,14 @@
+public {
+    "Current fibonacci number";
+    num_b;
+    "Get next number";
+    action next();
+}
+
+var num_a: int = 0;
+var num_b: int = 1;
+
+action next() {
+    num_a := num_b,
+    num_b := num_a + num_b,
+}

@@ -225,9 +225,6 @@ impl GlobalContext {
         };
 
         match &type_expression.kind {
-            TypeExpressionKind::Any => {
-                Ok(Type::Any)
-            }
             TypeExpressionKind::Identifier(identifier) => {
                 if let Some(primitive) = Type::find_primitive(identifier) {
                     Ok(primitive)

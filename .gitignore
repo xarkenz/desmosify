@@ -4,5 +4,6 @@
 /.idea
 /.vscode
 
+/docs/_site/
 /tests/**/out/
 /utils/fetched_*
