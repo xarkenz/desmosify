@@ -73,3 +73,10 @@ the purposes of Desmosify, but it might come in handy.
 ```
 javascript:(()%3D%3E%7Bif(!Calc)return%20alert(%22This%20action%20is%20only%20allowed%20on%20a%20Desmos%20page.%22)%3Bwindow.open(%22data%3Aapplication%2Fjson%3Bcharset%3Dutf-8%2C%22%2BencodeURIComponent(JSON.stringify(Calc.getState()))%2C%22_blank%22)%7D)()%3B
 ```
+
+<script>
+document.querySelectorAll('div.highlighter-rouge, div.listingblock > div.content, figure.highlight').forEach(block => {
+    let code = block.querySelector('pre:not(.lineno, .highlight), code');
+    code.innerText = code.innerText.trimEnd();
+});
+</script>
