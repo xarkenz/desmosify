@@ -240,7 +240,7 @@ comparable with `==`, such as points and colors.
 ```
 
 {: .compatibility-note }
-This intrinsic is only available on `--target desmos-geometry`.
+This intrinsic is *only* available on `--target desmos-geometry`.
 
 Construct a line segment from `point_1` to `point_2`.
 
@@ -251,6 +251,9 @@ Construct a line segment from `point_1` to `point_2`.
 @polygon(..points: (real, real)+): polygon+
 @polygon(points: [(real, real)]): polygon
 ```
+
+{: .compatibility-note }
+This intrinsic is *not* available on `--target desmos-graphing3d`.
 
 Construct a closed polygon using `points`.
 
@@ -267,7 +270,7 @@ Construct a closed polygon using `points`.
 ```
 
 {: .compatibility-note }
-This intrinsic is only supported on `--target desmos-geometry`.
+This intrinsic is *only* available on `--target desmos-geometry`.
 
 Rotate `object` about `point` by `angle` radians.
 
@@ -337,7 +340,7 @@ Rotate `object` about `point` by `angle` radians.
 ```
 
 {: .compatibility-note }
-This intrinsic is unsupported on `--target desmos-graphing3d`.
+This intrinsic is *not* available on `--target desmos-graphing3d`.
 
 The horizontal width of the current viewport, in logical pixels.
 
@@ -349,7 +352,7 @@ The horizontal width of the current viewport, in logical pixels.
 ```
 
 {: .compatibility-note }
-This intrinsic is unsupported on `--target desmos-graphing3d`.
+This intrinsic is *not* available on `--target desmos-graphing3d`.
 
 The vertical height of the current viewport, in logical pixels.
 
