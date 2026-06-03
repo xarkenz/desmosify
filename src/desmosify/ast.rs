@@ -1,5 +1,5 @@
 use std::rc::Rc;
-use crate::token::{Literal, TokenKind};
+use crate::token::TokenKind;
 
 pub mod parse;
 
@@ -321,7 +321,14 @@ pub struct ExpressionListMapLoop {
 
 #[derive(Clone, Debug)]
 pub enum ExpressionKind {
-    Literal(Literal),
+    Undefined,
+    Infinity,
+    Integer(i128),
+    Real(f64),
+    Boolean(bool),
+    Character(char),
+    String(Rc<str>),
+    Identifier(Rc<str>),
     ActionIdentifier(Rc<str>),
     IntrinsicIdentifier(Rc<str>),
     Grouping {
@@ -390,8 +397,29 @@ pub enum ExpressionKind {
 impl std::fmt::Display for ExpressionKind {
     fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
         match self {
-            Self::Literal(literal) => {
-                write!(f, "{literal}")
+            Self::Undefined => {
+                write!(f, "undefined")
+            }
+            Self::Infinity => {
+                write!(f, "infinity")
+            }
+            Self::Integer(value) => {
+                write!(f, "{value}")
+            }
+            Self::Real(value) => {
+                write!(f, "{value}")
+            }
+            Self::Boolean(value) => {
+                write!(f, "{value}")
+            }
+            Self::Character(value) => {
+                write!(f, "{value:?}")
+            }
+            Self::String(value) => {
+                write!(f, "{value:?}")
+            }
+            Self::Identifier(identifier) => {
+                write!(f, "{identifier}")
             }
             Self::ActionIdentifier(identifier) => {
                 write!(f, "action {identifier}")

@@ -2,42 +2,6 @@ use std::rc::Rc;
 
 pub mod scan;
 
-// TODO: get rid of this and collapse it into TokenKind and ExpressionKind
-#[derive(Clone, PartialEq, Debug)]
-pub enum Literal {
-    Identifier(Rc<str>),
-    Integer(i128),
-    Real(f64),
-    Boolean(bool),
-    Character(char),
-    String(Rc<str>),
-}
-
-impl Literal {
-    pub fn from_word(content: &str) -> Self {
-        match content {
-            "true" => Self::Boolean(true),
-            "false" => Self::Boolean(false),
-            "infinity" => Self::Real(f64::INFINITY),
-            "undefined" => Self::Real(f64::NAN),
-            _ => Self::Identifier(content.into()),
-        }
-    }
-}
-
-impl std::fmt::Display for Literal {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Self::Identifier(name) => write!(f, "{name}"),
-            Self::Integer(value) => write!(f, "{value}"),
-            Self::Real(value) => write!(f, "{value}"),
-            Self::Boolean(value) => write!(f, "{value}"),
-            Self::Character(value) => write!(f, "{value:?}"),
-            Self::String(value) => write!(f, "{value:?}"),
-        }
-    }
-}
-
 #[derive(Clone, PartialEq, Debug)]
 pub enum TokenKind {
     // Symbols
@@ -95,16 +59,23 @@ pub enum TokenKind {
     For,
     If,
     In,
+    Infinity,
     Let,
     Public,
     Then,
     Ticker,
     Timer,
+    Undefined,
     Var,
     Where,
     With,
     // Miscellaneous
-    Literal(Literal),
+    Integer(i128),
+    Real(f64),
+    Boolean(bool),
+    Character(char),
+    String(Rc<str>),
+    Identifier(Rc<str>),
 }
 
 impl TokenKind {
@@ -123,69 +94,20 @@ impl TokenKind {
 
 impl std::fmt::Display for TokenKind {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        if let Some(symbolic_literal) = self.get_symbolic_literal() {
+            return write!(f, "{symbolic_literal}")
+        }
+        else if let Some(keyword_literal) = self.get_keyword_literal() {
+            return write!(f, "{keyword_literal}")
+        }
         match self {
-            Self::Ampersand => write!(f, "&"),
-            Self::Ampersand2 => write!(f, "&&"),
-            Self::AngleLeft => write!(f, "<"),
-            Self::AngleLeft2 => write!(f, "<<"),
-            Self::AngleLeftEqual => write!(f, "<="),
-            Self::AngleRight => write!(f, ">"),
-            Self::AngleRight2 => write!(f, ">>"),
-            Self::AngleRightEqual => write!(f, ">="),
-            Self::AtSign => write!(f, "@"),
-            Self::Backslash => write!(f, "\\"),
-            Self::Bang => write!(f, "!"),
-            Self::BangEqual => write!(f, "!="),
-            Self::Caret => write!(f, "^"),
-            Self::Colon => write!(f, ":"),
-            Self::Colon2 => write!(f, "::"),
-            Self::ColonEqual => write!(f, ":="),
-            Self::Comma => write!(f, ","),
-            Self::CurlyLeft => write!(f, "{{"),
-            Self::CurlyRight => write!(f, "}}"),
-            Self::Dollar => write!(f, "$"),
-            Self::Dot => write!(f, "."),
-            Self::Dot2 => write!(f, ".."),
-            Self::Equal => write!(f, "="),
-            Self::Equal2 => write!(f, "=="),
-            Self::Hash => write!(f, "#"),
-            Self::Minus => write!(f, "-"),
-            Self::ParenLeft => write!(f, "("),
-            Self::ParenRight => write!(f, ")"),
-            Self::Percent => write!(f, "%"),
-            Self::Pipe => write!(f, "|"),
-            Self::Pipe2 => write!(f, "||"),
-            Self::Plus => write!(f, "+"),
-            Self::Question => write!(f, "?"),
-            Self::Semicolon => write!(f, ";"),
-            Self::Slash => write!(f, "/"),
-            Self::SquareLeft => write!(f, "["),
-            Self::SquareRight => write!(f, "]"),
-            Self::Star => write!(f, "*"),
-            Self::Star2 => write!(f, "**"),
-            Self::Tilde => write!(f, "~"),
-            Self::ArrowRight => write!(f, "->"),
-            Self::DoubleArrowRight => write!(f, "=>"),
-            Self::RangeInclusive => write!(f, "..="),
-            Self::RangeExclusive => write!(f, "..<"),
-            Self::Action => write!(f, "action"),
-            Self::Disable => write!(f, "disable"),
-            Self::Display => write!(f, "display"),
-            Self::Elif => write!(f, "elif"),
-            Self::Else => write!(f, "else"),
-            Self::Enum => write!(f, "enum"),
-            Self::For => write!(f, "for"),
-            Self::If => write!(f, "if"),
-            Self::In => write!(f, "in"),
-            Self::Let => write!(f, "let"),
-            Self::Public => write!(f, "public"),
-            Self::Then => write!(f, "then"),
-            Self::Ticker => write!(f, "ticker"),
-            Self::Timer => write!(f, "timer"),
-            Self::Var => write!(f, "var"),
-            Self::Where => write!(f, "where"),
-            Self::With => write!(f, "with"),
-            Self::Literal(literal) => literal.fmt(f),
+            Self::Integer(value) => write!(f, "{value}"),
+            Self::Real(value) => write!(f, "{value}"),
+            Self::Boolean(value) => write!(f, "{value}"),
+            Self::Character(value) => write!(f, "{value:?}"),
+            Self::String(value) => write!(f, "{value:?}"),
+            Self::Identifier(identifier) => write!(f, "{identifier}"),
+            _ => unreachable!("all tokens should be matched by this point")
         }
     }
 }
@@ -244,14 +166,18 @@ pub const KEYWORD_TOKENS: &[(&str, TokenKind)] = &[
     ("elif", TokenKind::Elif),
     ("else", TokenKind::Else),
     ("enum", TokenKind::Enum),
+    ("false", TokenKind::Boolean(false)),
     ("for", TokenKind::For),
     ("if", TokenKind::If),
     ("in", TokenKind::In),
+    ("infinity", TokenKind::Infinity),
     ("let", TokenKind::Let),
     ("public", TokenKind::Public),
     ("then", TokenKind::Then),
     ("ticker", TokenKind::Ticker),
     ("timer", TokenKind::Timer),
+    ("true", TokenKind::Boolean(true)),
+    ("undefined", TokenKind::Undefined),
     ("var", TokenKind::Var),
     ("where", TokenKind::Where),
     ("with", TokenKind::With),

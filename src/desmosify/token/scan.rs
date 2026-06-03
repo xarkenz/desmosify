@@ -80,11 +80,11 @@ impl<T: BufRead> Scanner<T> {
                     match self.next_char()? {
                         Some('/') => {
                             self.skip_line_comment()?;
-                            return self.next_token();
+                            return self.next_token()
                         }
                         Some('*') => {
                             self.skip_block_comment()?;
-                            return self.next_token();
+                            return self.next_token()
                         }
                         Some(next_ch) => {
                             self.put_back(next_ch);
@@ -93,10 +93,10 @@ impl<T: BufRead> Scanner<T> {
                     }
                 }
                 else if ch == '"' {
-                    return self.scan_string_literal().map(Some);
+                    return self.scan_string_literal().map(Some)
                 }
                 else if ch == '\'' {
-                    return self.scan_character_literal().map(Some);
+                    return self.scan_character_literal().map(Some)
                 }
                 self.put_back(ch);
                 self.scan_symbolic_literal().map(Some)
@@ -147,7 +147,7 @@ impl<T: BufRead> Scanner<T> {
     fn next_non_space_char(&mut self) -> crate::Result<Option<char>> {
         while let Some(ch) = self.next_char()? {
             if !ch.is_whitespace() {
-                return Ok(Some(ch));
+                return Ok(Some(ch))
             }
         }
 
@@ -194,7 +194,7 @@ impl<T: BufRead> Scanner<T> {
                         Some(digit @ '0'..='9') => {
                             content.push('.');
                             content.push(digit);
-                            return self.scan_real_literal_end(start_index, content);
+                            return self.scan_real_literal_end(start_index, content)
                         }
                         Some(non_digit) => {
                             self.put_back(non_digit);
@@ -206,7 +206,7 @@ impl<T: BufRead> Scanner<T> {
                 }
                 'E' | 'e' => {
                     content.push(ch);
-                    return self.scan_real_literal_end(start_index, content);
+                    return self.scan_real_literal_end(start_index, content)
                 }
                 'A'..='Z' | 'a'..='z' => {
                     // The only valid integer suffixes start with 'i' and 'u', but detect any
@@ -228,7 +228,7 @@ impl<T: BufRead> Scanner<T> {
 
         let _ = suffix;
         Ok(Token {
-            kind: TokenKind::Literal(Literal::Integer(value)),
+            kind: TokenKind::Integer(value),
             span: self.create_span(start_index, self.next_index),
         })
     }
@@ -265,7 +265,7 @@ impl<T: BufRead> Scanner<T> {
 
         let _ = suffix;
         Ok(Token {
-            kind: TokenKind::Literal(Literal::Real(value)),
+            kind: TokenKind::Real(value),
             span: self.create_span(start_index, self.next_index),
         })
     }
@@ -293,18 +293,13 @@ impl<T: BufRead> Scanner<T> {
     fn scan_word_literal(&mut self) -> crate::Result<Token> {
         let (span, content) = self.scan_alphanumeric_word()?;
 
-        if let Some(keyword_token) = get_keyword_token_match(&content) {
-            Ok(Token {
-                kind: keyword_token.clone(),
-                span,
-            })
-        }
-        else {
-            Ok(Token {
-                kind: TokenKind::Literal(Literal::from_word(&content)),
-                span,
-            })
-        }
+        Ok(Token {
+            kind: match get_keyword_token_match(&content) {
+                Some(keyword_token) => keyword_token.clone(),
+                None => TokenKind::Identifier(content.into()),
+            },
+            span,
+        })
     }
 
     fn scan_symbolic_literal(&mut self) -> crate::Result<Token> {
@@ -328,7 +323,7 @@ impl<T: BufRead> Scanner<T> {
                 return Ok(Token {
                     kind: symbolic_token.clone(),
                     span: self.create_span(start_index, self.next_index),
-                });
+                })
             }
 
             // Since no match was found, take away a character and try again
@@ -386,7 +381,7 @@ impl<T: BufRead> Scanner<T> {
                                     }))?;
                             }
                             else {
-                                return Ok(None);
+                                return Ok(None)
                             }
                         }
 
@@ -406,7 +401,7 @@ impl<T: BufRead> Scanner<T> {
                                     }))? as u16;
                             }
                             else {
-                                return Ok(None);
+                                return Ok(None)
                             }
                         }
 
@@ -436,7 +431,7 @@ impl<T: BufRead> Scanner<T> {
                                     }))? as u32;
                             }
                             else {
-                                return Ok(None);
+                                return Ok(None)
                             }
                         }
 
@@ -481,9 +476,9 @@ impl<T: BufRead> Scanner<T> {
         while let Some(ch) = self.next_char()? {
             if ch == '"' {
                 return Ok(Token {
-                    kind: TokenKind::Literal(Literal::String(content.into())),
+                    kind: TokenKind::String(content.into()),
                     span: self.create_span(start_index, self.next_index),
-                });
+                })
             }
             else {
                 self.put_back(ch);
@@ -512,7 +507,7 @@ impl<T: BufRead> Scanner<T> {
 
         if let Some('\'') = self.next_char()? {
             Ok(Token {
-                kind: TokenKind::Literal(Literal::Character(char_value)),
+                kind: TokenKind::Character(char_value),
                 span: self.create_span(start_index, self.next_index),
             })
         }

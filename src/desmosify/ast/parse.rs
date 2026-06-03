@@ -70,7 +70,7 @@ impl<'a, T: BufRead> Parser<'a, T> {
     pub fn expect_identifier(&self) -> crate::Result<(Rc<str>, crate::Span)> {
         let token = self.get_token()?;
         match &token.kind {
-            TokenKind::Literal(Literal::Identifier(identifier)) => Ok((identifier.clone(), token.span)),
+            TokenKind::Identifier(identifier) => Ok((identifier.clone(), token.span)),
             _ => Err(Box::new(crate::Error {
                 kind: crate::ErrorKind::ExpectedIdentifier,
                 span: Some(token.span),
@@ -81,7 +81,7 @@ impl<'a, T: BufRead> Parser<'a, T> {
     pub fn expect_identifier_or_keyword(&self) -> crate::Result<(Rc<str>, crate::Span)> {
         let token = self.get_token()?;
         match &token.kind {
-            TokenKind::Literal(Literal::Identifier(identifier)) => Ok((identifier.clone(), token.span)),
+            TokenKind::Identifier(identifier) => Ok((identifier.clone(), token.span)),
             _ => match token.kind.get_keyword_literal() {
                 Some(literal) => Ok((literal.into(), token.span)),
                 None => Err(Box::new(crate::Error {
@@ -95,7 +95,7 @@ impl<'a, T: BufRead> Parser<'a, T> {
     pub fn expect_string(&self) -> crate::Result<(Rc<str>, crate::Span)> {
         let token = self.get_token()?;
         match &token.kind {
-            TokenKind::Literal(Literal::String(string)) => Ok((string.clone(), token.span)),
+            TokenKind::String(string) => Ok((string.clone(), token.span)),
             _ => Err(Box::new(crate::Error {
                 kind: crate::ErrorKind::ExpectedString,
                 span: Some(token.span),
@@ -108,7 +108,7 @@ impl<'a, T: BufRead> Parser<'a, T> {
         let start_span = start_token.span;
 
         let mut expression_kind = match &start_token.kind {
-            TokenKind::Literal(Literal::Identifier(identifier)) => {
+            TokenKind::Identifier(identifier) => {
                 TypeExpressionKind::Identifier(identifier.clone())
             }
             TokenKind::ParenLeft => {
@@ -170,7 +170,7 @@ impl<'a, T: BufRead> Parser<'a, T> {
                         got_token: got_token.clone(),
                     },
                     span: Some(self.current_span()),
-                }));
+                }))
             }
         };
 
@@ -216,8 +216,29 @@ impl<'a, T: BufRead> Parser<'a, T> {
         }
         else {
             let operand_kind = match &start_token.kind {
-                TokenKind::Literal(literal) => {
-                    ExpressionKind::Literal(literal.clone())
+                TokenKind::Undefined => {
+                    ExpressionKind::Undefined
+                }
+                TokenKind::Infinity => {
+                    ExpressionKind::Infinity
+                }
+                TokenKind::Integer(value) => {
+                    ExpressionKind::Integer(*value)
+                }
+                TokenKind::Real(value) => {
+                    ExpressionKind::Real(*value)
+                }
+                TokenKind::Boolean(value) => {
+                    ExpressionKind::Boolean(*value)
+                }
+                TokenKind::Character(value) => {
+                    ExpressionKind::Character(*value)
+                }
+                TokenKind::String(value) => {
+                    ExpressionKind::String(value.clone())
+                }
+                TokenKind::Identifier(identifier) => {
+                    ExpressionKind::Identifier(identifier.clone())
                 }
                 TokenKind::Action => {
                     self.consume_token()?; // Action
@@ -411,7 +432,7 @@ impl<'a, T: BufRead> Parser<'a, T> {
                         return Err(Box::new(crate::Error {
                             kind: crate::ErrorKind::ConditionalMissingCondition,
                             span: Some(start_span.expand_to(self.current_span())),
-                        }));
+                        }))
                     }
 
                     ExpressionKind::Conditional {
@@ -447,7 +468,7 @@ impl<'a, T: BufRead> Parser<'a, T> {
                             value: Box::new(value),
                             inner: Box::new(inner),
                         },
-                    });
+                    })
                 }
                 got_token => {
                     return Err(Box::new(crate::Error {
@@ -455,7 +476,7 @@ impl<'a, T: BufRead> Parser<'a, T> {
                             got_token: got_token.clone(),
                         },
                         span: Some(self.current_span()),
-                    }));
+                    }))
                 }
             };
 
@@ -653,7 +674,7 @@ impl<'a, T: BufRead> Parser<'a, T> {
                         got_token: operator_token.kind.clone(),
                     },
                     span: Some(self.current_span()),
-                }));
+                }))
             }
         }
 
@@ -753,7 +774,7 @@ impl<'a, T: BufRead> Parser<'a, T> {
                         condition_consequents: condition_consequents.into_boxed_slice(),
                         alternative,
                     },
-                });
+                })
             }
             keyword @ (TokenKind::Elif | TokenKind::Else) => {
                 return Err(Box::new(crate::Error {
@@ -761,7 +782,7 @@ impl<'a, T: BufRead> Parser<'a, T> {
                         keyword: keyword.clone(),
                     },
                     span: Some(start_span),
-                }));
+                }))
             }
             _ => {
                 let variable = self.parse_expression(None, &[TokenKind::ColonEqual])?;
@@ -775,7 +796,7 @@ impl<'a, T: BufRead> Parser<'a, T> {
                         variable: Box::new(variable),
                         value: Box::new(value),
                     },
-                });
+                })
             }
         };
 
@@ -813,7 +834,7 @@ impl<'a, T: BufRead> Parser<'a, T> {
 
     pub fn parse_declaration(&mut self) -> crate::Result<Option<Declaration>> {
         if self.current_token().is_none() {
-            return Ok(None);
+            return Ok(None)
         }
 
         let start_token = self.expect_token_from(&[

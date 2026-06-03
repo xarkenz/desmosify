@@ -217,6 +217,7 @@ pub enum ValueKind {
         identifier: Rc<str>,
     },
     Undefined(Type),
+    Infinity(Type),
     Real(f64),
     Mathematical(MathematicalConstant),
     Int(i64),
@@ -378,6 +379,9 @@ impl ValueKind {
                 }
             }
             Self::Undefined(value_type) => {
+                value_type.clone()
+            }
+            Self::Infinity(value_type) => {
                 value_type.clone()
             }
             Self::Real(..) |
@@ -596,6 +600,9 @@ impl std::fmt::Debug for ValueKind {
             }
             Self::Undefined(..) => {
                 write!(f, "Undefined<{self_type}>")
+            }
+            Self::Infinity(..) => {
+                write!(f, "Infinity<{self_type}>")
             }
             Self::Real(value) => {
                 f.debug_tuple("Real").field(value).finish()

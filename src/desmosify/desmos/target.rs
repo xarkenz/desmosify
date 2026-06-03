@@ -716,33 +716,36 @@ impl<'target> GraphExpressionListBuilder<'target> {
 
         match &value.kind {
             ValueKind::Undefined(value_type) => {
-                let undefined_scalar = GraphExpression::Binary {
-                    kind: GraphBinaryKind::Fraction,
-                    lhs: Box::new(GraphExpression::Integer(0)),
+                // Create undefined using 0 / 0
+                Ok(GraphExpression::Binary {
+                    kind: GraphBinaryKind::Divide,
+                    lhs: Box::new(match value_type {
+                        Type::Point2 { .. } => GraphExpression::Unary {
+                            kind: GraphUnaryKind::Parentheses,
+                            inner: Box::new(GraphExpression::Sequence {
+                                elements: Vec::from([
+                                    GraphExpression::Integer(0),
+                                    GraphExpression::Integer(0),
+                                ]),
+                            }),
+                        },
+                        Type::Point3 { .. } => GraphExpression::Unary {
+                            kind: GraphUnaryKind::Parentheses,
+                            inner: Box::new(GraphExpression::Sequence {
+                                elements: Vec::from([
+                                    GraphExpression::Integer(0),
+                                    GraphExpression::Integer(0),
+                                    GraphExpression::Integer(0),
+                                ]),
+                            }),
+                        },
+                        _ => GraphExpression::Integer(0)
+                    }),
                     rhs: Box::new(GraphExpression::Integer(0)),
-                };
-                match value_type {
-                    Type::Point2 { .. } => Ok(GraphExpression::Unary {
-                        kind: GraphUnaryKind::Parentheses,
-                        inner: Box::new(GraphExpression::Sequence {
-                            elements: Vec::from([
-                                undefined_scalar.clone(),
-                                undefined_scalar,
-                            ]),
-                        }),
-                    }),
-                    Type::Point3 { .. } => Ok(GraphExpression::Unary {
-                        kind: GraphUnaryKind::Parentheses,
-                        inner: Box::new(GraphExpression::Sequence {
-                            elements: Vec::from([
-                                undefined_scalar.clone(),
-                                undefined_scalar.clone(),
-                                undefined_scalar,
-                            ]),
-                        }),
-                    }),
-                    _ => Ok(undefined_scalar)
-                }
+                })
+            }
+            ValueKind::Infinity(..) => {
+                Ok(GraphExpression::Escape("infty".into()))
             }
             ValueKind::Real(value) => {
                 Ok(GraphExpression::Decimal(*value))

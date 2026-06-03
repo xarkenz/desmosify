@@ -7,7 +7,6 @@ use crate::sema::display::{DragMode, LabelOrientation, LineStyle, PointStyle, Pr
 use crate::sema::types::{ListState, Type};
 use crate::sema::values::{ActionValue, ActionValueKind, GlobalReference, LocalReference, Value, IndexKind, ValueKind, ListMapLoop, BinaryKind, UnaryKind, ActionReference};
 use crate::target::Target;
-use crate::token::Literal;
 
 pub fn interpret_program(source_paths: &[PathBuf], target: &mut dyn Target, context: &GlobalContext) -> crate::Result<Program> {
     let mut lets = Vec::new();
@@ -181,7 +180,7 @@ pub fn interpret_ticker_declarations(
                     return Err(Box::new(crate::Error {
                         kind: crate::ErrorKind::IncompatibleTickerIntervals,
                         span: Some(declaration.span),
-                    }));
+                    }))
                 }
 
                 local_context.add_scoped_intrinsic("dt", ValueKind::TickerDt);
@@ -270,7 +269,7 @@ pub fn interpret_display_declarations(
                     key: attribute.key.as_ref().into(),
                 },
                 span: Some(attribute.key_span),
-            }));
+            }))
         };
 
         if (min_arity ..= max_arity).contains(&arguments.len()) {
@@ -491,7 +490,7 @@ pub fn interpret_display_declarations(
                                 key: attribute.key.as_ref().into(),
                             },
                             span: Some(attribute.key_span),
-                        }));
+                        }))
                     }
                 };
 
@@ -549,10 +548,10 @@ pub fn interpret_action_expression(
             let variable = interpret_expression(target, context, &local_context, variable)?;
             let variable_span = variable.span;
             let ValueKind::Global(variable) = variable.kind else {
-                return Err(invalid_update_lhs_error());
+                return Err(invalid_update_lhs_error())
             };
             let DefinitionKind::Value(ValueDefinition::Variable { .. }) = context.find_definition(&variable.identifier).unwrap().definition.kind else {
-                return Err(invalid_update_lhs_error());
+                return Err(invalid_update_lhs_error())
             };
 
             let value = interpret_expression(target, context, &local_context, value)?
@@ -631,7 +630,7 @@ pub fn interpret_expression(
     expression: &Expression,
 ) -> crate::Result<Value> {
     let kind = match &expression.kind {
-        ExpressionKind::Literal(Literal::Identifier(identifier)) => {
+        ExpressionKind::Identifier(identifier) => {
             if let Some(local) = local_context.find_local(identifier) {
                 local.clone()
             }
@@ -647,13 +646,13 @@ pub fn interpret_expression(
                         identifier: identifier.as_ref().into(),
                     },
                     span: Some(expression.span),
-                }));
+                }))
             }
         }
-        ExpressionKind::Literal(Literal::Real(value)) => {
+        ExpressionKind::Real(value) => {
             ValueKind::Real(*value)
         }
-        ExpressionKind::Literal(Literal::Integer(value)) => {
+        ExpressionKind::Integer(value) => {
             let value = i64::try_from(*value).map_err(|_| Box::new(crate::Error {
                 kind: crate::ErrorKind::IntegerTooLarge,
                 span: Some(expression.span),
@@ -661,10 +660,10 @@ pub fn interpret_expression(
 
             ValueKind::Int(value)
         }
-        ExpressionKind::Literal(Literal::Boolean(value)) => {
+        ExpressionKind::Boolean(value) => {
             ValueKind::Bool(*value)
         }
-        ExpressionKind::Literal(Literal::String(value)) => {
+        ExpressionKind::String(value) => {
             ValueKind::Str(value.clone())
         }
         ExpressionKind::ActionIdentifier(identifier) => {
@@ -680,7 +679,7 @@ pub fn interpret_expression(
                         identifier: identifier.as_ref().into(),
                     },
                     span: Some(expression.span),
-                }));
+                }))
             }
         }
         ExpressionKind::IntrinsicIdentifier(identifier) => {
@@ -696,7 +695,7 @@ pub fn interpret_expression(
                         identifier: identifier.as_ref().into(),
                     },
                     span: Some(expression.span),
-                }));
+                }))
             }
         }
         ExpressionKind::Grouping { expression } => {
@@ -868,7 +867,7 @@ pub fn interpret_expression(
                                 got: arguments.len(),
                             },
                             span: function.span,
-                        }));
+                        }))
                     }
 
                     let mut result_list_state = None;
@@ -900,7 +899,7 @@ pub fn interpret_expression(
                             got_type: got_type.to_string(),
                         },
                         span: function.span,
-                    }));
+                    }))
                 }
             }
         }
@@ -965,7 +964,7 @@ pub fn interpret_expression(
             return Err(Box::new(crate::Error {
                 kind: crate::ErrorKind::UnexpectedExpressionKind,
                 span: Some(expression.span),
-            }));
+            }))
         }
     };
 
@@ -1175,11 +1174,11 @@ fn interpret_access_operation(
     let lhs = interpret_expression(target, context, local_context, lhs)?;
     let (lhs_list, lhs_type) = lhs.get_type().into_flatten_list();
 
-    let ExpressionKind::Literal(Literal::Identifier(member_identifier)) = &rhs.kind else {
+    let ExpressionKind::Identifier(member_identifier) = &rhs.kind else {
         return Err(Box::new(crate::Error {
             kind: crate::ErrorKind::ExpectedIdentifier,
             span: Some(rhs.span),
-        }));
+        }))
     };
 
     let invalid_access_error = || Box::new(crate::Error {
