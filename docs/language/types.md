@@ -16,9 +16,10 @@ parent: Language Reference
 
 ## Introduction
 
-Desmosify is not a statically typed language, nor does it make any guarantees about soundness, but it requires that data
-types be specified in certain places (e.g. global variables, function parameters) for compile-time type checking, as
-well as for program readability. These types often reflect those in Desmos, but with some compile-time conveniences.
+Desmosify is not a fully statically typed language, nor does it make any guarantees about soundness, but it requires
+that data types be specified in certain places (e.g. global variables, function parameters) for compile-time type
+checking, as well as for program readability. These types often reflect those in Desmos, but with some compile-time
+conveniences.
 
 ## Basic Types
 
