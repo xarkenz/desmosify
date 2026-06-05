@@ -988,14 +988,14 @@ pub fn interpret_unary_operation(
     };
 
     let mut operand = interpret_expression(target, context, local_context, operand)?;
-    let (operand_list, mut operand_type) = operand.get_type().into_flatten_list();
+    let operand_list = operand.get_type().list_state();
 
     let result_type = match kind {
         UnaryKind::Positive |
         UnaryKind::Negative => {
             // The result must be arithmetic
-            (operand, operand_type) = operand.coerce_to_arithmetic(Type::require_numeric_or_point)?;
-            operand_type
+            operand = operand.coerce_to_arithmetic(Type::require_numeric_or_point)?;
+            operand.get_type()
         }
         UnaryKind::LogicalNot => {
             operand = operand.coerce_to(&Type::Bool, true)?;
@@ -1043,25 +1043,25 @@ pub fn interpret_binary_operation(
 
     let mut lhs = interpret_expression(target, context, local_context, lhs)?;
     let mut rhs = interpret_expression(target, context, local_context, rhs)?;
-    let (lhs_list, mut lhs_type) = lhs.get_type().into_flatten_list();
-    let (rhs_list, mut rhs_type) = rhs.get_type().into_flatten_list();
+    let (lhs_list, lhs_type) = lhs.get_type().into_flatten_list();
+    let (rhs_list, rhs_type) = rhs.get_type().into_flatten_list();
 
     let result_type = match kind {
         BinaryKind::Exponent |
         BinaryKind::Remainder => {
             // The result must be arithmetic and cannot be a point
-            (lhs, lhs_type) = lhs.coerce_to_arithmetic(Type::require_numeric)?;
-            (rhs, rhs_type) = rhs.coerce_to_arithmetic(Type::require_numeric)?;
-            Type::merge(&lhs_type, &rhs_type)
+            lhs = lhs.coerce_to_arithmetic(Type::require_numeric)?;
+            rhs = rhs.coerce_to_arithmetic(Type::require_numeric)?;
+            Type::merge(&lhs.get_type(), &rhs.get_type())
                 .map_err(|error| error.with_span(span))?
         }
         BinaryKind::Multiply => {
             // The result must be arithmetic, but at most one operand may be a point
-            (lhs, lhs_type) = lhs.coerce_to_arithmetic(Type::require_numeric_or_point)?;
-            let lhs_type = lhs_type.into_flatten_list().1;
+            lhs = lhs.coerce_to_arithmetic(Type::require_numeric_or_point)?;
+            let lhs_type = lhs.get_type().into_flatten_list().1;
             if matches!(lhs_type, Type::Point2 { .. } | Type::Point3 { .. }) {
-                (rhs, rhs_type) = rhs.coerce_to_arithmetic(Type::require_numeric)?;
-                let rhs_type = rhs_type.into_flatten_list().1;
+                rhs = rhs.coerce_to_arithmetic(Type::require_numeric)?;
+                let rhs_type = rhs.get_type().into_flatten_list().1;
                 match &lhs_type {
                     Type::Point2 { x_type, y_type } => Type::Point2 {
                         x_type: Box::new(x_type.merge(&rhs_type)
@@ -1081,8 +1081,8 @@ pub fn interpret_binary_operation(
                 }.unflatten_list(ListState::merge(lhs_list, rhs_list))
             }
             else {
-                (rhs, rhs_type) = rhs.coerce_to_arithmetic(Type::require_numeric_or_point)?;
-                let rhs_type = rhs_type.into_flatten_list().1;
+                rhs = rhs.coerce_to_arithmetic(Type::require_numeric_or_point)?;
+                let rhs_type = rhs.get_type().into_flatten_list().1;
                 match &rhs_type {
                     Type::Point2 { x_type, y_type } => Type::Point2 {
                         x_type: Box::new(x_type.merge(&lhs_type)
@@ -1105,7 +1105,7 @@ pub fn interpret_binary_operation(
         }
         BinaryKind::Divide => {
             // The result is always assumed to be real, but lhs may be a point
-            let result_type = match lhs_type.flatten_list().1 {
+            let result_type = match lhs.get_type().flatten_list().1 {
                 Type::Point2 { .. } => Type::Point2 {
                     x_type: Box::new(Type::Real),
                     y_type: Box::new(Type::Real),
@@ -1124,9 +1124,9 @@ pub fn interpret_binary_operation(
         BinaryKind::Add |
         BinaryKind::Subtract => {
             // The result must be arithmetic, but may be a point
-            (lhs, lhs_type) = lhs.coerce_to_arithmetic(Type::require_numeric_or_point)?;
-            (rhs, rhs_type) = rhs.coerce_to_arithmetic(Type::require_numeric_or_point)?;
-            Type::merge(&lhs_type, &rhs_type)
+            lhs = lhs.coerce_to_arithmetic(Type::require_numeric_or_point)?;
+            rhs = rhs.coerce_to_arithmetic(Type::require_numeric_or_point)?;
+            Type::merge(&lhs.get_type(), &rhs.get_type())
                 .map_err(|error| error.with_span(span))?
         }
         BinaryKind::LessThan |

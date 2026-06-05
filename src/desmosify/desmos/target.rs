@@ -853,7 +853,7 @@ impl<'target> GraphExpressionListBuilder<'target> {
                     rhs: Box::new(self.translate_value(list)?),
                 })
             }
-            ValueKind::Rotate { object, point, angle, .. } => {
+            ValueKind::Rotation { object, point, angle, .. } => {
                 Ok(GraphExpression::Binary {
                     kind: GraphBinaryKind::Call,
                     lhs: Box::new(GraphExpression::OperatorName("rotate".into())),

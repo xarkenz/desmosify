@@ -199,10 +199,10 @@ pub const CORE_INTRINSIC_FUNCTIONS: &[&IntrinsicFunction] = &[
     // &START,
     // &END,
     // Transformations
-    // &DILATE,
+    &DILATE,
     &ROTATE,
-    // &REFLECT,
-    // &TRANSLATE,
+    &REFLECT,
+    &TRANSLATE,
     // Color
     &RGB,
     &HSV,
@@ -637,41 +637,147 @@ pub static POLYGON: IntrinsicFunction = reducer_intrinsic!(
 
 // ------ Transformations ------
 
-// DILATE
+pub static DILATE: IntrinsicFunction = IntrinsicFunction {
+    identifier: "dilate",
+    min_arity: 3,
+    max_arity: Some(3),
+    interpret_call: |_, _, _, arguments| {
+        let mut arguments = arguments.into_iter();
+
+        let object = arguments.next().unwrap();
+        let (object_list, object_type) = object.get_type().into_flatten_list();
+        object_type.require_transformable()?;
+
+        let point = arguments.next().unwrap()
+            .coerce_to(&Type::real_point2(), true)?;
+
+        let factor = arguments.next().unwrap()
+            .coerce_to(&Type::Real, true)?;
+
+        let list_state = ListState::merge(
+            ListState::merge(
+                object_list,
+                point.get_type().list_state(),
+            ),
+            factor.get_type().list_state(),
+        );
+
+        Ok(ValueKind::Dilation {
+            object: Box::new(object),
+            point: Box::new(point),
+            factor: Box::new(factor),
+            result_type: object_type.unflatten_list(list_state),
+        })
+    },
+};
 pub static ROTATE: IntrinsicFunction = IntrinsicFunction {
     identifier: "rotate",
     min_arity: 3,
     max_arity: Some(3),
     interpret_call: |_, _, _, arguments| {
-        // TODO: check types better
         let mut arguments = arguments.into_iter();
+
         let object = arguments.next().unwrap();
+        let (object_list, object_type) = object.get_type().into_flatten_list();
+        object_type.require_transformable()?;
+
         let point = arguments.next().unwrap()
-            .coerce_to(&Type::Point2 {
-                x_type: Box::new(Type::Real),
-                y_type: Box::new(Type::Real),
-            }, true)?;
+            .coerce_to(&Type::real_point2(), true)?;
+
         let angle = arguments.next().unwrap()
             .coerce_to(&Type::Real, true)?;
-        let result_type = object.get_type().into_flatten_list().1;
+
         let list_state = ListState::merge(
             ListState::merge(
-                object.get_type().list_state(),
+                object_list,
                 point.get_type().list_state(),
             ),
             angle.get_type().list_state(),
         );
 
-        Ok(ValueKind::Rotate {
+        Ok(ValueKind::Rotation {
             object: Box::new(object),
             point: Box::new(point),
             angle: Box::new(angle),
-            result_type: result_type.unflatten_list(list_state),
-        }.into())
+            result_type: object_type.unflatten_list(list_state),
+        })
     },
 };
-// REFLECT
-// TRANSLATE
+pub static REFLECT: IntrinsicFunction = IntrinsicFunction {
+    identifier: "reflect",
+    min_arity: 2,
+    max_arity: Some(2),
+    interpret_call: |_, _, _, arguments| {
+        let mut arguments = arguments.into_iter();
+
+        let object = arguments.next().unwrap();
+        let (object_list, object_type) = object.get_type().into_flatten_list();
+        object_type.require_transformable()?;
+
+        let line = arguments.next().unwrap();
+        line.get_type().into_flatten_list().1.require_line_like()?;
+
+        let list_state = ListState::merge(
+            object_list,
+            line.get_type().list_state(),
+        );
+
+        Ok(ValueKind::Reflection {
+            object: Box::new(object),
+            line: Box::new(line),
+            result_type: object_type.unflatten_list(list_state),
+        })
+    },
+};
+pub static TRANSLATE: IntrinsicFunction = IntrinsicFunction {
+    identifier: "translate",
+    min_arity: 2,
+    max_arity: Some(3),
+    interpret_call: |_, _, _, arguments| {
+        let mut arguments = arguments.into_iter();
+
+        let object = arguments.next().unwrap();
+        let (object_list, object_type) = object.get_type().into_flatten_list();
+        object_type.require_transformable()?;
+
+        let point_1_or_vector = arguments.next().unwrap();
+
+        if let Some(point_2) = arguments.next() {
+            let real_point2 = Type::real_point2();
+            let point_1 = point_1_or_vector.coerce_to(&real_point2, true)?;
+            let point_2 = point_2.coerce_to(&real_point2, true)?;
+
+            let list_state = ListState::merge(
+                object_list,
+                ListState::merge(
+                    point_1.get_type().list_state(),
+                    point_2.get_type().list_state(),
+                ),
+            );
+
+            Ok(ValueKind::TranslationByPoints {
+                object: Box::new(object),
+                point_1: Box::new(point_1),
+                point_2: Box::new(point_2),
+                result_type: object_type.unflatten_list(list_state),
+            })
+        }
+        else {
+            let vector = point_1_or_vector.coerce_to(&Type::Vector, true)?;
+
+            let list_state = ListState::merge(
+                object_list,
+                vector.get_type().list_state(),
+            );
+
+            Ok(ValueKind::TranslationByVector {
+                object: Box::new(object),
+                vector: Box::new(vector),
+                result_type: object_type.unflatten_list(list_state),
+            })
+        }
+    },
+};
 
 // ------ Color ------
 

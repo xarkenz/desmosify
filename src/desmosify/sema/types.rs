@@ -53,6 +53,8 @@ pub enum Type {
     Line,
     Ray,
     Vector,
+    Angle,
+    DirectedAngle,
     Segment3D,
     Triangle3D,
     Sphere3D,
@@ -85,6 +87,21 @@ pub enum Type {
 }
 
 impl Type {
+    pub fn real_point2() -> Self {
+        Self::Point2 {
+            x_type: Box::new(Self::Real),
+            y_type: Box::new(Self::Real),
+        }
+    }
+
+    pub fn real_point3() -> Self {
+        Self::Point3 {
+            x_type: Box::new(Self::Real),
+            y_type: Box::new(Self::Real),
+            z_type: Box::new(Self::Real),
+        }
+    }
+
     pub fn find_primitive(identifier: &str) -> Option<Self> {
         match identifier {
             "any" => Some(Self::Any),
@@ -102,6 +119,8 @@ impl Type {
             "line" => Some(Self::Line),
             "ray" => Some(Self::Ray),
             "vector" => Some(Self::Vector),
+            "angle" => Some(Self::Angle),
+            "directed_angle" => Some(Self::DirectedAngle),
             "segment3d" => Some(Self::Segment3D),
             "triangle3d" => Some(Self::Triangle3D),
             "sphere3d" => Some(Self::Sphere3D),
@@ -198,6 +217,8 @@ impl Type {
             Self::Line => true,
             Self::Ray => true,
             Self::Vector => true,
+            Self::Angle => true,
+            Self::DirectedAngle => true,
             Self::Segment3D => true,
             Self::Triangle3D => true,
             Self::Sphere3D => true,
@@ -286,6 +307,62 @@ impl Type {
         else {
             Err(Box::new(crate::Error {
                 kind: crate::ErrorKind::ExpectedNumericOrPointType {
+                    got_type: self.to_string(),
+                },
+                span: None,
+            }))
+        }
+    }
+
+    pub fn is_transformable(&self) -> bool {
+        match self {
+            Self::Any => true,
+            Self::Polygon => true,
+            Self::Segment => true,
+            Self::Circle => true,
+            Self::Arc => true,
+            Self::Line => true,
+            Self::Ray => true,
+            Self::Vector => true,
+            Self::Angle => true,
+            Self::DirectedAngle => true,
+            Self::Point2 { .. } => true,
+            _ => false
+        }
+    }
+
+    pub fn require_transformable(&self) -> crate::Result<()> {
+        if self.is_transformable() {
+            Ok(())
+        }
+        else {
+            Err(Box::new(crate::Error {
+                kind: crate::ErrorKind::ExpectedTransformableType {
+                    got_type: self.to_string(),
+                },
+                span: None,
+            }))
+        }
+    }
+
+    pub fn is_line_like(&self) -> bool {
+        match self {
+            Self::Any => true,
+            Self::Segment => true,
+            Self::Line => true,
+            Self::Ray => true,
+            Self::Vector => true,
+            _ => false
+        }
+    }
+
+    pub fn require_line_like(&self) -> crate::Result<()> {
+        if self.is_line_like() {
+            Ok(())
+        }
+        else {
+            Err(Box::new(crate::Error {
+                kind: crate::ErrorKind::ExpectedLineLikeType {
                     got_type: self.to_string(),
                 },
                 span: None,
@@ -393,6 +470,8 @@ impl std::fmt::Display for Type {
             Self::Line => write!(f, "line"),
             Self::Ray => write!(f, "ray"),
             Self::Vector => write!(f, "vector"),
+            Self::Angle => write!(f, "angle"),
+            Self::DirectedAngle => write!(f, "directed_angle"),
             Self::Segment3D => write!(f, "segment3d"),
             Self::Triangle3D => write!(f, "triangle3d"),
             Self::Sphere3D => write!(f, "sphere3d"),

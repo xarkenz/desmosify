@@ -291,10 +291,32 @@ pub enum ValueKind {
     Unique {
         list: Box<Value>,
     },
-    Rotate {
+    Dilation {
+        object: Box<Value>,
+        point: Box<Value>,
+        factor: Box<Value>,
+        result_type: Type,
+    },
+    Rotation {
         object: Box<Value>,
         point: Box<Value>,
         angle: Box<Value>,
+        result_type: Type,
+    },
+    Reflection {
+        object: Box<Value>,
+        line: Box<Value>,
+        result_type: Type,
+    },
+    TranslationByPoints {
+        object: Box<Value>,
+        point_1: Box<Value>,
+        point_2: Box<Value>,
+        result_type: Type,
+    },
+    TranslationByVector {
+        object: Box<Value>,
+        vector: Box<Value>,
         result_type: Type,
     },
     Point2 {
@@ -454,7 +476,19 @@ impl ValueKind {
             Self::Unique { list } => {
                 list.get_type()
             }
-            Self::Rotate { result_type, .. } => {
+            Self::Dilation { result_type, .. } => {
+                result_type.clone()
+            }
+            Self::Rotation { result_type, .. } => {
+                result_type.clone()
+            }
+            Self::Reflection { result_type, .. } => {
+                result_type.clone()
+            }
+            Self::TranslationByPoints { result_type, .. } => {
+                result_type.clone()
+            }
+            Self::TranslationByVector { result_type, .. } => {
                 result_type.clone()
             }
             Self::Point2 { point_type, .. } => {
@@ -511,8 +545,24 @@ impl ValueKind {
     pub fn is_undefined(&self) -> bool {
         match *self {
             Self::Undefined(..) => true,
-            Self::Real(value) if value.is_nan() => true,
+            Self::Real(value) => value.is_nan(),
             _ => false
+        }
+    }
+
+    pub fn assume_type(self, value_type: Type, span: Option<crate::Span>) -> Self {
+        if value_type == self.get_type() {
+            self
+        }
+        else {
+            ValueKind::Unary {
+                kind: UnaryKind::AssumeType,
+                operand: Box::new(Value {
+                    kind: self,
+                    span,
+                }),
+                result_type: value_type,
+            }
         }
     }
 
@@ -574,20 +624,20 @@ impl ValueKind {
         }
     }
 
-    pub fn coerce_to_arithmetic(mut self, constraint: fn(&Type) -> crate::Result<()>, span: Option<crate::Span>) -> crate::Result<(Self, Type)> {
-        let (self_list, mut self_type) = self.get_type().into_flatten_list();
+    pub fn coerce_to_arithmetic(mut self, constraint: fn(&Type) -> crate::Result<()>, span: Option<crate::Span>) -> crate::Result<Self> {
+        let (self_list, self_type) = self.get_type().into_flatten_list();
 
         constraint(&self_type).map_err(|error| error.with_span(span))?;
 
-        match &self_type {
+        let result_type = match &self_type {
             Type::Bool => {
                 self = self.coerce_to(&Type::Int, true, span)?;
-                self_type = Type::Int;
+                Type::Int
             }
-            _ => {}
-        }
+            _ => self_type
+        };
 
-        Ok((self, self_type.unflatten_list(self_list)))
+        Ok(self.assume_type(result_type.unflatten_list(self_list), span))
     }
 }
 
@@ -710,9 +760,25 @@ impl std::fmt::Debug for ValueKind {
                 write!(f, "Unique<{self_type}>")?;
                 f.debug_tuple("").field(list).finish()
             }
-            Self::Rotate { object, point, angle, .. } => {
-                write!(f, "Rotate<{self_type}>")?;
+            Self::Dilation { object, point, factor, .. } => {
+                write!(f, "Dilation<{self_type}>")?;
+                f.debug_tuple("").field(object).field(point).field(factor).finish()
+            }
+            Self::Rotation { object, point, angle, .. } => {
+                write!(f, "Rotation<{self_type}>")?;
                 f.debug_tuple("").field(object).field(point).field(angle).finish()
+            }
+            Self::Reflection { object, line, .. } => {
+                write!(f, "Reflection<{self_type}>")?;
+                f.debug_tuple("").field(object).field(line).finish()
+            }
+            Self::TranslationByPoints { object, point_1, point_2, .. } => {
+                write!(f, "TranslationByPoints<{self_type}>")?;
+                f.debug_tuple("").field(object).field(point_1).field(point_2).finish()
+            }
+            Self::TranslationByVector { object, vector, .. } => {
+                write!(f, "TranslationByVector<{self_type}>")?;
+                f.debug_tuple("").field(object).field(vector).finish()
             }
             Self::Point2 { x, y, .. } => {
                 write!(f, "Point2<{self_type}>")?;
@@ -794,15 +860,19 @@ impl Value {
         self.kind.is_undefined()
     }
 
+    pub fn assume_type(mut self, value_type: Type) -> Self {
+        self.kind = self.kind.assume_type(value_type, self.span);
+        self
+    }
+
     pub fn coerce_to(mut self, target_type: &Type, allow_broadcast: bool) -> crate::Result<Self> {
         self.kind = self.kind.coerce_to(target_type, allow_broadcast, self.span)?;
         Ok(self)
     }
 
-    pub fn coerce_to_arithmetic(mut self, constraint: fn(&Type) -> crate::Result<()>) -> crate::Result<(Self, Type)> {
-        let result_type;
-        (self.kind, result_type) = self.kind.coerce_to_arithmetic(constraint, self.span)?;
-        Ok((self, result_type))
+    pub fn coerce_to_arithmetic(mut self, constraint: fn(&Type) -> crate::Result<()>) -> crate::Result<Self> {
+        self.kind = self.kind.coerce_to_arithmetic(constraint, self.span)?;
+        Ok(self)
     }
 
     pub fn get_const_str(&self) -> crate::Result<Rc<str>> {
