@@ -1,7 +1,10 @@
 use std::path::Path;
 use crate::desmos::{GraphFolderEntry, GraphSettings, GraphState, ToJson};
-use crate::desmos::target::{DesmosTargetInfo, GraphExpressionListBuilder};
+use crate::desmos::builder::GraphExpressionListBuilder;
+use crate::desmos::target::DesmosTargetInfo;
 use crate::sema::Program;
+
+pub const TARGET_NAME: &str = "desmos-geometry";
 
 #[derive(Debug)]
 pub struct DesmosGeometryTarget {
@@ -18,7 +21,7 @@ impl Default for DesmosGeometryTarget {
 
 impl crate::target::Target for DesmosGeometryTarget {
     fn name(&self) -> &'static str {
-        "desmos-geometry"
+        TARGET_NAME
     }
 
     fn create_local_id(&mut self) -> u64 {
@@ -45,6 +48,7 @@ impl crate::target::Target for DesmosGeometryTarget {
                 viewport_y_min: -10.0,
                 viewport_x_max: 10.0,
                 viewport_y_max: 10.0,
+                degree_mode: false,
             },
             expressions: GraphExpressionListBuilder::build_program(program, &mut self.info)?,
         };

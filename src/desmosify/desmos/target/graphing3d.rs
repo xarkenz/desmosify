@@ -2,6 +2,8 @@ use std::path::Path;
 use crate::desmos::target::DesmosTargetInfo;
 use crate::sema::Program;
 
+pub const TARGET_NAME: &str = "desmos-graphing3d";
+
 #[derive(Debug)]
 pub struct DesmosGraphing3DTarget {
     info: DesmosTargetInfo,
@@ -17,7 +19,7 @@ impl Default for DesmosGraphing3DTarget {
 
 impl crate::target::Target for DesmosGraphing3DTarget {
     fn name(&self) -> &'static str {
-        "desmos-graphing3d"
+        TARGET_NAME
     }
 
     fn create_local_id(&mut self) -> u64 {

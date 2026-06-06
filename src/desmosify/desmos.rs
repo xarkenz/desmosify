@@ -5,6 +5,7 @@ use crate::sema::display::{DragMode, LabelOrientation, LineStyle, PointStyle};
 pub mod latex;
 pub mod target;
 pub mod symbol;
+pub mod builder;
 
 pub trait ToJson {
     fn to_json(&self) -> JsonValue;
@@ -614,6 +615,7 @@ pub struct GraphSettings {
     pub viewport_y_min: f64,
     pub viewport_x_max: f64,
     pub viewport_y_max: f64,
+    pub degree_mode: bool,
 }
 
 impl ToJson for GraphSettings {
@@ -629,6 +631,7 @@ impl ToJson for GraphSettings {
                 "xmax": self.viewport_x_max,
                 "ymax": self.viewport_y_max,
             },
+            "degreeMode": self.degree_mode,
         }
     }
 }
