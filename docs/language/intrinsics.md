@@ -64,8 +64,6 @@ intrinsics can be used. There are a few notations which may be unfamiliar:
 // @sin(@pi / 2) => 1.0
 ```
 
-Compute the sine of `theta` radians.
-
 {: #cos }
 ### `@cos` — Cosine
 
@@ -74,8 +72,6 @@ Compute the sine of `theta` radians.
 
 // @cos(@pi / 2) => 0.0
 ```
-
-Compute the cosine of `theta` radians.
 
 {: #tan }
 ### `@tan` — Tangent
@@ -86,7 +82,277 @@ Compute the cosine of `theta` radians.
 // @tan(@pi) => 0.0
 ```
 
-Compute the tangent of `theta` radians.
+{: #csc }
+### `@csc` — Cosecant
+
+```
+@csc(theta: real+): real+
+```
+
+{: #sec }
+### `@sec` — Secant
+
+```
+@sec(theta: real+): real+
+```
+
+{: #cot }
+### `@cot` — Cotangent
+
+```
+@cot(theta: real+): real+
+```
+
+{: #arcsin }
+### `@arcsin` — Inverse sine
+
+```
+@arcsin(x: real+): real+
+```
+
+{: #arccos }
+### `@arcsin` — Inverse cosine
+
+```
+@arccos(x: real+): real+
+```
+
+{: #arctan }
+### `@arctan` — Inverse tangent
+
+```
+@arctan(x: real+): real+
+```
+
+{: #arccsc }
+### `@arccsc` — Inverse cosecant
+
+```
+@arccsc(x: real+): real+
+```
+
+{: #arcsec }
+### `@arcsec` — Inverse secant
+
+```
+@arcsec(x: real+): real+
+```
+
+{: #arccot }
+### `@arccot` — Inverse cotangent
+
+```
+@arccot(x: real+): real+
+```
+
+{: #sinh }
+### `@sinh` — Hyperbolic sine
+
+```
+@sinh(theta: real+): real+
+```
+
+{: #cosh }
+### `@cosh` — Hyperbolic cosine
+
+```
+@cosh(theta: real+): real+
+```
+
+{: #tanh }
+### `@tanh` — Hyperbolic tangent
+
+```
+@tanh(theta: real+): real+
+```
+
+{: #csch }
+### `@csch` — Hyperbolic cosecant
+
+```
+@csch(theta: real+): real+
+```
+
+{: #sech }
+### `@sech` — Hyperbolic secant
+
+```
+@sech(theta: real+): real+
+```
+
+{: #coth }
+### `@coth` — Hyperbolic cotangent
+
+```
+@coth(theta: real+): real+
+```
+
+## Calculus
+
+{: #e }
+### `@e` — Euler's constant *e*
+
+```
+@e: real
+
+// @e => 2.71…
+```
+
+{: #exp }
+### `@exp` — Exponent of *e*
+
+```
+@exp(x: real+): real+
+```
+
+{: #ln }
+### `@ln` — Natural logarithm
+
+```
+@ln(x: real+): real+
+```
+
+{: #log }
+### `@log` — Logarithm
+
+```
+@log(base: real+, x: real+): real+
+```
+
+## Number Theory
+
+{: #lcm }
+### `@lcm` — Least common multiple
+
+```
+@lcm(a: int+, b: int+): int+
+
+// @lcm(4, 7) => 28
+// @lcm(4, 6) => 12
+```
+
+{: #gcd }
+### `@gcd` — Greatest common denominator
+
+```
+@gcd(a: int+, b: int+): int+
+
+// @gcd(4, 7) => 1
+// @gcd(4, 6) => 2
+```
+
+{: #ceil }
+### `@ceil` — Round toward positive infinity
+
+```
+@ceil(x: real+): int+
+```
+
+{: #floor }
+### `@floor` — Round toward negative infinity
+
+```
+@floor(x: real+): int+
+```
+
+{: #round }
+### `@round` — Round to nearest
+
+```
+@round(x: real+): int+
+```
+
+{: #sign }
+### `@sign` — Sign value
+
+```
+@sign(x: real+): int+
+```
+
+{: #sqrt }
+### `@sqrt` — Square root
+
+```
+@sqrt(x: real+): real+
+```
+
+{: #cbrt }
+### `@cbrt` — Cube root
+
+```
+@cbrt(x: real+): real+
+```
+
+{: #nth_root }
+### `@nth_root` — Nth root
+
+```
+@nth_root(x: real+, n: real+): real+
+```
+
+## Complex
+
+## List Operations
+
+{: #join }
+### `@join` — Join into a single list
+
+```
+// T: any
+@join(..components: T+): [T]
+
+// @join([1, 2], [3], 4) => [1, 2, 3, 4]
+```
+
+Join two or more lists/values into a single list by concatenating them in order.
+
+{: #sort }
+### `@sort` — Sort a list in ascending order
+
+```
+// K: real | int | bool
+// T: any
+@sort(list: [K]): [K]
+@sort(list: [T], keys: [K]): [T]
+
+// @sort([3, 1, 4, 2]) => [1, 2, 3, 4]
+// -@sort(-[3, 1, 4, 2]) => [4, 3, 2, 1]
+// @sort([a, b, c], [3, 1, 2]) => [b, c, a]
+// -@sort([a, b, c], -[3, 1, 2]) => [a, c, b]
+```
+
+Sort `list` in ascending (increasing) order. If only `list` is provided, its values are used as the keys for sorting.
+If `keys` is provided, `list` will be sorted according to the ordering of `keys`. (`keys` and `list` must have the same
+number of values.) The sort used is a *stable* sort—that is, items that use the same key will remain in the same order
+as they were in the original list.
+
+To sort in descending order, the idioms `-@sort(-list)` or `-@sort(list, -keys)` can be used.
+
+{: #shuffle }
+### `@shuffle` — Randomly shuffle a list
+
+```
+// T: any
+@shuffle(list: [T]): [T]
+@shuffle(list: [T], seed: real): [T]
+
+// @shuffle([1 ..= 4]) => e.g. [2, 3, 1, 4]
+```
+
+Shuffle the items in `list` using global randomness (and `seed` if it is provided).
+
+{: #unique }
+### `@unique` — Remove duplicate items in a list
+
+```
+// T: any
+@unique(list: [T]): [T]
+
+// @unique([1, 4, 1, 3, 3, 2, 3, 4]) => [1, 4, 3, 2]
+```
+
+Retain only the first of each unique item in `list`. Note that this also works for items that are not normally
+comparable with `==`, such as points and colors.
 
 ## Statistics
 
@@ -160,92 +426,125 @@ Compute the number of values in `values`.
 
 Compute the sum of all values in `values`. `bool` values are interpreted as 0 or 1.
 
-## List Operations
-
-{: #join }
-### `@join` — Join into a single list
-
-```
-// T: any
-@join(..components: T+): [T]
-
-// @join([1, 2], [3], 4) => [1, 2, 3, 4]
-```
-
-Join two or more lists/values into a single list by concatenating them in order.
-
-{: #sort }
-### `@sort` — Sort a list in ascending order
-
-```
-// K: real | int | bool
-// T: any
-@sort(list: [K]): [K]
-@sort(list: [T], keys: [K]): [T]
-
-// @sort([3, 1, 4, 2]) => [1, 2, 3, 4]
-// -@sort(-[3, 1, 4, 2]) => [4, 3, 2, 1]
-// @sort([a, b, c], [3, 1, 2]) => [b, c, a]
-// -@sort([a, b, c], -[3, 1, 2]) => [a, c, b]
-```
-
-Sort `list` in ascending (increasing) order. If only `list` is provided, its values are used as the keys for sorting.
-If `keys` is provided, `list` will be sorted according to the ordering of `keys`. (`keys` and `list` must have the same
-number of values.) The sort used is a *stable* sort—that is, items that use the same key will remain in the same order
-as they were in the original list.
-
-To sort in descending order, the idioms `-@sort(-list)` or `-@sort(list, -keys)` can be used.
-
-{: #shuffle }
-### `@shuffle` — Randomly shuffle a list
-
-```
-// T: any
-@shuffle(list: [T]): [T]
-@shuffle(list: [T], seed: real): [T]
-
-// @shuffle([1 ..= 4]) => e.g. [2, 3, 1, 4]
-```
-
-Shuffle the items in `list` using global randomness (and `seed` if it is provided).
-
-{: #unique }
-### `@unique` — Remove duplicate items in a list
-
-```
-// T: any
-@unique(list: [T]): [T]
-
-// @unique([1, 4, 1, 3, 3, 2, 3, 4]) => [1, 4, 3, 2]
-```
-
-Retain only the first of each unique item in `list`. Note that this also works for items that are not normally
-comparable with `==`, such as points and colors.
-
 ## Visualizations
 
 ## Distributions
 
 ## Statistical Tests
 
-## Calculus
-
 ## Geometry
 
+{: #midpoint }
+### `@midpoint` — Midpoint
+
+```
+@midpoint(point_1: (real, real), point_2: (real, real)): (real, real)
+@midpoint(point_1: (real, real, real), point_2: (real, real, real)): (real, real, real)
+@midpoint(seg: segment): (real, real)
+@midpoint(seg: segment3d): (real, real, real)
+```
+
+{: .compatibility-note }
+This forms of this intrinsic accepting a segment are *not* available on `--target desmos-graphing`.
+
 {: #segment }
-### `@segment` — Construct a segment
+### `@segment` — Construct a 2D line segment
 
 ```
 @segment(point_1: (real, real), point_2: (real, real)): segment
 ```
 
 {: .compatibility-note }
+This intrinsic is *not* available on `--target desmos-graphing`.
+
+Construct a 2D line segment from `point_1` to `point_2`.
+
+{: #segment3d }
+### `@segment3d` — Construct a 3D line segment
+
+```
+@segment3d(point_1: (real, real, real), point_2: (real, real, real)): segment3d
+```
+
+{: .compatibility-note }
+This intrinsic is *not* available on `--target desmos-graphing`.
+
+Construct a 3D line segment from `point_1` to `point_2`.
+
+{: #line }
+### `@line` — Construct a 2D line
+
+```
+@line(point_1: (real, real), point_2: (real, real)): line
+```
+
+{: .compatibility-note }
 This intrinsic is *only* available on `--target desmos-geometry`.
 
-Construct a line segment from `point_1` to `point_2`.
+Construct a 2D line passing through `point_1` and `point_2`.
+
+{: #ray }
+### `@ray` — Construct a 2D line ray
+
+```
+@ray(point_1: (real, real), point_2: (real, real)): ray
+```
+
+{: .compatibility-note }
+This intrinsic is *only* available on `--target desmos-geometry`.
+
+Construct a 2D line ray starting at `point_1` and passing through `point_2`.
+
+{: #vector }
+### `@vector` — Construct a 2D vector
+
+```
+@vector(start: (real, real), end: (real, real)): vector
+```
+
+{: .compatibility-note }
+This intrinsic is *not* available on `--target desmos-graphing`.
+
+Construct a 2D vector from `start` to `end`.
+
+{: #vector3d }
+### `@vector3d` — Construct a 3D vector
+
+```
+@vector3d(start: (real, real, real), end: (real, real, real)): vector3d
+```
+
+{: .compatibility-note }
+This intrinsic is *not* available on `--target desmos-graphing`.
+
+Construct a 3D vector from `start` to `end`.
+
+{: #circle }
+### `@circle` — Construct a 2D circle
+
+```
+@circle(center: (real, real), radius: real): circle
+```
+
+{: .compatibility-note }
+This intrinsic is *only* available on `--target desmos-geometry`.
+
+Construct a 2D circle centered at `center` with radius `radius`.
+
+{: #sphere3d }
+### `@sphere3d` — Construct a 3D sphere
+
+```
+@sphere3d(center: (real, real, real), radius: real): sphere3d
+```
+
+{: .compatibility-note }
+This intrinsic is *only* available on `--target desmos-graphing3d`.
+
+Construct a 3D sphere centered at `center` with radius `radius`.
 
 {: #polygon }
-### `@polygon` — Construct a polygon
+### `@polygon` — Construct a 2D polygon
 
 ```
 @polygon(..points: (real, real)+): polygon+
@@ -255,11 +554,46 @@ Construct a line segment from `point_1` to `point_2`.
 {: .compatibility-note }
 This intrinsic is *not* available on `--target desmos-graphing3d`.
 
-Construct a closed polygon using `points`.
+Construct a closed 2D polygon using `points`.
 
 ## Properties & Measurements
 
+{: #start }
+### `@start` — Vector start point
+
+```
+@start(v: vector): (real, real)
+@start(v: vector3d): (real, real, real)
+```
+
+{: .compatibility-note }
+This intrinsic is *not* available on `--target desmos-graphing`.
+
+{: #start }
+### `@end` — Vector end point
+
+```
+@end(v: vector): (real, real)
+@end(v: vector3d): (real, real, real)
+```
+
+{: .compatibility-note }
+This intrinsic is *not* available on `--target desmos-graphing`.
+
 ## Transformations
+
+{: #dilate }
+### `@dilate` — Dilate/Scale an object on a point
+
+```
+// T: (real, real) | polygon | segment | circle | arc | line | ray | vector
+@dilate(object: T+, point: (real, real)+, factor: real+): T+
+```
+
+{: .compatibility-note }
+This intrinsic is *only* available on `--target desmos-geometry`.
+
+Dilate `object` by a factor of `factor` with `point` as the focal point.
 
 {: #rotate }
 ### `@rotate` — Rotate an object about a point
@@ -273,6 +607,34 @@ Construct a closed polygon using `points`.
 This intrinsic is *only* available on `--target desmos-geometry`.
 
 Rotate `object` about `point` by `angle` radians.
+
+{: #reflect }
+### `@reflect` — Reflect an object across a line
+
+```
+// T: (real, real) | polygon | segment | circle | arc | line | ray | vector
+// L: segment | line | ray | vector
+@reflect(object: T+, line: L+): T+
+```
+
+{: .compatibility-note }
+This intrinsic is *only* available on `--target desmos-geometry`.
+
+Reflect `object` across `line`.
+
+{: #translate }
+### `@translate` — Translate an object
+
+```
+// T: (real, real) | polygon | segment | circle | arc | line | ray | vector
+@translate(object: T+, start: (real, real)+, end: (real, real)+): T+
+@translate(object: T+, displacement: vector+): T+
+```
+
+{: .compatibility-note }
+This intrinsic is *only* available on `--target desmos-geometry`.
+
+Translate `object` by a given displacement (either `displacement` or the displacement from `start` to `end`).
 
 ## Color
 
@@ -316,19 +678,6 @@ Rotate `object` about `point` by `angle` radians.
 ```
 
 ## Sound
-
-## Number Theory
-
-{: #e }
-### `@e` — Euler's constant *e*
-
-```
-@e: real
-
-// @e => 2.71…
-```
-
-## Complex
 
 ## Advanced
 

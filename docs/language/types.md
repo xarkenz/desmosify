@@ -82,9 +82,6 @@ This type is *not* available on `--target desmos-graphing3d`.
 {: .compatibility-note }
 This type is *only* available on `--target desmos-geometry`.
 
-{: .note }
-This type is not yet implemented properly.
-
 {: #arc }
 ### `arc` — Circular arc object
 
@@ -100,14 +97,11 @@ This type is not yet implemented properly.
 {: .compatibility-note }
 This type is *only* available on `--target desmos-geometry`.
 
-{: .note }
-This type is not yet implemented properly.
-
 {: #segment }
 ### `segment` — Line segment object
 
 {: .compatibility-note }
-This type is *only* available on `--target desmos-geometry`.
+This type is *not* available on `--target desmos-graphing`.
 
 {: #ray }
 ### `ray` — Line ray object
@@ -115,17 +109,11 @@ This type is *only* available on `--target desmos-geometry`.
 {: .compatibility-note }
 This type is *only* available on `--target desmos-geometry`.
 
-{: .note }
-This type is not yet implemented properly.
-
 {: #vector }
 ### `vector` — Vector object
 
 {: .compatibility-note }
-This type is *only* available on `--target desmos-geometry`.
-
-{: .note }
-This type is not yet implemented properly.
+This type is *not* available on `--target desmos-graphing`.
 
 ## 3D Geometric Types
 
@@ -135,26 +123,29 @@ This type is not yet implemented properly.
 {: #triangle3d }
 ### `triangle3d` — 3D triangle object
 
+{: .compatibility-note }
+This type is *only* available on `--target desmos-graphing3d`.
+
 {: .note }
 This type is not yet implemented properly.
 
 {: #sphere3d }
 ### `sphere3d` — 3D sphere object
 
-{: .note }
-This type is not yet implemented properly.
+{: .compatibility-note }
+This type is *only* available on `--target desmos-graphing3d`.
 
 {: #segment3d }
 ### `segment3d` — 3D line segment object
 
-{: .note }
-This type is not yet implemented properly.
+{: .compatibility-note }
+This type is *not* available on `--target desmos-graphing`.
 
 {: #vector3d }
 ### `vector3d` — 3D vector object
 
-{: .note }
-This type is not yet implemented properly.
+{: .compatibility-note }
+This type is *not* available on `--target desmos-graphing`.
 
 {: #enum }
 ## Enumeration Types

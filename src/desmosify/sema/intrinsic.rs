@@ -562,6 +562,7 @@ pub static FLOOR: IntrinsicFunction = unary_intrinsic!(
     "floor", (Type::Real) => Floor, Type::Int
 );
 
+// FIXME: there is a version of this function with 2 arguments which is not handled
 pub static ROUND: IntrinsicFunction = unary_intrinsic!(
     "round", (Type::Real) => Round, Type::Int
 );
