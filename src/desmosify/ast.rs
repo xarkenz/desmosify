@@ -259,7 +259,7 @@ impl std::fmt::Display for RangeKind {
 }
 
 #[derive(Clone, Debug)]
-pub enum ExpressionIndexOperation {
+pub enum IndexOperation {
     Single {
         index: Box<Expression>,
     },
@@ -279,13 +279,13 @@ pub enum ExpressionIndexOperation {
     },
 }
 
-impl ExpressionIndexOperation {
+impl IndexOperation {
     pub fn is_range(&self) -> bool {
         matches!(self, Self::Range { .. } | Self::RangeFrom { .. } | Self::RangeTo { .. })
     }
 }
 
-impl std::fmt::Display for ExpressionIndexOperation {
+impl std::fmt::Display for IndexOperation {
     fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
         match self {
             Self::Single { index } => {
@@ -375,7 +375,7 @@ pub enum ExpressionKind {
     },
     Index {
         list: Box<Expression>,
-        operation: ExpressionIndexOperation,
+        operation: IndexOperation,
     },
     FunctionCall {
         function: Box<Expression>,

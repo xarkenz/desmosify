@@ -1,11 +1,11 @@
 use std::path::PathBuf;
 use std::rc::Rc;
-use crate::ast::{ActionExpression, ActionExpressionKind, BinaryOperation, DefinitionKind, DisplayAttribute, DisplayAttributeValue, Expression, ExpressionIndexOperation, ExpressionKind, ParameterList, PublicLineKind, TypeDefinition, UnaryOperation, ValueDefinition, VariableKind};
+use crate::ast::{ActionExpression, ActionExpressionKind, BinaryOperation, DefinitionKind, DisplayAttribute, DisplayAttributeValue, Expression, IndexOperation, ExpressionKind, ParameterList, PublicLineKind, TypeDefinition, UnaryOperation, ValueDefinition, VariableKind};
 use crate::sema::{Program, ProgramAction, ProgramLet, ProgramPublic, ProgramPublicLine, ProgramTicker, ProgramVariable, ProgramVariableKind};
 use crate::sema::context::{GlobalContext, LocalContext};
 use crate::sema::display::{DragMode, LabelOrientation, LineStyle, PointStyle, ProgramDisplay, ProgramDisplayAttribute, ProgramDisplayAttributeKind, ProgramDisplayElement};
 use crate::sema::types::{ListState, Type};
-use crate::sema::values::{ActionValue, ActionValueKind, GlobalReference, LocalReference, Value, IndexKind, ValueKind, ListMapLoop, BinaryKind, UnaryKind, ActionReference};
+use crate::sema::values::{ActionValue, ActionValueKind, GlobalReference, LocalReference, Value, IndexKind, ValueKind, ListMapLoop, BinaryKind, UnaryKind, ActionReference, InequalityKind};
 use crate::target::Target;
 
 pub fn interpret_program(source_paths: &[PathBuf], target: &mut dyn Target, context: &GlobalContext) -> crate::Result<Program> {
@@ -1031,10 +1031,18 @@ pub fn interpret_binary_operation(
         BinaryOperation::Remainder => BinaryKind::Remainder,
         BinaryOperation::Add => BinaryKind::Add,
         BinaryOperation::Subtract => BinaryKind::Subtract,
-        BinaryOperation::LessThan => BinaryKind::LessThan,
-        BinaryOperation::LessEqual => BinaryKind::LessEqual,
-        BinaryOperation::GreaterThan => BinaryKind::GreaterThan,
-        BinaryOperation::GreaterEqual => BinaryKind::GreaterEqual,
+        BinaryOperation::LessThan => {
+            return interpret_inequality_chain(target, context, local_context, InequalityKind::LessThan, lhs, rhs, span)
+        }
+        BinaryOperation::LessEqual => {
+            return interpret_inequality_chain(target, context, local_context, InequalityKind::LessEqual, lhs, rhs, span)
+        }
+        BinaryOperation::GreaterThan => {
+            return interpret_inequality_chain(target, context, local_context, InequalityKind::GreaterThan, lhs, rhs, span)
+        }
+        BinaryOperation::GreaterEqual => {
+            return interpret_inequality_chain(target, context, local_context, InequalityKind::GreaterEqual, lhs, rhs, span)
+        }
         BinaryOperation::Equal => BinaryKind::Equal,
         BinaryOperation::NotEqual => BinaryKind::NotEqual,
         BinaryOperation::LogicalAnd => BinaryKind::LogicalAnd,
@@ -1129,22 +1137,13 @@ pub fn interpret_binary_operation(
             Type::merge(&lhs.get_type(), &rhs.get_type())
                 .map_err(|error| error.with_span(span))?
         }
-        BinaryKind::LessThan |
-        BinaryKind::LessEqual |
-        BinaryKind::GreaterThan |
-        BinaryKind::GreaterEqual => {
-            // The operands must merge into a numeric type, but the result is always a bool
-            Type::merge(&lhs_type, &rhs_type)
-                .map_err(|error| error.with_span(span))?
-                .require_numeric()?;
-            Type::Bool.unflatten_list(ListState::merge(lhs_list, rhs_list))
-        }
         BinaryKind::Equal |
         BinaryKind::NotEqual => {
             // The operands must merge into a numeric or point type, but the result is always a bool
             Type::merge(&lhs_type, &rhs_type)
                 .map_err(|error| error.with_span(span))?
-                .require_numeric_or_point()?;
+                .require_numeric_or_point()
+                .map_err(|error| error.with_span(span))?;
             Type::Bool.unflatten_list(ListState::merge(lhs_list, rhs_list))
         }
         BinaryKind::LogicalAnd |
@@ -1258,14 +1257,72 @@ fn interpret_access_operation(
     }
 }
 
+fn interpret_inequality_chain(
+    target: &mut dyn Target,
+    context: &GlobalContext,
+    local_context: &LocalContext,
+    rightmost_kind: InequalityKind,
+    lhs: &Expression,
+    rhs: &Expression,
+    span: Option<crate::Span>,
+) -> crate::Result<ValueKind> {
+    let rhs_value = interpret_expression(target, context, local_context, rhs)?;
+    let (mut list_state, mut compared_type) = rhs_value.get_type().into_flatten_list();
+
+    // Descend into the LHS subtree as long as comparison operations is found.
+    // Any chained comparisons without parentheses will be in the left subtree because comparisons
+    // have left-to-right associativity.
+    let mut chain_rev = vec![(rightmost_kind, rhs_value)];
+    let mut current_lhs = lhs;
+    loop {
+        if let ExpressionKind::Binary { operation, lhs, rhs } = &current_lhs.kind {
+            let kind = match operation {
+                BinaryOperation::LessThan => InequalityKind::LessThan,
+                BinaryOperation::LessEqual => InequalityKind::LessEqual,
+                BinaryOperation::GreaterThan => InequalityKind::GreaterThan,
+                BinaryOperation::GreaterEqual => InequalityKind::GreaterEqual,
+                _ => break
+            };
+
+            let rhs_value = interpret_expression(target, context, local_context, rhs)?;
+            let (rhs_list, rhs_type) = rhs_value.get_type().into_flatten_list();
+
+            list_state = ListState::merge(list_state, rhs_list);
+            compared_type = compared_type.merge(&rhs_type)
+                .map_err(|error| error.with_span(rhs_value.span))?;
+
+            chain_rev.push((kind, rhs_value));
+            current_lhs = lhs.as_ref();
+        }
+        else {
+            break
+        }
+    }
+
+    let lhs_value =  interpret_expression(target, context, local_context, current_lhs)?;
+    let (lhs_list, lhs_type) = lhs_value.get_type().into_flatten_list();
+
+    list_state = ListState::merge(list_state, lhs_list);
+    compared_type.merge(&lhs_type)
+        .map_err(|error| error.with_span(lhs_value.span))?
+        .require_numeric()
+        .map_err(|error| error.with_span(span))?;
+
+    Ok(ValueKind::InequalityChain {
+        lhs: Box::new(lhs_value),
+        chain: chain_rev.into_iter().rev().collect(),
+        result_type: Type::Bool.unflatten_list(list_state),
+    })
+}
+
 pub fn interpret_index_operation(
     target: &mut dyn Target,
     context: &GlobalContext,
     local_context: &LocalContext,
-    operation: &ExpressionIndexOperation,
+    operation: &IndexOperation,
 ) -> crate::Result<IndexKind> {
     match operation {
-        ExpressionIndexOperation::Single { index } => {
+        IndexOperation::Single { index } => {
             let index = interpret_expression(target, context, local_context, index)?
                 .coerce_to(&Type::Int, true)?;
 
@@ -1273,7 +1330,7 @@ pub fn interpret_index_operation(
                 index: Box::new(index),
             })
         }
-        ExpressionIndexOperation::Range { kind, from_index, to_index, step } => {
+        IndexOperation::Range { kind, from_index, to_index, step } => {
             let from_index = interpret_expression(target, context, local_context, from_index)?
                 .coerce_to(&Type::Int, false)?;
             let to_index = interpret_expression(target, context, local_context, to_index)?
@@ -1291,7 +1348,7 @@ pub fn interpret_index_operation(
                 step: Box::new(step),
             })
         }
-        ExpressionIndexOperation::RangeFrom { from_index, step } => {
+        IndexOperation::RangeFrom { from_index, step } => {
             let from_index = interpret_expression(target, context, local_context, from_index)?
                 .coerce_to(&Type::Int, false)?;
             let step = match step {
@@ -1305,7 +1362,7 @@ pub fn interpret_index_operation(
                 step: Box::new(step),
             })
         }
-        ExpressionIndexOperation::RangeTo { kind, to_index } => {
+        IndexOperation::RangeTo { kind, to_index } => {
             let to_index = interpret_expression(target, context, local_context, to_index)?
                 .coerce_to(&Type::Int, false)?;
 

@@ -137,9 +137,8 @@ let poke(l: [any], i: int, x: any): [any] = {
 };
 
 let player_of(piece: Piece+): Player+ = {
-    // TODO: chained inequalities
-    Piece.RED_FLAG <= piece && piece <= Piece.RED_MARSHAL: Player.RED,
-    Piece.BLUE_FLAG <= piece && piece <= Piece.BLUE_MARSHAL: Player.BLUE,
+    Piece.RED_FLAG <= piece <= Piece.RED_MARSHAL: Player.RED,
+    Piece.BLUE_FLAG <= piece <= Piece.BLUE_MARSHAL: Player.BLUE,
 };
 
 let piece_type_of(piece: Piece+): PieceType+ = {

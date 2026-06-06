@@ -733,8 +733,6 @@ pub enum GraphExpression {
     },
     InequalityChain {
         lhs: Box<Self>,
-        first_kind: GraphInequalityKind,
-        rhs: Box<Self>,
         chain: Vec<(GraphInequalityKind, Self)>,
     },
     Sequence {
@@ -927,8 +925,8 @@ impl GraphExpression {
                     lhs.to_latex().add_escape("to".into()).add(rhs.to_latex())
                 }
             }
-            Self::InequalityChain { lhs, first_kind, rhs, chain } => {
-                let mut latex = lhs.to_latex().add_node(first_kind.to_latex_node()).add(rhs.to_latex());
+            Self::InequalityChain { lhs, chain } => {
+                let mut latex = lhs.to_latex();
                 for (inequality, value) in chain {
                     latex = latex.add_node(inequality.to_latex_node()).add(value.to_latex());
                 }

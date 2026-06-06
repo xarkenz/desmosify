@@ -99,10 +99,6 @@ pub enum BinaryKind {
     Remainder,
     Add,
     Subtract,
-    LessThan,
-    LessEqual,
-    GreaterThan,
-    GreaterEqual,
     Equal,
     NotEqual,
     LogicalAnd,
@@ -120,6 +116,14 @@ pub enum BinaryKind {
     Vector3D,
     Circle,
     Sphere3D,
+}
+
+#[derive(Copy, Clone, PartialEq, Debug)]
+pub enum InequalityKind {
+    LessThan,
+    LessEqual,
+    GreaterThan,
+    GreaterEqual,
 }
 
 #[derive(Copy, Clone, PartialEq, Debug)]
@@ -264,6 +268,11 @@ pub enum ValueKind {
         kind: BinaryKind,
         lhs: Box<Value>,
         rhs: Box<Value>,
+        result_type: Type,
+    },
+    InequalityChain {
+        lhs: Box<Value>,
+        chain: Box<[(InequalityKind, Value)]>,
         result_type: Type,
     },
     Reducer {
@@ -466,6 +475,9 @@ impl ValueKind {
                 result_type.clone()
             }
             Self::Binary { result_type, .. } => {
+                result_type.clone()
+            }
+            Self::InequalityChain { result_type, .. } => {
                 result_type.clone()
             }
             Self::Reducer { result_type, .. } => {
@@ -719,13 +731,22 @@ impl std::fmt::Debug for ValueKind {
             Self::ClickIndex => {
                 write!(f, "ClickIndex")
             }
-            Self::Unary { kind: operation, operand, .. } => {
-                write!(f, "{operation:?}<{self_type}>")?;
+            Self::Unary { kind, operand, .. } => {
+                write!(f, "{kind:?}<{self_type}>")?;
                 f.debug_tuple("").field(operand).finish()
             }
-            Self::Binary { kind: operation, lhs, rhs, .. } => {
-                write!(f, "{operation:?}<{self_type}>")?;
+            Self::Binary { kind, lhs, rhs, .. } => {
+                write!(f, "{kind:?}<{self_type}>")?;
                 f.debug_tuple("").field(lhs).field(rhs).finish()
+            }
+            Self::InequalityChain { lhs, chain, .. } => {
+                write!(f, "InequalityChain<{self_type}>")?;
+                let mut tuple = f.debug_tuple("");
+                tuple.field(lhs);
+                for (kind, rhs) in chain {
+                    tuple.field(kind).field(rhs);
+                }
+                tuple.finish()
             }
             Self::Reducer { kind, list, .. } => {
                 write!(f, "{kind:?}<{self_type}>")?;

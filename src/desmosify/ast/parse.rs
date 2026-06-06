@@ -569,7 +569,7 @@ impl<'a, T: BufRead> Parser<'a, T> {
                     self.consume_token()?; // Whatever the range operator token was
                     let to_index = self.parse_expression(None, &[TokenKind::SquareRight])?;
 
-                    index_operation = ExpressionIndexOperation::RangeTo {
+                    index_operation = IndexOperation::RangeTo {
                         kind: range_kind,
                         to_index: Box::new(to_index),
                     };
@@ -599,7 +599,7 @@ impl<'a, T: BufRead> Parser<'a, T> {
                             _ => unreachable!()
                         };
 
-                        index_operation = ExpressionIndexOperation::Range {
+                        index_operation = IndexOperation::Range {
                             kind: range_kind,
                             from_index: Box::new(index),
                             to_index: Box::new(to_index),
@@ -623,13 +623,13 @@ impl<'a, T: BufRead> Parser<'a, T> {
                             _ => unreachable!()
                         };
 
-                        index_operation = ExpressionIndexOperation::RangeFrom {
+                        index_operation = IndexOperation::RangeFrom {
                             from_index: Box::new(index),
                             step,
                         };
                     }
                     else {
-                        index_operation = ExpressionIndexOperation::Single {
+                        index_operation = IndexOperation::Single {
                             index: Box::new(index),
                         };
                     }

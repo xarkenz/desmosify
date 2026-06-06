@@ -4,7 +4,7 @@ use crate::desmos::target::DesmosTargetInfo;
 use crate::sema::{Program, ProgramAction, ProgramLet, ProgramPublicLine, ProgramTicker, ProgramVariable, ProgramVariableKind};
 use crate::sema::display::{ImageValue, ProgramDisplayAttributeKind, ProgramDisplayElement};
 use crate::sema::types::Type;
-use crate::sema::values::{ActionValue, ActionValueKind, BinaryKind, ColorKind, DoubleReducerKind, IndexKind, MathematicalConstant, ParameterizedReducerKind, ReducerKind, UnaryKind, Value, ValueKind};
+use crate::sema::values::{ActionValue, ActionValueKind, BinaryKind, ColorKind, DoubleReducerKind, IndexKind, InequalityKind, MathematicalConstant, ParameterizedReducerKind, ReducerKind, UnaryKind, Value, ValueKind};
 
 pub const INTRINSICS_FOLDER_ID: &str = "desmosify_intrinsics";
 pub const GLOBALS_FOLDER_ID: &str = "desmosify_globals";
@@ -190,17 +190,18 @@ impl<'target> GraphExpressionListBuilder<'target> {
                                             rhs: Box::new(local_s.clone()),
                                         }),
                                     }),
-                                    first_kind: GraphInequalityKind::GreaterThan,
-                                    rhs: Box::new(GraphExpression::Binary {
-                                        kind: GraphBinaryKind::ImplicitMultiply,
-                                        lhs: Box::new(local_b.clone()),
-                                        rhs: Box::new(GraphExpression::Binary {
-                                            kind: GraphBinaryKind::Call,
-                                            lhs: Box::new(GraphExpression::OperatorName("sign".into())),
-                                            rhs: Box::new(local_s.clone()),
-                                        }),
-                                    }),
-                                    chain: Vec::new(),
+                                    chain: Vec::from([(
+                                        GraphInequalityKind::GreaterThan,
+                                        GraphExpression::Binary {
+                                            kind: GraphBinaryKind::ImplicitMultiply,
+                                            lhs: Box::new(local_b.clone()),
+                                            rhs: Box::new(GraphExpression::Binary {
+                                                kind: GraphBinaryKind::Call,
+                                                lhs: Box::new(GraphExpression::OperatorName("sign".into())),
+                                                rhs: Box::new(local_s.clone()),
+                                            }),
+                                        },
+                                    )]),
                                 }),
                                 rhs: Box::new(GraphExpression::Unary {
                                     kind: GraphUnaryKind::List,
@@ -718,6 +719,31 @@ impl<'target> GraphExpressionListBuilder<'target> {
             }
             ValueKind::Binary { kind, lhs, rhs, .. } => {
                 self.translate_binary(*kind, lhs, rhs, unsupported_error)
+            }
+            ValueKind::InequalityChain { lhs, chain, .. } => {
+                Ok(GraphExpression::Unary {
+                    kind: GraphUnaryKind::Piecewise,
+                    inner: Box::new(GraphExpression::Sequence {
+                        elements: Vec::from([
+                            GraphExpression::InequalityChain {
+                                lhs: Box::new(self.translate_value(lhs)?),
+                                chain: chain
+                                    .iter()
+                                    .map(|(kind, rhs)| Ok((
+                                        match kind {
+                                            InequalityKind::LessThan => GraphInequalityKind::LessThan,
+                                            InequalityKind::LessEqual => GraphInequalityKind::LessEqual,
+                                            InequalityKind::GreaterThan => GraphInequalityKind::GreaterThan,
+                                            InequalityKind::GreaterEqual => GraphInequalityKind::GreaterEqual,
+                                        },
+                                        self.translate_value(rhs)?,
+                                    )))
+                                    .collect::<crate::Result<_>>()?,
+                            },
+                            GraphExpression::Integer(0),
+                        ]),
+                    }),
+                })
             }
             ValueKind::Reducer { kind, list, .. } => {
                 self.translate_reducer(*kind, [list.as_ref()], unsupported_error)
@@ -1326,70 +1352,6 @@ impl<'target> GraphExpressionListBuilder<'target> {
                     self.translate_value(rhs)?,
                 ))
             }
-            BinaryKind::LessThan => {
-                Ok(GraphExpression::Unary {
-                    kind: GraphUnaryKind::Piecewise,
-                    inner: Box::new(GraphExpression::Sequence {
-                        elements: Vec::from([
-                            GraphExpression::InequalityChain {
-                                lhs: Box::new(self.translate_value(lhs)?),
-                                first_kind: GraphInequalityKind::LessThan,
-                                rhs: Box::new(self.translate_value(rhs)?),
-                                chain: Vec::new(),
-                            },
-                            GraphExpression::Integer(0),
-                        ]),
-                    }),
-                })
-            }
-            BinaryKind::LessEqual => {
-                Ok(GraphExpression::Unary {
-                    kind: GraphUnaryKind::Piecewise,
-                    inner: Box::new(GraphExpression::Sequence {
-                        elements: Vec::from([
-                            GraphExpression::InequalityChain {
-                                lhs: Box::new(self.translate_value(lhs)?),
-                                first_kind: GraphInequalityKind::LessEqual,
-                                rhs: Box::new(self.translate_value(rhs)?),
-                                chain: Vec::new(),
-                            },
-                            GraphExpression::Integer(0),
-                        ]),
-                    }),
-                })
-            }
-            BinaryKind::GreaterThan => {
-                Ok(GraphExpression::Unary {
-                    kind: GraphUnaryKind::Piecewise,
-                    inner: Box::new(GraphExpression::Sequence {
-                        elements: Vec::from([
-                            GraphExpression::InequalityChain {
-                                lhs: Box::new(self.translate_value(lhs)?),
-                                first_kind: GraphInequalityKind::GreaterThan,
-                                rhs: Box::new(self.translate_value(rhs)?),
-                                chain: Vec::new(),
-                            },
-                            GraphExpression::Integer(0),
-                        ]),
-                    }),
-                })
-            }
-            BinaryKind::GreaterEqual => {
-                Ok(GraphExpression::Unary {
-                    kind: GraphUnaryKind::Piecewise,
-                    inner: Box::new(GraphExpression::Sequence {
-                        elements: Vec::from([
-                            GraphExpression::InequalityChain {
-                                lhs: Box::new(self.translate_value(lhs)?),
-                                first_kind: GraphInequalityKind::GreaterEqual,
-                                rhs: Box::new(self.translate_value(rhs)?),
-                                chain: Vec::new(),
-                            },
-                            GraphExpression::Integer(0),
-                        ]),
-                    }),
-                })
-            }
             BinaryKind::Equal => {
                 Ok(GraphExpression::Unary {
                     kind: GraphUnaryKind::Piecewise,
@@ -1715,36 +1677,21 @@ impl<'target> GraphExpressionListBuilder<'target> {
                     rhs: Box::new(GraphExpression::Integer(0)),
                 })
             }
-            ValueKind::Binary { kind: BinaryKind::LessThan, lhs, rhs, .. } => {
+            ValueKind::InequalityChain { lhs, chain, .. } => {
                 Ok(GraphExpression::InequalityChain {
-                    first_kind: GraphInequalityKind::LessThan,
                     lhs: Box::new(self.translate_value(lhs)?),
-                    rhs: Box::new(self.translate_value(rhs)?),
-                    chain: Vec::new(),
-                })
-            }
-            ValueKind::Binary { kind: BinaryKind::GreaterThan, lhs, rhs, .. } => {
-                Ok(GraphExpression::InequalityChain {
-                    first_kind: GraphInequalityKind::GreaterThan,
-                    lhs: Box::new(self.translate_value(lhs)?),
-                    rhs: Box::new(self.translate_value(rhs)?),
-                    chain: Vec::new(),
-                })
-            }
-            ValueKind::Binary { kind: BinaryKind::LessEqual, lhs, rhs, .. } => {
-                Ok(GraphExpression::InequalityChain {
-                    first_kind: GraphInequalityKind::LessEqual,
-                    lhs: Box::new(self.translate_value(lhs)?),
-                    rhs: Box::new(self.translate_value(rhs)?),
-                    chain: Vec::new(),
-                })
-            }
-            ValueKind::Binary { kind: BinaryKind::GreaterEqual, lhs, rhs, .. } => {
-                Ok(GraphExpression::InequalityChain {
-                    first_kind: GraphInequalityKind::GreaterEqual,
-                    lhs: Box::new(self.translate_value(lhs)?),
-                    rhs: Box::new(self.translate_value(rhs)?),
-                    chain: Vec::new(),
+                    chain: chain
+                        .iter()
+                        .map(|(kind, rhs)| Ok((
+                            match kind {
+                                InequalityKind::LessThan => GraphInequalityKind::LessThan,
+                                InequalityKind::LessEqual => GraphInequalityKind::LessEqual,
+                                InequalityKind::GreaterThan => GraphInequalityKind::GreaterThan,
+                                InequalityKind::GreaterEqual => GraphInequalityKind::GreaterEqual,
+                            },
+                            self.translate_value(rhs)?,
+                        )))
+                        .collect::<crate::Result<_>>()?,
                 })
             }
             _ => {
