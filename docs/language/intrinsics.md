@@ -438,10 +438,10 @@ Compute the sum of all values in `values`. `bool` values are interpreted as 0 or
 ### `@midpoint` — Midpoint
 
 ```
-@midpoint(point_1: (real, real), point_2: (real, real)): (real, real)
-@midpoint(point_1: (real, real, real), point_2: (real, real, real)): (real, real, real)
-@midpoint(seg: segment): (real, real)
-@midpoint(seg: segment3d): (real, real, real)
+@midpoint(point_1: (real, real)+, point_2: (real, real)+): (real, real)+
+@midpoint(point_1: (real, real, real)+, point_2: (real, real, real)+): (real, real, real)+
+@midpoint(seg: segment+): (real, real)+
+@midpoint(seg: segment3d+): (real, real, real)+
 ```
 
 {: .compatibility-note }
@@ -451,7 +451,7 @@ This forms of this intrinsic accepting a segment are *not* available on `--targe
 ### `@segment` — Construct a 2D line segment
 
 ```
-@segment(point_1: (real, real), point_2: (real, real)): segment
+@segment(point_1: (real, real)+, point_2: (real, real)+): segment+
 ```
 
 {: .compatibility-note }
@@ -463,7 +463,7 @@ Construct a 2D line segment from `point_1` to `point_2`.
 ### `@segment3d` — Construct a 3D line segment
 
 ```
-@segment3d(point_1: (real, real, real), point_2: (real, real, real)): segment3d
+@segment3d(point_1: (real, real, real)+, point_2: (real, real, real)+): segment3d+
 ```
 
 {: .compatibility-note }
@@ -475,7 +475,7 @@ Construct a 3D line segment from `point_1` to `point_2`.
 ### `@line` — Construct a 2D line
 
 ```
-@line(point_1: (real, real), point_2: (real, real)): line
+@line(point_1: (real, real)+, point_2: (real, real)+): line+
 ```
 
 {: .compatibility-note }
@@ -487,7 +487,7 @@ Construct a 2D line passing through `point_1` and `point_2`.
 ### `@ray` — Construct a 2D line ray
 
 ```
-@ray(point_1: (real, real), point_2: (real, real)): ray
+@ray(point_1: (real, real)+, point_2: (real, real)+): ray+
 ```
 
 {: .compatibility-note }
@@ -499,7 +499,7 @@ Construct a 2D line ray starting at `point_1` and passing through `point_2`.
 ### `@vector` — Construct a 2D vector
 
 ```
-@vector(start: (real, real), end: (real, real)): vector
+@vector(start: (real, real)+, end: (real, real)+): vector+
 ```
 
 {: .compatibility-note }
@@ -511,7 +511,7 @@ Construct a 2D vector from `start` to `end`.
 ### `@vector3d` — Construct a 3D vector
 
 ```
-@vector3d(start: (real, real, real), end: (real, real, real)): vector3d
+@vector3d(start: (real, real, real)+, end: (real, real, real)+): vector3d+
 ```
 
 {: .compatibility-note }
@@ -523,7 +523,7 @@ Construct a 3D vector from `start` to `end`.
 ### `@circle` — Construct a 2D circle
 
 ```
-@circle(center: (real, real), radius: real): circle
+@circle(center: (real, real)+, radius: real+): circle+
 ```
 
 {: .compatibility-note }
@@ -535,7 +535,7 @@ Construct a 2D circle centered at `center` with radius `radius`.
 ### `@sphere3d` — Construct a 3D sphere
 
 ```
-@sphere3d(center: (real, real, real), radius: real): sphere3d
+@sphere3d(center: (real, real, real)+, radius: real+): sphere3d+
 ```
 
 {: .compatibility-note }
@@ -562,8 +562,8 @@ Construct a closed 2D polygon using `points`.
 ### `@start` — Vector start point
 
 ```
-@start(v: vector): (real, real)
-@start(v: vector3d): (real, real, real)
+@start(v: vector+): (real, real)+
+@start(v: vector3d+): (real, real, real)+
 ```
 
 {: .compatibility-note }
@@ -573,8 +573,8 @@ This intrinsic is *not* available on `--target desmos-graphing`.
 ### `@end` — Vector end point
 
 ```
-@end(v: vector): (real, real)
-@end(v: vector3d): (real, real, real)
+@end(v: vector+): (real, real)+
+@end(v: vector3d+): (real, real, real)+
 ```
 
 {: .compatibility-note }
