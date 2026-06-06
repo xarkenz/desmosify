@@ -99,21 +99,53 @@ pub const CORE_INTRINSIC_FUNCTIONS: &[&IntrinsicFunction] = &[
     &SIN,
     &COS,
     &TAN,
-    // &CSC,
-    // &SEC,
-    // &COT,
-    // &ARCSIN,
-    // &ARCCOS,
-    // &ARCTAN,
-    // &ARCCSC,
-    // &ARCSEC,
-    // &ARCCOT,
-    // &SINH,
-    // &COSH,
-    // &TANH,
-    // &CSCH,
-    // &SECH,
-    // &COTH,
+    &CSC,
+    &SEC,
+    &COT,
+    &ARCSIN,
+    &ARCCOS,
+    &ARCTAN,
+    &ARCCSC,
+    &ARCSEC,
+    &ARCCOT,
+    &SINH,
+    &COSH,
+    &TANH,
+    &CSCH,
+    &SECH,
+    &COTH,
+    // Calculus
+    &EXP,
+    &LN,
+    &LOG,
+    // &DERIVATIVE,
+    // &INTEGRAL,
+    // &SUM,
+    // &PRODUCT,
+    // Number Theory
+    &LCM,
+    &GCD,
+    &CEIL,
+    &FLOOR,
+    &ROUND,
+    // &ABS,
+    &SIGN,
+    &SQRT,
+    &CBRT,
+    &NTH_ROOT,
+    // &NPR,
+    // &NCR,
+    // &FACTORIAL,
+    // Complex
+    // &REAL,
+    // &IMAG,
+    // &CONJ,
+    // &ARG,
+    // List Operations
+    &JOIN,
+    &SORT,
+    &SHUFFLE,
+    &UNIQUE,
     // Statistics
     &MEAN,
     // &MEDIAN,
@@ -133,11 +165,6 @@ pub const CORE_INTRINSIC_FUNCTIONS: &[&IntrinsicFunction] = &[
     // &STATS,
     &COUNT,
     &TOTAL,
-    // List Operations
-    &JOIN,
-    &SORT,
-    &SHUFFLE,
-    &UNIQUE,
     // Visualizations
     // &HISTOGRAM,
     // &DOT_PLOT,
@@ -158,28 +185,24 @@ pub const CORE_INTRINSIC_FUNCTIONS: &[&IntrinsicFunction] = &[
     // &TTEST,
     // &TSCORE,
     // &ITTEST,
-    // Calculus
-    // &EXP,
-    // &LN,
-    // &LOG,
-    // &DERIVATIVE,
-    // &INTEGRAL,
-    // &SUM,
-    // &PRODUCT,
     // Geometry
-    // &MIDPOINT,
+    &MIDPOINT,
     // &INTERSECTION,
     &SEGMENT,
-    // &LINE,
-    // &RAY,
-    // &VECTOR,
+    &SEGMENT3D,
+    &LINE,
+    &RAY,
+    &VECTOR,
+    &VECTOR3D,
     // &PARALLEL,
     // &PERPENDICULAR,
-    // &CIRCLE,
+    &CIRCLE,
+    &SPHERE3D,
     // &ARC,
     // &ANGLE,
     // &DIRECTED_ANGLE,
     &POLYGON,
+    // &TRIANGLE3D,
     // &GLIDER,
     // Properties & Measurements
     // &DOT,
@@ -196,8 +219,8 @@ pub const CORE_INTRINSIC_FUNCTIONS: &[&IntrinsicFunction] = &[
     // &CENTER,
     // &COTERMINAL,
     // &SUPPLEMENT,
-    // &START,
-    // &END,
+    &START,
+    &END,
     // Transformations
     &DILATE,
     &ROTATE,
@@ -211,24 +234,6 @@ pub const CORE_INTRINSIC_FUNCTIONS: &[&IntrinsicFunction] = &[
     &OKLCH,
     // Sound
     // &TONE,
-    // Number Theory
-    // &LCM,
-    // &GCD,
-    // &CEIL,
-    // &FLOOR,
-    // &ROUND,
-    // &SIGN,
-    // &SQRT,
-    // &CBRT,
-    // &NTHROOT,
-    // &NPR,
-    // &NCR,
-    // &FACTORIAL,
-    // Complex
-    // &REAL,
-    // &IMAG,
-    // &CONJ,
-    // &ARG,
     // Desmosify
     &ENUM_VALUES,
     &ENUM_VALUE,
@@ -239,30 +244,80 @@ pub const CORE_INTRINSIC_FUNCTIONS: &[&IntrinsicFunction] = &[
     &TARGET_SYMBOL,
 ];
 
-pub fn interpret_trig_call(
+pub fn interpret_unary_call(
     kind: UnaryKind,
+    argument_type: &Type,
+    result_type: Type,
     arguments: Box<[Value]>,
 ) -> crate::Result<ValueKind> {
     let argument = arguments.into_iter().next().unwrap()
-        .coerce_to(&Type::Real, true)?;
-    let is_list = argument.get_type().list_state();
+        .coerce_to(argument_type, true)?;
+
+    let list_state = argument.get_type().list_state();
 
     Ok(ValueKind::Unary {
         kind,
         operand: Box::new(argument),
-        result_type: Type::Real.unflatten_list(is_list),
+        result_type: result_type.unflatten_list(list_state),
     })
 }
 
-macro_rules! trig_intrinsic {
-    ($id:expr => $kind:ident) => {
+macro_rules! unary_intrinsic {
+    ($identifier:literal, ($argument_type:expr) => $kind:ident, $result_type:expr) => {
         IntrinsicFunction {
-            identifier: $id,
+            identifier: $identifier,
             min_arity: 1,
             max_arity: Some(1),
-            interpret_call: |_, _, _, arguments| {
-                interpret_trig_call(UnaryKind::$kind, arguments)
-            },
+            interpret_call: |_, _, _, arguments| interpret_unary_call(
+                UnaryKind::$kind,
+                &($argument_type),
+                $result_type,
+                arguments,
+            ),
+        }
+    };
+}
+
+pub fn interpret_binary_call(
+    kind: BinaryKind,
+    lhs_type: &Type,
+    rhs_type: &Type,
+    result_type: Type,
+    arguments: Box<[Value]>,
+) -> crate::Result<ValueKind> {
+    let mut arguments = arguments.into_iter();
+
+    let lhs = arguments.next().unwrap()
+        .coerce_to(lhs_type, true)?;
+    let rhs = arguments.next().unwrap()
+        .coerce_to(rhs_type, true)?;
+
+    let list_state = ListState::merge(
+        lhs.get_type().list_state(),
+        rhs.get_type().list_state(),
+    );
+
+    Ok(ValueKind::Binary {
+        kind,
+        lhs: Box::new(lhs),
+        rhs: Box::new(rhs),
+        result_type: result_type.unflatten_list(list_state),
+    })
+}
+
+macro_rules! binary_intrinsic {
+    ($identifier:literal, ($lhs_type:expr, $rhs_type:expr) => $kind:ident, $result_type:expr) => {
+        IntrinsicFunction {
+            identifier: $identifier,
+            min_arity: 2,
+            max_arity: Some(2),
+            interpret_call: |_, _, _, arguments| interpret_binary_call(
+                BinaryKind::$kind,
+                &($lhs_type),
+                &($rhs_type),
+                $result_type,
+                arguments,
+            ),
         }
     };
 }
@@ -314,14 +369,17 @@ pub fn interpret_reducer_call(
 }
 
 macro_rules! reducer_intrinsic {
-    ($id:expr, $chk:expr => $kind:ident, $res:expr) => {
+    ($identifier:literal, $argument_check:expr => $kind:ident, $result_override:expr) => {
         IntrinsicFunction {
-            identifier: $id,
+            identifier: $identifier,
             min_arity: 1,
             max_arity: None,
-            interpret_call: |_, _, _, arguments| {
-                interpret_reducer_call(ReducerKind::$kind, $chk, $res, arguments)
-            },
+            interpret_call: |_, _, _, arguments| interpret_reducer_call(
+                ReducerKind::$kind,
+                $argument_check,
+                $result_override,
+                arguments,
+            ),
         }
     };
 }
@@ -392,55 +450,155 @@ pub fn read_file_bytes(local_context: &LocalContext, path_value: &Value) -> crat
 
 // ------ Trigonometric ------
 
-pub static SIN: IntrinsicFunction = trig_intrinsic!("sin" => Sin);
-pub static COS: IntrinsicFunction = trig_intrinsic!("cos" => Cos);
-pub static TAN: IntrinsicFunction = trig_intrinsic!("tan" => Tan);
-// CSC
-// SEC
-// COT
-// ARCSIN
-// ARCCOS
-// ARCTAN
-// ARCCSC
-// ARCSEC
-// ARCCOT
-// SINH
-// COSH
-// TANH
-// CSCH
-// SECH
-// COTH
+pub static SIN: IntrinsicFunction = unary_intrinsic!(
+    "sin", (Type::Real) => Sin, Type::Real
+);
 
-// ------ Statistics ------
+pub static COS: IntrinsicFunction = unary_intrinsic!(
+    "cos", (Type::Real) => Cos, Type::Real
+);
 
-pub static MEAN: IntrinsicFunction = reducer_intrinsic!(
-    "mean", Some(Type::require_numeric_or_point) => Mean, None
+pub static TAN: IntrinsicFunction = unary_intrinsic!(
+    "tan", (Type::Real) => Tan, Type::Real
 );
-// MEDIAN
-pub static MIN: IntrinsicFunction = reducer_intrinsic!(
-    "min", Some(Type::require_numeric) => Min, None
+
+pub static CSC: IntrinsicFunction = unary_intrinsic!(
+    "csc", (Type::Real) => Csc, Type::Real
 );
-pub static MAX: IntrinsicFunction = reducer_intrinsic!(
-    "max", Some(Type::require_numeric) => Max, None
+
+pub static SEC: IntrinsicFunction = unary_intrinsic!(
+    "sec", (Type::Real) => Sec, Type::Real
 );
-// QUARTILE
-// QUANTILE
-// STDEV
-// STDEVP
-// VAR
-// VARP
-// COV
-// COVP
-// MAD
-// CORR
-// SPEARMAN
-// STATS
-pub static COUNT: IntrinsicFunction = reducer_intrinsic!(
-    "count", None => Count, Some(Type::Int)
+
+pub static COT: IntrinsicFunction = unary_intrinsic!(
+    "cot", (Type::Real) => Cot, Type::Real
 );
-pub static TOTAL: IntrinsicFunction = reducer_intrinsic!(
-    "total", Some(Type::require_numeric_or_point) => Total, None
+
+pub static ARCSIN: IntrinsicFunction = unary_intrinsic!(
+    "arcsin", (Type::Real) => Arcsin, Type::Real
 );
+
+pub static ARCCOS: IntrinsicFunction = unary_intrinsic!(
+    "arccos", (Type::Real) => Arccos, Type::Real
+);
+
+pub static ARCTAN: IntrinsicFunction = unary_intrinsic!(
+    "arctan", (Type::Real) => Arctan, Type::Real
+);
+
+pub static ARCCSC: IntrinsicFunction = unary_intrinsic!(
+    "arccsc", (Type::Real) => Arccsc, Type::Real
+);
+
+pub static ARCSEC: IntrinsicFunction = unary_intrinsic!(
+    "arcsec", (Type::Real) => Arcsec, Type::Real
+);
+
+pub static ARCCOT: IntrinsicFunction = unary_intrinsic!(
+    "arccot", (Type::Real) => Arccot, Type::Real
+);
+
+pub static SINH: IntrinsicFunction = unary_intrinsic!(
+    "sinh", (Type::Real) => Sinh, Type::Real
+);
+
+pub static COSH: IntrinsicFunction = unary_intrinsic!(
+    "cosh", (Type::Real) => Cosh, Type::Real
+);
+
+pub static TANH: IntrinsicFunction = unary_intrinsic!(
+    "tanh", (Type::Real) => Tanh, Type::Real
+);
+
+pub static CSCH: IntrinsicFunction = unary_intrinsic!(
+    "csch", (Type::Real) => Csch, Type::Real
+);
+
+pub static SECH: IntrinsicFunction = unary_intrinsic!(
+    "sech", (Type::Real) => Sech, Type::Real
+);
+
+pub static COTH: IntrinsicFunction = unary_intrinsic!(
+    "coth", (Type::Real) => Coth, Type::Real
+);
+
+// ------ Calculus ------
+
+pub static EXP: IntrinsicFunction = unary_intrinsic!(
+    "exp", (Type::Real) => Exp, Type::Real
+);
+
+pub static LN: IntrinsicFunction = unary_intrinsic!(
+    "ln", (Type::Real) => Ln, Type::Real
+);
+
+pub static LOG: IntrinsicFunction = binary_intrinsic!(
+    "log", (Type::Real, Type::Real) => Log, Type::Real
+);
+
+// DERIVATIVE
+
+// INTEGRAL
+
+// SUM
+
+// PRODUCT
+
+// ------ Number Theory ------
+
+pub static LCM: IntrinsicFunction = binary_intrinsic!(
+    "lcm", (Type::Int, Type::Int) => Lcm, Type::Int
+);
+
+pub static GCD: IntrinsicFunction = binary_intrinsic!(
+    "gcd", (Type::Int, Type::Int) => Gcd, Type::Int
+);
+
+pub static CEIL: IntrinsicFunction = unary_intrinsic!(
+    "ceil", (Type::Real) => Ceil, Type::Int
+);
+
+pub static FLOOR: IntrinsicFunction = unary_intrinsic!(
+    "floor", (Type::Real) => Floor, Type::Int
+);
+
+pub static ROUND: IntrinsicFunction = unary_intrinsic!(
+    "round", (Type::Real) => Round, Type::Int
+);
+
+// ABS
+
+pub static SIGN: IntrinsicFunction = unary_intrinsic!(
+    "sign", (Type::Real) => Sign, Type::Int
+);
+
+pub static SQRT: IntrinsicFunction = unary_intrinsic!(
+    "sqrt", (Type::Real) => Sqrt, Type::Real
+);
+
+pub static CBRT: IntrinsicFunction = unary_intrinsic!(
+    "cbrt", (Type::Real) => Cbrt, Type::Real
+);
+
+pub static NTH_ROOT: IntrinsicFunction = binary_intrinsic!(
+    "nth_root", (Type::Real, Type::Real) => NthRoot, Type::Real
+);
+
+// NPR
+
+// NCR
+
+// FACTORIAL
+
+// ------ Complex ------
+
+// REAL
+
+// IMAG
+
+// CONJ
+
+// ARG
 
 // ------ List Operations ------
 
@@ -463,6 +621,7 @@ pub static JOIN: IntrinsicFunction = IntrinsicFunction {
         })
     },
 };
+
 pub static SORT: IntrinsicFunction = IntrinsicFunction {
     identifier: "sort",
     min_arity: 1,
@@ -496,6 +655,7 @@ pub static SORT: IntrinsicFunction = IntrinsicFunction {
         })
     },
 };
+
 pub static SHUFFLE: IntrinsicFunction = IntrinsicFunction {
     identifier: "shuffle",
     min_arity: 1,
@@ -518,6 +678,7 @@ pub static SHUFFLE: IntrinsicFunction = IntrinsicFunction {
         })
     },
 };
+
 pub static UNIQUE: IntrinsicFunction = IntrinsicFunction {
     identifier: "unique",
     min_arity: 1,
@@ -536,104 +697,275 @@ pub static UNIQUE: IntrinsicFunction = IntrinsicFunction {
     },
 };
 
+// ------ Statistics ------
+
+pub static MEAN: IntrinsicFunction = reducer_intrinsic!(
+    "mean", Some(Type::require_numeric_or_point) => Mean, None
+);
+
+// MEDIAN
+
+pub static MIN: IntrinsicFunction = reducer_intrinsic!(
+    "min", Some(Type::require_numeric) => Min, None
+);
+
+pub static MAX: IntrinsicFunction = reducer_intrinsic!(
+    "max", Some(Type::require_numeric) => Max, None
+);
+
+// QUARTILE
+
+// QUANTILE
+
+// STDEV
+
+// STDEVP
+
+// VAR
+
+// VARP
+
+// COV
+
+// COVP
+
+// MAD
+
+// CORR
+
+// SPEARMAN
+
+// STATS
+
+pub static COUNT: IntrinsicFunction = reducer_intrinsic!(
+    "count", None => Count, Some(Type::Int)
+);
+
+pub static TOTAL: IntrinsicFunction = reducer_intrinsic!(
+    "total", Some(Type::require_numeric_or_point) => Total, None
+);
+
 // ------ Visualizations ------
 
 // HISTOGRAM
+
 // DOT_PLOT
+
 // BOX_PLOT
 
 // ------ Distributions ------
 
 // NORMAL_DIST
+
 // T_DIST
+
 // CHISQ_DIST
+
 // UNIFORM_DIST
+
 // BINOMIAL_DIST
+
 // POISSON_DIST
+
 // GEO_DIST
+
 // PDF
+
 // CDF
+
 // INVERSE_CDF
+
 // RANDOM
 
 // ------ Statistical Tests ------
 
 // TTEST
+
 // TSCORE
+
 // ITTEST
-
-// ------ Calculus ------
-
-// EXP
-// LN
-// LOG
-// DERIVATIVE
-// INTEGRAL
-// SUM
-// PRODUCT
 
 // ------ Geometry ------
 
-// MIDPOINT
-// INTERSECTION
-pub static SEGMENT: IntrinsicFunction = IntrinsicFunction {
-    identifier: "segment",
-    min_arity: 2,
+pub static MIDPOINT: IntrinsicFunction = IntrinsicFunction {
+    identifier: "midpoint",
+    min_arity: 1,
     max_arity: Some(2),
     interpret_call: |_, _, _, arguments| {
-        // TODO: check types
         let mut arguments = arguments.into_iter();
-        let point_1 = arguments.next().unwrap();
-        let point_2 = arguments.next().unwrap();
-        let list_state = ListState::merge(
-            point_1.get_type().list_state(),
-            point_2.get_type().list_state(),
-        );
 
-        Ok(ValueKind::Binary {
-            kind: BinaryKind::Segment,
-            lhs: Box::new(point_1),
-            rhs: Box::new(point_2),
-            result_type: Type::Segment.unflatten_list(list_state),
-        })
+        let point_1_or_segment = arguments.next().unwrap();
+
+        if let Some(point_2) = arguments.next() {
+            let point_type = match point_1_or_segment.get_type().into_flatten_list().1 {
+                Type::Point2 { .. } => Type::real_point2(),
+                Type::Point3 { .. } => Type::real_point3(),
+                got_type => return Err(Box::new(crate::Error {
+                    kind: crate::ErrorKind::ExpectedNumericPointType {
+                        got_type: got_type.to_string(),
+                    },
+                    span: point_1_or_segment.span,
+                }))
+            };
+
+            let point_1 = point_1_or_segment.coerce_to(&point_type, true)?;
+            let point_2 = point_2.coerce_to(&point_type, true)?;
+
+            let list_state = ListState::merge(
+                point_1.get_type().list_state(),
+                point_2.get_type().list_state(),
+            );
+
+            Ok(ValueKind::Binary {
+                kind: BinaryKind::MidpointOfPoints,
+                lhs: Box::new(point_1),
+                rhs: Box::new(point_2),
+                result_type: point_type.unflatten_list(list_state),
+            })
+        }
+        else {
+            let (list_state, segment_type) = point_1_or_segment.get_type().into_flatten_list();
+            let point_type = match segment_type {
+                Type::Segment => Type::real_point2(),
+                Type::Segment3D => Type::real_point3(),
+                got_type => return Err(Box::new(crate::Error {
+                    kind: crate::ErrorKind::ExpectedSegmentType {
+                        got_type: got_type.to_string(),
+                    },
+                    span: point_1_or_segment.span,
+                }))
+            };
+
+            Ok(ValueKind::Unary {
+                kind: UnaryKind::MidpointOfSegment,
+                operand: Box::new(point_1_or_segment),
+                result_type: point_type.unflatten_list(list_state),
+            })
+        }
     },
 };
-// SEGMENT3D
-// LINE
-// RAY
-// VECTOR
-// VECTOR3D
+
+// INTERSECTION
+
+pub static SEGMENT: IntrinsicFunction = binary_intrinsic!(
+    "segment", (Type::real_point2(), Type::real_point2()) => Segment, Type::Segment
+);
+
+pub static SEGMENT3D: IntrinsicFunction = binary_intrinsic!(
+    "segment3d", (Type::real_point3(), Type::real_point3()) => Segment3D, Type::Segment3D
+);
+
+pub static LINE: IntrinsicFunction = binary_intrinsic!(
+    "line", (Type::real_point2(), Type::real_point2()) => Line, Type::Line
+);
+
+pub static RAY: IntrinsicFunction = binary_intrinsic!(
+    "ray", (Type::real_point2(), Type::real_point2()) => Ray, Type::Ray
+);
+
+pub static VECTOR: IntrinsicFunction = binary_intrinsic!(
+    "vector", (Type::real_point2(), Type::real_point2()) => Vector, Type::Vector
+);
+
+pub static VECTOR3D: IntrinsicFunction = binary_intrinsic!(
+    "vector3d", (Type::real_point3(), Type::real_point3()) => Vector3D, Type::Vector3D
+);
+
 // PARALLEL
+
 // PERPENDICULAR
-// CIRCLE
-// SPHERE3D
+
+pub static CIRCLE: IntrinsicFunction = binary_intrinsic!(
+    "circle", (Type::real_point2(), Type::Real) => Circle, Type::Circle
+);
+
+pub static SPHERE3D: IntrinsicFunction = binary_intrinsic!(
+    "sphere3d", (Type::real_point3(), Type::Real) => Sphere3D, Type::Sphere3D
+);
+
 // ARC
+
 // ANGLE
+
 // DIRECTED_ANGLE
+
 pub static POLYGON: IntrinsicFunction = reducer_intrinsic!(
     "polygon", Some(Type::require_numeric_point_2d) => Polygon, Some(Type::Polygon)
 );
+
 // TRIANGLE3D
+
 // GLIDER
 
 // ------ Properties & Measurements ------
 
 // DOT
+
 // CROSS
+
 // DISTANCE
+
 // LENGTH
+
 // AREA
+
 // PERIMETER
+
 // VERTICES
+
 // ANGLES
+
 // DIRECTED_ANGLES
+
 // SEGMENTS
+
 // RADIUS
+
 // CENTER
+
 // COTERMINAL
+
 // SUPPLEMENT
-// START
-// END
+
+fn interpret_start_end_call(kind: UnaryKind, arguments: Box<[Value]>) -> crate::Result<ValueKind> {
+    let vector = arguments.into_iter().next().unwrap();
+    let (list_state, vector_type) = vector.get_type().into_flatten_list();
+
+    let point_type = match vector_type {
+        Type::Vector => Type::real_point2(),
+        Type::Vector3D => Type::real_point3(),
+        got_type => return Err(Box::new(crate::Error {
+            kind: crate::ErrorKind::ExpectedVectorType {
+                got_type: got_type.to_string(),
+            },
+            span: vector.span,
+        }))
+    };
+
+    Ok(ValueKind::Unary {
+        kind,
+        operand: Box::new(vector),
+        result_type: point_type.unflatten_list(list_state),
+    })
+}
+
+pub static START: IntrinsicFunction = IntrinsicFunction {
+    identifier: "start",
+    min_arity: 1,
+    max_arity: Some(1),
+    interpret_call: |_, _, _, arguments| {
+        interpret_start_end_call(UnaryKind::VectorStart, arguments)
+    },
+};
+
+pub static END: IntrinsicFunction = IntrinsicFunction {
+    identifier: "end",
+    min_arity: 1,
+    max_arity: Some(1),
+    interpret_call: |_, _, _, arguments| {
+        interpret_start_end_call(UnaryKind::VectorEnd, arguments)
+    },
+};
 
 // ------ Transformations ------
 
@@ -670,6 +1002,7 @@ pub static DILATE: IntrinsicFunction = IntrinsicFunction {
         })
     },
 };
+
 pub static ROTATE: IntrinsicFunction = IntrinsicFunction {
     identifier: "rotate",
     min_arity: 3,
@@ -703,6 +1036,7 @@ pub static ROTATE: IntrinsicFunction = IntrinsicFunction {
         })
     },
 };
+
 pub static REFLECT: IntrinsicFunction = IntrinsicFunction {
     identifier: "reflect",
     min_arity: 2,
@@ -729,6 +1063,7 @@ pub static REFLECT: IntrinsicFunction = IntrinsicFunction {
         })
     },
 };
+
 pub static TRANSLATE: IntrinsicFunction = IntrinsicFunction {
     identifier: "translate",
     min_arity: 2,
@@ -782,36 +1117,18 @@ pub static TRANSLATE: IntrinsicFunction = IntrinsicFunction {
 // ------ Color ------
 
 pub static RGB: IntrinsicFunction = color_intrinsic!("rgb" => Rgb);
+
 pub static HSV: IntrinsicFunction = color_intrinsic!("hsv" => Hsv);
+
 pub static OKHSV: IntrinsicFunction = color_intrinsic!("okhsv" => Okhsv);
+
 pub static OKLAB: IntrinsicFunction = color_intrinsic!("oklab" => Oklab);
+
 pub static OKLCH: IntrinsicFunction = color_intrinsic!("oklch" => Oklch);
 
 // ------ Sound ------
 
 // TONE
-
-// ------ Number Theory ------
-
-// LCM
-// GCD
-// CEIL
-// FLOOR
-// ROUND
-// SIGN
-// SQRT
-// CBRT
-// NTHROOT
-// NPR
-// NCR
-// FACTORIAL
-
-// ------ Complex ------
-
-// REAL
-// IMAG
-// CONJ
-// ARG
 
 // ------ Desmosify ------
 
@@ -853,6 +1170,7 @@ pub static ENUM_VALUES: IntrinsicFunction = IntrinsicFunction {
         })
     },
 };
+
 pub static ENUM_VALUE: IntrinsicFunction = IntrinsicFunction {
     identifier: "enum_value",
     min_arity: 2,
@@ -891,6 +1209,7 @@ pub static ENUM_VALUE: IntrinsicFunction = IntrinsicFunction {
         })
     },
 };
+
 pub static INCLUDE_TEXT: IntrinsicFunction = IntrinsicFunction {
     identifier: "include_text",
     min_arity: 1,
@@ -912,6 +1231,7 @@ pub static INCLUDE_TEXT: IntrinsicFunction = IntrinsicFunction {
         Ok(ValueKind::Str(text.into()))
     },
 };
+
 pub static INCLUDE_DATA: IntrinsicFunction = IntrinsicFunction {
     identifier: "include_data",
     min_arity: 1,
@@ -943,6 +1263,7 @@ pub static INCLUDE_DATA: IntrinsicFunction = IntrinsicFunction {
         Ok(ValueKind::Str(data_url.to_string().into()))
     },
 };
+
 pub static IMAGE: IntrinsicFunction = IntrinsicFunction {
     identifier: "image",
     min_arity: 5,
@@ -1002,6 +1323,7 @@ pub static IMAGE: IntrinsicFunction = IntrinsicFunction {
         ))
     },
 };
+
 pub static CONCAT: IntrinsicFunction = IntrinsicFunction {
     identifier: "concat",
     min_arity: 0,
@@ -1016,6 +1338,7 @@ pub static CONCAT: IntrinsicFunction = IntrinsicFunction {
         Ok(ValueKind::Str(result.into()))
     },
 };
+
 pub static TARGET_SYMBOL: IntrinsicFunction = IntrinsicFunction {
     identifier: "target_symbol",
     min_arity: 1,

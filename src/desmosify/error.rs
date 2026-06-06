@@ -211,10 +211,19 @@ pub enum ErrorKind {
     ExpectedNumericOrPointType {
         got_type: String,
     },
+    ExpectedNumericPointType {
+        got_type: String,
+    },
     ExpectedNumericPoint2Type {
         got_type: String,
     },
     ExpectedNumericPoint3Type {
+        got_type: String,
+    },
+    ExpectedSegmentType {
+        got_type: String,
+    },
+    ExpectedVectorType {
         got_type: String,
     },
     ExpectedTransformableType {
@@ -431,11 +440,20 @@ impl std::fmt::Display for ErrorKind {
             Self::ExpectedNumericOrPointType { got_type } => {
                 write!(f, "expected a numeric value or numeric point, got '{got_type}'")
             }
+            Self::ExpectedNumericPointType { got_type } => {
+                write!(f, "expected a numeric 2D or 3D point, got '{got_type}'")
+            }
             Self::ExpectedNumericPoint2Type { got_type } => {
                 write!(f, "expected a numeric 2D point, got '{got_type}'")
             }
             Self::ExpectedNumericPoint3Type { got_type } => {
                 write!(f, "expected a numeric 3D point, got '{got_type}'")
+            }
+            Self::ExpectedSegmentType { got_type } => {
+                write!(f, "expected a 2D or 3D segment, got '{got_type}'")
+            }
+            Self::ExpectedVectorType { got_type } => {
+                write!(f, "expected a 2D or 3D vector, got '{got_type}'")
             }
             Self::ExpectedTransformableType { got_type } => {
                 write!(f, "expected a transformable object, got '{got_type}'")

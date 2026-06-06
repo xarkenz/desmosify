@@ -1233,9 +1233,81 @@ impl<'target> GraphExpressionListBuilder<'target> {
                     self.translate_value(operand)?,
                 ))
             }
+            UnaryKind::Exp => {
+                Ok(unary_function(
+                    "exp",
+                    self.translate_value(operand)?,
+                ))
+            }
+            UnaryKind::Ln => {
+                Ok(unary_function(
+                    "exp",
+                    self.translate_value(operand)?,
+                ))
+            }
+            UnaryKind::Ceil => {
+                Ok(unary_function(
+                    "ceil",
+                    self.translate_value(operand)?,
+                ))
+            }
+            UnaryKind::Floor => {
+                Ok(unary_function(
+                    "floor",
+                    self.translate_value(operand)?,
+                ))
+            }
+            UnaryKind::Round => {
+                Ok(unary_function(
+                    "round",
+                    self.translate_value(operand)?,
+                ))
+            }
+            UnaryKind::Abs => {
+                Ok(GraphExpression::Unary {
+                    kind: GraphUnaryKind::Pipes,
+                    inner: Box::new(self.translate_value(operand)?),
+                })
+            }
+            UnaryKind::Sign => {
+                Ok(unary_function(
+                    "sign",
+                    self.translate_value(operand)?,
+                ))
+            }
+            UnaryKind::Sqrt => {
+                Ok(GraphExpression::Radical {
+                    index: None,
+                    radicand: Box::new(self.translate_value(operand)?),
+                })
+            }
+            UnaryKind::Cbrt => {
+                Ok(GraphExpression::Radical {
+                    index: Some(Box::new(GraphExpression::Integer(3))),
+                    radicand: Box::new(self.translate_value(operand)?),
+                })
+            }
             UnaryKind::Factorial => {
                 Ok(unary_operator(
                     GraphUnaryKind::Factorial,
+                    self.translate_value(operand)?,
+                ))
+            }
+            UnaryKind::MidpointOfSegment => {
+                Ok(unary_function(
+                    "midpoint",
+                    self.translate_value(operand)?,
+                ))
+            }
+            UnaryKind::VectorStart => {
+                Ok(unary_function(
+                    "start",
+                    self.translate_value(operand)?,
+                ))
+            }
+            UnaryKind::VectorEnd => {
+                Ok(unary_function(
+                    "end",
                     self.translate_value(operand)?,
                 ))
             }
@@ -1453,6 +1525,44 @@ impl<'target> GraphExpressionListBuilder<'target> {
                     }),
                 })
             }
+            BinaryKind::Log => {
+                Ok(GraphExpression::Binary {
+                    kind: GraphBinaryKind::Call,
+                    lhs: Box::new(GraphExpression::Binary {
+                        kind: GraphBinaryKind::Subscript,
+                        lhs: Box::new(GraphExpression::OperatorName("log".into())),
+                        rhs: Box::new(self.translate_value(lhs)?),
+                    }),
+                    rhs: Box::new(self.translate_value(rhs)?),
+                })
+            }
+            BinaryKind::Lcm => {
+                Ok(binary_function(
+                    "lcm",
+                    self.translate_value(lhs)?,
+                    self.translate_value(rhs)?,
+                ))
+            }
+            BinaryKind::Gcd => {
+                Ok(binary_function(
+                    "gcd",
+                    self.translate_value(lhs)?,
+                    self.translate_value(rhs)?,
+                ))
+            }
+            BinaryKind::NthRoot => {
+                Ok(GraphExpression::Radical {
+                    index: Some(Box::new(self.translate_value(rhs)?)),
+                    radicand: Box::new(self.translate_value(lhs)?),
+                })
+            }
+            BinaryKind::MidpointOfPoints => {
+                Ok(binary_function(
+                    "midpoint",
+                    self.translate_value(lhs)?,
+                    self.translate_value(rhs)?,
+                ))
+            }
             BinaryKind::Segment | BinaryKind::Segment3D => {
                 Ok(binary_function(
                     "segment",
@@ -1477,6 +1587,20 @@ impl<'target> GraphExpressionListBuilder<'target> {
             BinaryKind::Vector | BinaryKind::Vector3D => {
                 Ok(binary_function(
                     "vector",
+                    self.translate_value(lhs)?,
+                    self.translate_value(rhs)?,
+                ))
+            }
+            BinaryKind::Circle => {
+                Ok(binary_function(
+                    "circle",
+                    self.translate_value(lhs)?,
+                    self.translate_value(rhs)?,
+                ))
+            }
+            BinaryKind::Sphere3D => {
+                Ok(binary_function(
+                    "sphere",
                     self.translate_value(lhs)?,
                     self.translate_value(rhs)?,
                 ))

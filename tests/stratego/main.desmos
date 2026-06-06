@@ -381,7 +381,7 @@ let possible_move_spaces: [(real, real)] = view_grid[possible_moves];
 
 let piece_labels(piece: Piece): [(real, real)] = @join(
     {pieces == piece: view_grid},
-    {last_captured == piece: 0.5 * (view_grid[last_move_begin_index] + view_grid[last_move_end_index])},
+    {last_captured == piece: @midpoint(view_grid[last_move_begin_index], view_grid[last_move_end_index])},
 );
 
 action reset() {

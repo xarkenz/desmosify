@@ -74,7 +74,19 @@ pub enum UnaryKind {
     Csch,
     Sech,
     Coth,
+    Exp,
+    Ln,
+    Ceil,
+    Floor,
+    Round,
+    Abs,
+    Sign,
+    Sqrt,
+    Cbrt,
     Factorial,
+    MidpointOfSegment,
+    VectorStart,
+    VectorEnd,
 }
 
 #[derive(Copy, Clone, PartialEq, Debug)]
@@ -95,12 +107,19 @@ pub enum BinaryKind {
     NotEqual,
     LogicalAnd,
     LogicalOr,
+    Log,
+    Lcm,
+    Gcd,
+    NthRoot,
+    MidpointOfPoints,
     Segment,
     Segment3D,
     Line,
     Ray,
     Vector,
     Vector3D,
+    Circle,
+    Sphere3D,
 }
 
 #[derive(Copy, Clone, PartialEq, Debug)]
