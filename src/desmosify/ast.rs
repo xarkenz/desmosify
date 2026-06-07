@@ -669,16 +669,20 @@ pub enum ValueDefinition {
     },
 }
 
-// TODO: allow assigning values
 #[derive(Clone, Debug)]
 pub struct EnumerationVariant {
     pub identifier: Rc<str>,
     pub identifier_span: crate::Span,
+    pub value: Option<Expression>,
 }
 
 impl std::fmt::Display for EnumerationVariant {
     fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
-        write!(f, "{}", self.identifier)
+        write!(f, "{}", self.identifier)?;
+        if let Some(value) = &self.value {
+            write!(f, "= {value}")?;
+        }
+        Ok(())
     }
 }
 

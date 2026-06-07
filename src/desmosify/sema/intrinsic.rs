@@ -1133,6 +1133,8 @@ pub static OKLCH: IntrinsicFunction = color_intrinsic!("oklch" => Oklch);
 
 // ------ Desmosify ------
 
+// FIXME: this is broken for any enum that is not the default shape. to fix, generate a global list
+//        and reference it here
 pub static ENUM_VALUES: IntrinsicFunction = IntrinsicFunction {
     identifier: "enum_values",
     min_arity: 1,

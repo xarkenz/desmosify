@@ -1,7 +1,7 @@
 use crate::ast::RangeKind;
 use crate::desmos::{GraphBinaryKind, GraphEntry, GraphExpression, GraphExpressionEntry, GraphExpressionList, GraphFolderEntry, GraphImageEntry, GraphInequalityKind, GraphSlider, GraphSliderLoopMode, GraphTextEntry, GraphTicker, GraphUnaryKind};
 use crate::desmos::target::DesmosTargetInfo;
-use crate::sema::{Program, ProgramAction, ProgramLet, ProgramPublicLine, ProgramTicker, ProgramVariable, ProgramVariableKind};
+use crate::sema::{Program, ProgramAction, ProgramImmutable, ProgramPublicLine, ProgramTicker, ProgramVariable, ProgramVariableKind};
 use crate::sema::display::{ImageValue, ProgramDisplayAttributeKind, ProgramDisplayElement};
 use crate::sema::types::Type;
 use crate::sema::values::{ActionValue, ActionValueKind, BinaryKind, ColorKind, DoubleReducerKind, IndexKind, InequalityKind, MathematicalConstant, ParameterizedReducerKind, ReducerKind, UnaryKind, Value, ValueKind};
@@ -1811,18 +1811,18 @@ impl<'target> GraphExpressionListBuilder<'target> {
         }
     }
 
-    pub fn add_program_let(&mut self, program_let: &ProgramLet) -> crate::Result<()> {
-        let value = self.translate_value(program_let.value())?;
+    pub fn add_program_immutable(&mut self, immutable: &ProgramImmutable) -> crate::Result<()> {
+        let value = self.translate_value(&immutable.value)?;
 
         self.global_entries.push(Box::new(GraphExpressionEntry {
             id: self.target_info.create_entry_id(),
             folder_id: Some(GLOBALS_FOLDER_ID.into()),
             expression: GraphExpression::Binary {
                 kind: GraphBinaryKind::Equal,
-                lhs: Box::new(match program_let.parameters() {
+                lhs: Box::new(match &immutable.parameters {
                     Some(parameters) => GraphExpression::Binary {
                         kind: GraphBinaryKind::Call,
-                        lhs: Box::new(self.target_info.get_global_symbol(&program_let.identifier())),
+                        lhs: Box::new(self.target_info.get_global_symbol(&immutable.identifier)),
                         rhs: Box::new(GraphExpression::Sequence {
                             elements: parameters
                                 .iter()
@@ -1830,7 +1830,7 @@ impl<'target> GraphExpressionListBuilder<'target> {
                                 .collect(),
                         }),
                     },
-                    None => self.target_info.get_global_symbol(&program_let.identifier()),
+                    None => self.target_info.get_global_symbol(&immutable.identifier),
                 }),
                 rhs: Box::new(value),
             },
@@ -1840,18 +1840,18 @@ impl<'target> GraphExpressionListBuilder<'target> {
         Ok(())
     }
 
-    pub fn add_program_variable(&mut self, program_variable: &ProgramVariable) -> crate::Result<()> {
-        let value = self.translate_value(program_variable.value())?;
+    pub fn add_program_variable(&mut self, variable: &ProgramVariable) -> crate::Result<()> {
+        let value = self.translate_value(&variable.value)?;
 
         self.global_entries.push(Box::new(GraphExpressionEntry {
             id: self.target_info.create_entry_id(),
             folder_id: Some(GLOBALS_FOLDER_ID.into()),
             expression: GraphExpression::Binary {
                 kind: GraphBinaryKind::Equal,
-                lhs: Box::new(self.target_info.get_global_symbol(&program_variable.identifier())),
+                lhs: Box::new(self.target_info.get_global_symbol(&variable.identifier)),
                 rhs: Box::new(value),
             },
-            slider: match program_variable.kind() {
+            slider: match &variable.kind {
                 ProgramVariableKind::Default => None,
                 ProgramVariableKind::Timer => Some(GraphSlider {
                     loop_mode: GraphSliderLoopMode::PlayIndefinitely,
@@ -1866,7 +1866,7 @@ impl<'target> GraphExpressionListBuilder<'target> {
     }
 
     pub fn add_program_action(&mut self, program_action: &ProgramAction) -> crate::Result<()> {
-        let action = self.translate_action_value(program_action.action())?;
+        let action = self.translate_action_value(&program_action.action)?;
 
         self.action_entries.push(Box::new(GraphExpressionEntry {
             id: self.target_info.create_entry_id(),
@@ -1875,10 +1875,9 @@ impl<'target> GraphExpressionListBuilder<'target> {
                 kind: GraphBinaryKind::Equal,
                 lhs: Box::new(GraphExpression::Binary {
                     kind: GraphBinaryKind::Call,
-                    lhs: Box::new(self.target_info.get_action_symbol(&program_action.identifier())),
+                    lhs: Box::new(self.target_info.get_action_symbol(&program_action.identifier)),
                     rhs: Box::new(GraphExpression::Sequence {
-                        elements: program_action
-                            .parameters()
+                        elements: program_action.parameters
                             .iter()
                             .map(|parameter| self.target_info.get_local_symbol(parameter.id))
                             .collect(),
@@ -1896,8 +1895,8 @@ impl<'target> GraphExpressionListBuilder<'target> {
         self.ticker = match program_ticker {
             Some(program_ticker) => Some(GraphTicker {
                 playing: false,
-                handler: self.translate_action_value(program_ticker.tick_action())?,
-                min_step: match program_ticker.interval_ms() {
+                handler: self.translate_action_value(&program_ticker.tick_action)?,
+                min_step: match &program_ticker.interval_ms {
                     Some(interval_ms) => self.translate_value(interval_ms)?,
                     None => GraphExpression::Empty,
                 },
@@ -2079,23 +2078,23 @@ impl<'target> GraphExpressionListBuilder<'target> {
     }
 
     pub fn set_program(&mut self, program: &Program) -> crate::Result<()> {
-        for program_let in program.lets() {
-            self.add_program_let(program_let)?;
+        for immutable in &program.immutables {
+            self.add_program_immutable(immutable)?;
         }
-        for program_variable in program.variables() {
-            self.add_program_variable(program_variable)?;
+        for variable in &program.variables {
+            self.add_program_variable(variable)?;
         }
-        for program_action in program.actions() {
-            self.add_program_action(program_action)?;
+        for action in &program.actions {
+            self.add_program_action(action)?;
         }
-        self.set_program_ticker(program.ticker())?;
-        if let Some(program_public) = program.public() {
-            for public_line in program_public.lines() {
+        self.set_program_ticker(program.ticker.as_ref())?;
+        if let Some(public) = &program.public {
+            for public_line in &public.lines {
                 self.add_public_line(public_line)?;
             }
         }
-        if let Some(program_display) = program.display() {
-            for display_element in &program_display.elements {
+        if let Some(display) = &program.display {
+            for display_element in &display.elements {
                 self.add_display_element(display_element)?;
             }
         }

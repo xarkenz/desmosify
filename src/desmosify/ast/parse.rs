@@ -947,13 +947,28 @@ impl<'a, T: BufRead> Parser<'a, T> {
                 while !matches!(self.current_token_kind(), Some(TokenKind::CurlyRight)) {
                     let (identifier, identifier_span) = self.expect_identifier()?;
                     self.consume_token()?; // Literal(Identifier)
-                    let token = self.expect_token_from(&[TokenKind::Comma, TokenKind::CurlyRight])?;
+                    let token = self.expect_token_from(&[
+                        TokenKind::Equal,
+                        TokenKind::Comma,
+                        TokenKind::CurlyRight,
+                    ])?;
+
+                    let mut ordinal = None;
+                    if let TokenKind::Equal = token.kind {
+                        self.consume_token()?; // Equal
+                        ordinal = Some(self.parse_expression(None, &[
+                            TokenKind::Comma,
+                            TokenKind::CurlyRight,
+                        ])?);
+                    }
+
                     variants.push(EnumerationVariant {
                         identifier,
                         identifier_span,
+                        value: ordinal,
                     });
 
-                    if let TokenKind::Comma = token.kind {
+                    if let Some(TokenKind::Comma) = self.current_token_kind() {
                         self.consume_token()?; // Comma
                     }
                 }

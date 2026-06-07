@@ -1,7 +1,7 @@
 use std::path::PathBuf;
 use std::rc::Rc;
-use crate::ast::{ActionExpression, ActionExpressionKind, BinaryOperation, DefinitionKind, DisplayAttribute, DisplayAttributeValue, Expression, IndexOperation, ExpressionKind, ParameterList, PublicLineKind, TypeDefinition, UnaryOperation, ValueDefinition, VariableKind};
-use crate::sema::{Program, ProgramAction, ProgramLet, ProgramPublic, ProgramPublicLine, ProgramTicker, ProgramVariable, ProgramVariableKind};
+use crate::ast::{ActionExpression, ActionExpressionKind, BinaryOperation, DefinitionKind, DisplayAttribute, DisplayAttributeValue, Expression, IndexOperation, ExpressionKind, ParameterList, PublicLineKind, TypeDefinition, UnaryOperation, ValueDefinition, VariableKind, EnumerationVariant};
+use crate::sema::{Program, ProgramAction, ProgramEnumeration, ProgramImmutable, ProgramPublic, ProgramPublicLine, ProgramTicker, ProgramVariable, ProgramVariableKind};
 use crate::sema::context::{GlobalContext, LocalContext};
 use crate::sema::display::{DragMode, LabelOrientation, LineStyle, PointStyle, ProgramDisplay, ProgramDisplayAttribute, ProgramDisplayAttributeKind, ProgramDisplayElement};
 use crate::sema::types::{ListState, Type};
@@ -9,7 +9,8 @@ use crate::sema::values::{ActionValue, ActionValueKind, GlobalReference, LocalRe
 use crate::target::Target;
 
 pub fn interpret_program(source_paths: &[PathBuf], target: &mut dyn Target, context: &GlobalContext) -> crate::Result<Program> {
-    let mut lets = Vec::new();
+    let mut enumerations = Vec::new();
+    let mut immutables = Vec::new();
     let mut variables = Vec::new();
     let mut actions = Vec::new();
 
@@ -17,8 +18,17 @@ pub fn interpret_program(source_paths: &[PathBuf], target: &mut dyn Target, cont
         let local_context = LocalContext::new(&source_paths[definition.definition.span.source_id]);
 
         match &definition.definition.kind {
+            DefinitionKind::Type(TypeDefinition::Enumeration { variants }) => {
+                enumerations.push(interpret_enumeration_definition(
+                    target,
+                    context,
+                    local_context,
+                    identifier.clone(),
+                    variants,
+                )?);
+            }
             DefinitionKind::Value(ValueDefinition::Let { parameters, value, .. }) => {
-                lets.push(interpret_let_definition(
+                immutables.push(interpret_let_definition(
                     target,
                     context,
                     local_context,
@@ -50,17 +60,59 @@ pub fn interpret_program(source_paths: &[PathBuf], target: &mut dyn Target, cont
                     action,
                 )?);
             }
-            _ => {}
         }
     }
 
     Ok(Program {
-        lets: lets.into_boxed_slice(),
+        enumerations: enumerations.into_boxed_slice(),
+        immutables: immutables.into_boxed_slice(),
         variables: variables.into_boxed_slice(),
         actions: actions.into_boxed_slice(),
         ticker: interpret_ticker_declarations(source_paths, target, context)?,
         public: interpret_public_declarations(source_paths, target, context)?,
         display: interpret_display_declarations(source_paths, target, context)?,
+    })
+}
+
+pub fn interpret_enumeration_definition(
+    target: &mut dyn Target,
+    context: &GlobalContext,
+    local_context: LocalContext,
+    identifier: Rc<str>,
+    variants: &[EnumerationVariant],
+) -> crate::Result<ProgramEnumeration> {
+    let mut values: Vec<(Rc<str>, Value)> = Vec::with_capacity(variants.len());
+
+    for variant in variants {
+        let value = if let Some(value) = &variant.value {
+            interpret_expression(target, context, &local_context, value)?
+                .coerce_to(&Type::Int, false)?
+        }
+        else if let Some((_, previous_value)) = values.last() {
+            // TODO: eliminate this once constant folding is implemented?
+            if let ValueKind::Int(previous_int) = previous_value.kind {
+                // TODO: should raise error if this would be too big
+                ValueKind::Int(previous_int + 1).into()
+            }
+            else {
+                ValueKind::Binary {
+                    kind: BinaryKind::Add,
+                    lhs: Box::new(previous_value.clone()),
+                    rhs: Box::new(ValueKind::Int(1).into()),
+                    result_type: Type::Int,
+                }.into()
+            }
+        }
+        else {
+            ValueKind::Int(0).into()
+        };
+
+        values.push((variant.identifier.clone(), value));
+    }
+
+    Ok(ProgramEnumeration {
+        identifier,
+        values: values.into_boxed_slice(),
     })
 }
 
@@ -72,7 +124,7 @@ pub fn interpret_let_definition(
     parameters: Option<&ParameterList>,
     value_type: &Type,
     value: &Expression,
-) -> crate::Result<ProgramLet> {
+) -> crate::Result<ProgramImmutable> {
     let (typed_parameters, expected_type) = if let Some(parameters) = parameters {
         let Type::UserFunction { signature } = value_type else {
             panic!("parameter list is present but value type is not a function")
@@ -89,7 +141,7 @@ pub fn interpret_let_definition(
     let value = interpret_expression(target, context, &local_context, value)?
         .coerce_to(expected_type, false)?;
 
-    Ok(ProgramLet {
+    Ok(ProgramImmutable {
         identifier,
         parameters: typed_parameters,
         value,

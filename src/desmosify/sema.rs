@@ -10,24 +10,16 @@ pub mod types;
 pub mod values;
 
 #[derive(Clone, Debug)]
-pub struct ProgramLet {
-    identifier: Rc<str>,
-    parameters: Option<Box<[LocalReference]>>,
-    value: Value,
+pub struct ProgramEnumeration {
+    pub identifier: Rc<str>,
+    pub values: Box<[(Rc<str>, Value)]>,
 }
 
-impl ProgramLet {
-    pub fn identifier(&self) -> Rc<str> {
-        self.identifier.clone()
-    }
-
-    pub fn parameters(&self) -> Option<&[LocalReference]> {
-        self.parameters.as_deref()
-    }
-
-    pub fn value(&self) -> &Value {
-        &self.value
-    }
+#[derive(Clone, Debug)]
+pub struct ProgramImmutable {
+    pub identifier: Rc<str>,
+    pub parameters: Option<Box<[LocalReference]>>,
+    pub value: Value,
 }
 
 #[derive(Clone, Debug)]
@@ -38,60 +30,22 @@ pub enum ProgramVariableKind {
 
 #[derive(Clone, Debug)]
 pub struct ProgramVariable {
-    identifier: Rc<str>,
-    kind: ProgramVariableKind,
-    value: Value,
-}
-
-impl ProgramVariable {
-    pub fn identifier(&self) -> Rc<str> {
-        self.identifier.clone()
-    }
-
-    pub fn kind(&self) -> &ProgramVariableKind {
-        &self.kind
-    }
-
-    pub fn value(&self) -> &Value {
-        &self.value
-    }
+    pub identifier: Rc<str>,
+    pub kind: ProgramVariableKind,
+    pub value: Value,
 }
 
 #[derive(Clone, Debug)]
 pub struct ProgramAction {
-    identifier: Rc<str>,
-    parameters: Box<[LocalReference]>,
-    action: ActionValue,
-}
-
-impl ProgramAction {
-    pub fn identifier(&self) -> Rc<str> {
-        self.identifier.clone()
-    }
-
-    pub fn parameters(&self) -> &[LocalReference] {
-        &self.parameters
-    }
-
-    pub fn action(&self) -> &ActionValue {
-        &self.action
-    }
+    pub identifier: Rc<str>,
+    pub parameters: Box<[LocalReference]>,
+    pub action: ActionValue,
 }
 
 #[derive(Clone, Debug)]
 pub struct ProgramTicker {
-    interval_ms: Option<Value>,
-    tick_action: ActionValue,
-}
-
-impl ProgramTicker {
-    pub fn interval_ms(&self) -> Option<&Value> {
-        self.interval_ms.as_ref()
-    }
-
-    pub fn tick_action(&self) -> &ActionValue {
-        &self.tick_action
-    }
+    pub interval_ms: Option<Value>,
+    pub tick_action: ActionValue,
 }
 
 #[derive(Clone, Debug)]
@@ -102,47 +56,16 @@ pub enum ProgramPublicLine {
 
 #[derive(Clone, Debug)]
 pub struct ProgramPublic {
-    lines: Box<[ProgramPublicLine]>,
-}
-
-impl ProgramPublic {
-    pub fn lines(&self) -> &[ProgramPublicLine] {
-        &self.lines
-    }
+    pub lines: Box<[ProgramPublicLine]>,
 }
 
 #[derive(Clone, Debug)]
 pub struct Program {
-    lets: Box<[ProgramLet]>,
-    variables: Box<[ProgramVariable]>,
-    actions: Box<[ProgramAction]>,
-    ticker: Option<ProgramTicker>,
-    public: Option<ProgramPublic>,
-    display: Option<ProgramDisplay>,
-}
-
-impl Program {
-    pub fn lets(&self) -> &[ProgramLet] {
-        &self.lets
-    }
-
-    pub fn variables(&self) -> &[ProgramVariable] {
-        &self.variables
-    }
-
-    pub fn actions(&self) -> &[ProgramAction] {
-        &self.actions
-    }
-
-    pub fn ticker(&self) -> Option<&ProgramTicker> {
-        self.ticker.as_ref()
-    }
-
-    pub fn public(&self) -> Option<&ProgramPublic> {
-        self.public.as_ref()
-    }
-
-    pub fn display(&self) -> Option<&ProgramDisplay> {
-        self.display.as_ref()
-    }
+    pub enumerations: Box<[ProgramEnumeration]>,
+    pub immutables: Box<[ProgramImmutable]>,
+    pub variables: Box<[ProgramVariable]>,
+    pub actions: Box<[ProgramAction]>,
+    pub ticker: Option<ProgramTicker>,
+    pub public: Option<ProgramPublic>,
+    pub display: Option<ProgramDisplay>,
 }

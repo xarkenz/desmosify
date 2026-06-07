@@ -134,7 +134,7 @@ action reveal(index: int) {
     if mode == Mode.Initial then {
         tiles := populate_tiles(insert_item(
             @shuffle({
-                [1 ..= @count(tiles)] <= mine_count: Tile.Mine,
+                [1 ..< @count(tiles)] <= mine_count: Tile.Mine,
                 Tile.Empty
             }),
             index,
@@ -341,5 +341,5 @@ display {
         label("`Congratulations!`", 1, 3, 0, "above");
     {mode == Mode.Loss || mode == Mode.Win: (0, 0)}:
         color(0),
-        label("Change settings (if desired) and run `A_{Reset}` to start over.", 1, 1, 0, "below");
+        label(@concat("Change settings (if desired) and run `", @target_symbol(action reset), "` to start over."), 1, 1, 0, "below");
 }
