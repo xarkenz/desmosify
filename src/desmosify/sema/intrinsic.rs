@@ -3,7 +3,7 @@ use crate::ast::{DefinitionKind, RangeKind, TypeDefinition};
 use crate::sema::context::{GlobalContext, LocalContext};
 use crate::sema::display::ImageValue;
 use crate::sema::types::{ListState, Type};
-use crate::sema::values::{BinaryKind, ColorKind, MathematicalConstant, ReducerKind, UnaryKind, Value, ValueKind};
+use crate::sema::values::{BinaryKind, ColorKind, InequalityKind, MathematicalConstant, ReducerKind, UnaryKind, Value, ValueKind};
 use crate::target::Target;
 
 pub fn get_core_intrinsics(target: &dyn Target) -> impl Iterator<Item = (&'static str, ValueKind)> {
@@ -165,6 +165,8 @@ pub const CORE_INTRINSIC_FUNCTIONS: &[&IntrinsicFunction] = &[
     // &STATS,
     &COUNT,
     &TOTAL,
+    &ANY,
+    &ALL,
     // Visualizations
     // &HISTOGRAM,
     // &DOT_PLOT,
@@ -761,6 +763,98 @@ pub static COUNT: IntrinsicFunction = reducer_intrinsic!(
 pub static TOTAL: IntrinsicFunction = reducer_intrinsic!(
     "total", Some(Type::require_numeric_or_point) => Total, None
 );
+
+fn get_any_all_total(arguments: Box<[Value]>, transformer: fn(Value) -> Value) -> crate::Result<ValueKind> {
+    if arguments.len() == 1 {
+        let argument = arguments.into_iter().next().unwrap()
+            .coerce_to(&Type::Bool, true)?;
+        let argument = transformer(argument);
+
+        if argument.get_type().list_state().is_some() {
+            // This should also work for any MaybeList
+            Ok(ValueKind::Reducer {
+                kind: ReducerKind::Total,
+                list: Box::new(argument),
+                result_type: Type::Int,
+            })
+        }
+        else {
+            Ok(ValueKind::ArgumentsReducer {
+                kind: ReducerKind::Total,
+                arguments: Box::new([argument]),
+                result_type: Type::Int,
+            })
+        }
+    }
+    else {
+        let arguments: Box<[_]> = arguments.into_iter()
+            .map(|argument| {
+                let argument = argument.coerce_to(&Type::Bool, true)?;
+                let argument = transformer(argument);
+                Ok(argument)
+            })
+            .collect::<crate::Result<_>>()?;
+        let list_state = arguments
+            .iter()
+            .fold(None, |current_state, argument| ListState::merge(
+                current_state,
+                argument.get_type().list_state(),
+            ));
+
+        Ok(ValueKind::ArgumentsReducer {
+            kind: ReducerKind::Total,
+            arguments,
+            result_type: Type::Int.unflatten_list(list_state),
+        })
+    }
+}
+
+// @total(arguments) > 0
+pub static ANY: IntrinsicFunction = IntrinsicFunction {
+    identifier: "any",
+    min_arity: 1,
+    max_arity: None,
+    interpret_call: |_, _, _, arguments| {
+        let total = get_any_all_total(arguments, std::convert::identity)?;
+        let list_state = total.get_type().list_state();
+
+        Ok(ValueKind::InequalityChain {
+            lhs: Box::new(total.into()),
+            chain: Box::new([(
+                InequalityKind::GreaterThan,
+                ValueKind::Int(0).into(),
+            )]),
+            result_type: Type::Bool.unflatten_list(list_state),
+        })
+    },
+};
+
+// @total(!arguments) == 0
+pub static ALL: IntrinsicFunction = IntrinsicFunction {
+    identifier: "all",
+    min_arity: 1,
+    max_arity: None,
+    interpret_call: |_, _, _, arguments| {
+        let total = get_any_all_total(arguments, |argument| {
+            let list_state = argument.get_type().list_state();
+
+            ValueKind::Unary {
+                kind: UnaryKind::LogicalNot,
+                operand: Box::new(argument),
+                result_type: Type::Bool.unflatten_list(list_state),
+            }.into()
+        })?;
+
+        let list_state = total.get_type().list_state();
+
+        Ok(ValueKind::Binary {
+            kind: BinaryKind::Equal,
+            lhs: Box::new(total.into()),
+            rhs: Box::new(ValueKind::Int(0).into()),
+            result_type: Type::Bool.unflatten_list(list_state),
+        })
+    },
+};
 
 // ------ Visualizations ------
 
