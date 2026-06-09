@@ -29,7 +29,6 @@ enum TileState {
 var board_size: int = 20;
 var mine_count: int = 75;
 var border_units: real = 0.5;
-var tick_seconds: real = 0.1;
 
 // Variables
 
@@ -37,6 +36,7 @@ var mode: Mode = Mode.Initial;
 var current_size: int = board_size;
 var tiles: [Tile] = [Tile.Empty; board_size ** 2];
 var tile_states: [TileState] = [TileState.Hidden; board_size ** 2];
+var spread_indices: [int] = [];
 
 // Definitions
 
@@ -70,19 +70,11 @@ let count_adjacent_mines(tiles: [Tile], index: int): int =
     (has_right && has_down && tiles[index + 1 - board_size] == Tile.Mine) +
     (has_right && has_up && tiles[index + 1 + board_size] == Tile.Mine);
 
-let count_adjacent_revealed_empty(index: int+): int+ =
-    let has_left = index % current_size != 1 in
-    let has_right = index % current_size != 0 in
-    let has_down = index > current_size in
-    let has_up = index <= @count(tiles) - current_size in
-    (has_left && tiles[index - 1] == Tile.Empty && tile_states[index - 1] == TileState.Revealed) +
-    (has_right && tiles[index + 1] == Tile.Empty && tile_states[index + 1] == TileState.Revealed) +
-    (has_down && tiles[index - current_size] == Tile.Empty && tile_states[index - current_size] == TileState.Revealed) +
-    (has_up && tiles[index + current_size] == Tile.Empty && tile_states[index + current_size] == TileState.Revealed) +
-    (has_left && has_down && tiles[index - 1 - current_size] == Tile.Empty && tile_states[index - 1 - current_size] == TileState.Revealed) +
-    (has_left && has_up && tiles[index - 1 + current_size] == Tile.Empty && tile_states[index - 1 + current_size] == TileState.Revealed) +
-    (has_right && has_down && tiles[index + 1 - current_size] == Tile.Empty && tile_states[index + 1 - current_size] == TileState.Revealed) +
-    (has_right && has_up && tiles[index + 1 + current_size] == Tile.Empty && tile_states[index + 1 + current_size] == TileState.Revealed);
+// TODO: @any and @all (how would those work without repeating expressions?)
+let is_adjacent_to_any(test_index: int, indices: [int]): bool = @count(indices) > 0 && @max([
+    @max(@abs(grid[test_index].x - grid[index].x), @abs(grid[test_index].y - grid[index].y)) <= 1
+    for index in indices
+]);
 
 let is_solving_move(move_index: int, move_state: TileState): bool = @min([
     let state = {index == move_index: move_state, tile_states[index]} in
@@ -115,16 +107,25 @@ action reset() {
     tile_states := [TileState.Hidden; board_size ** 2],
 }
 
-ticker (1000 * tick_seconds) {
+ticker {
     action tick(),
 }
 
 action tick() {
-    if mode == Mode.Play then {
+    if @count(spread_indices) > 0 then {
         tile_states := {
-            tile_states == TileState.Hidden && count_adjacent_revealed_empty([1 ..= @count(tile_states)]) > 0: TileState.Revealed,
+            tile_states == TileState.Hidden && [
+                is_adjacent_to_any(index, [spread_indices where tiles[spread_indices] == Tile.Empty])
+                for index in [1 ..= @count(tiles)]
+            ]: TileState.Revealed,
             tile_states
         },
+        spread_indices := [
+            [1 ..= @count(tiles)] where tile_states == TileState.Hidden && tiles == Tile.Empty && [
+                is_adjacent_to_any(index, [spread_indices where tiles[spread_indices] == Tile.Empty])
+                for index in [1 ..= @count(tiles)]
+            ]
+        ],
     }
     else disable,
 }
@@ -140,6 +141,10 @@ action reveal(index: int) {
             index,
             Tile.Empty,
         )),
+        spread_indices := [index],
+    }
+    elif tiles[index] == Tile.Empty then {
+        spread_indices := @join(spread_indices, index),
     },
     mode := {
         mode == Mode.Initial: Mode.Play,
@@ -337,7 +342,7 @@ display {
         color(mark_color),
         label("`Game\\ over...`", 1, 3, 0, "above");
     {mode == Mode.Win: (0, 0)}:
-        color(grass_colors[0]),
+        color(grass_colors[1]),
         label("`Congratulations!`", 1, 3, 0, "above");
     {mode == Mode.Loss || mode == Mode.Win: (0, 0)}:
         color(0),

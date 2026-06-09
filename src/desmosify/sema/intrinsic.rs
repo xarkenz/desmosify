@@ -128,7 +128,7 @@ pub const CORE_INTRINSIC_FUNCTIONS: &[&IntrinsicFunction] = &[
     &CEIL,
     &FLOOR,
     &ROUND,
-    // &ABS,
+    &ABS,
     &SIGN,
     &SQRT,
     &CBRT,
@@ -567,7 +567,23 @@ pub static ROUND: IntrinsicFunction = unary_intrinsic!(
     "round", (Type::Real) => Round, Type::Int
 );
 
-// ABS
+pub static ABS: IntrinsicFunction = IntrinsicFunction {
+    identifier: "abs",
+    min_arity: 1,
+    max_arity: Some(1),
+    interpret_call: |_, _, _, arguments| {
+        let argument = arguments.into_iter().next().unwrap();
+        let (argument_list, argument_type) = argument.get_type().into_flatten_list();
+
+        argument_type.require_numeric()?;
+
+        Ok(ValueKind::Unary {
+            kind: UnaryKind::Abs,
+            operand: Box::new(argument),
+            result_type: argument_type.unflatten_list(argument_list),
+        })
+    },
+};
 
 pub static SIGN: IntrinsicFunction = unary_intrinsic!(
     "sign", (Type::Real) => Sign, Type::Int

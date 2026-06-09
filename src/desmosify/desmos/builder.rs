@@ -1894,7 +1894,7 @@ impl<'target> GraphExpressionListBuilder<'target> {
     pub fn set_program_ticker(&mut self, program_ticker: Option<&ProgramTicker>) -> crate::Result<()> {
         self.ticker = match program_ticker {
             Some(program_ticker) => Some(GraphTicker {
-                playing: false,
+                playing: true,
                 handler: self.translate_action_value(&program_ticker.tick_action)?,
                 min_step: match &program_ticker.interval_ms {
                     Some(interval_ms) => self.translate_value(interval_ms)?,
