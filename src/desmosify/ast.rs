@@ -640,6 +640,12 @@ impl std::fmt::Display for ParameterList {
 pub enum VariableKind {
     Default,
     Timer,
+    // TODO: loop mode
+    Slider {
+        min: Option<Box<Expression>>,
+        max: Option<Box<Expression>>,
+        step: Option<Box<Expression>>,
+    },
 }
 
 impl std::fmt::Display for VariableKind {
@@ -647,6 +653,19 @@ impl std::fmt::Display for VariableKind {
         match self {
             Self::Default => write!(f, "var"),
             Self::Timer => write!(f, "var timer"),
+            Self::Slider { min, max, step } => {
+                write!(f, "var slider(")?;
+                match (min, max) {
+                    (Some(min), Some(max)) => write!(f, "{min} ..= {max}")?,
+                    (Some(min), None) => write!(f, "{min} ..")?,
+                    (None, Some(max)) => write!(f, "..= {max}")?,
+                    (None, None) => write!(f, "..")?,
+                }
+                if let Some(step) = step {
+                    write!(f, " : {step}")?;
+                }
+                write!(f, ")")
+            }
         }
     }
 }

@@ -26,8 +26,8 @@ enum TileState {
 
 // Config
 
-var board_size: int = 20;
-var mine_count: int = 75;
+var slider(2 ..= 40) board_size: int = 20;
+var slider(1 ..= current_size ** 2 - 1) mine_count: int = 75;
 var border_units: real = 0.5;
 
 // Variables
@@ -185,9 +185,9 @@ public {
     "Also, undo and redo work as you would expect, so if you explode and are a dirty cheater you can pretend it never happened.";
     "The settings below are applied the next time the board is regenerated. (You will actually be able to change these here in the future. I just haven't implemented that in my compiler yet.)";
     "Board size (both width and height, for now):";
-    board_size; // TODO: slider
+    board_size;
     "Number of mines hidden in the board:";
-    mine_count; // TODO: slider
+    mine_count;
     "Click the arrow to generate a new board:";
     action reset();
     "Click the arrow to forfeit and show the solution:";
@@ -348,3 +348,18 @@ display {
         color(0),
         label(@concat("Change settings (if desired) and run `", @target_symbol(action reset), "` to start over."), 1, 1, 0, "below");
 }
+
+// grass_dark: #26bf66
+// grass_light: #33cc66
+// sand_dark: #dfbe9c
+// sand_light: #e6c9a6
+// marker_dark: #df5543
+// marker_light: #e66950
+// number_1: #3c78d8
+// number_2: #6aa84f
+// number_3: #cc0000
+// number_4: #e69138
+// number_5: #a64d79
+// number_6: #76a5af
+// number_7: #bf9000
+// number_8: #999999

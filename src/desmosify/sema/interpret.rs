@@ -160,6 +160,19 @@ pub fn interpret_variable_definition(
     let kind = match kind {
         VariableKind::Default => ProgramVariableKind::Default,
         VariableKind::Timer => ProgramVariableKind::Timer,
+        VariableKind::Slider { min, max, step } => {
+            let mut interpret = |option: Option<&Expression>| {
+                option.map(|expression| {
+                    interpret_expression(target, context, &local_context, expression)?
+                        .coerce_to(value_type, false)
+                }).transpose()
+            };
+            ProgramVariableKind::Slider {
+                min: interpret(min.as_deref())?.map(Box::new),
+                max: interpret(max.as_deref())?.map(Box::new),
+                step: interpret(step.as_deref())?.map(Box::new),
+            }
+        }
     };
 
     let value = interpret_expression(target, context, &local_context, value)?

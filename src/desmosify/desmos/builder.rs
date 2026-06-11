@@ -1843,6 +1843,27 @@ impl<'target> GraphExpressionListBuilder<'target> {
     pub fn add_program_variable(&mut self, variable: &ProgramVariable) -> crate::Result<()> {
         let value = self.translate_value(&variable.value)?;
 
+        let slider = match &variable.kind {
+            ProgramVariableKind::Default => None,
+            ProgramVariableKind::Timer => Some(GraphSlider {
+                loop_mode: GraphSliderLoopMode::PlayIndefinitely,
+                is_playing: true,
+                ..Default::default()
+            }),
+            ProgramVariableKind::Slider { min, max, step } => Some(GraphSlider {
+                min: min.as_ref().map_or(Ok(Default::default()), |min| {
+                    self.translate_value(min)
+                })?,
+                max: max.as_ref().map_or(Ok(Default::default()), |max| {
+                    self.translate_value(max)
+                })?,
+                step: step.as_ref().map_or(Ok(Default::default()), |step| {
+                    self.translate_value(step)
+                })?,
+                ..Default::default()
+            }),
+        };
+
         self.global_entries.push(Box::new(GraphExpressionEntry {
             id: self.target_info.create_entry_id(),
             folder_id: Some(GLOBALS_FOLDER_ID.into()),
@@ -1851,14 +1872,7 @@ impl<'target> GraphExpressionListBuilder<'target> {
                 lhs: Box::new(self.target_info.get_global_symbol(&variable.identifier)),
                 rhs: Box::new(value),
             },
-            slider: match &variable.kind {
-                ProgramVariableKind::Default => None,
-                ProgramVariableKind::Timer => Some(GraphSlider {
-                    loop_mode: GraphSliderLoopMode::PlayIndefinitely,
-                    is_playing: true,
-                    ..Default::default()
-                }),
-            },
+            slider,
             ..Default::default()
         }));
 

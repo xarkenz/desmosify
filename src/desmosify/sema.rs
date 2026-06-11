@@ -26,6 +26,11 @@ pub struct ProgramImmutable {
 pub enum ProgramVariableKind {
     Default,
     Timer,
+    Slider {
+        min: Option<Box<Value>>,
+        max: Option<Box<Value>>,
+        step: Option<Box<Value>>,
+    },
 }
 
 #[derive(Clone, Debug)]

@@ -374,7 +374,7 @@ impl<'a, T: BufRead> Parser<'a, T> {
                                 while !matches!(self.current_token_kind(), Some(TokenKind::SquareRight)) {
                                     self.consume_token()?; // For
                                     let (identifier, identifier_span) = self.expect_identifier()?;
-                                    self.consume_token()?; // Literal(Identifier)
+                                    self.consume_token()?; // Identifier
                                     self.expect_token_from(&[TokenKind::In])?;
                                     self.consume_token()?; // In
                                     let list = self.parse_expression(None, &[TokenKind::For, TokenKind::SquareRight])?;
@@ -444,7 +444,7 @@ impl<'a, T: BufRead> Parser<'a, T> {
                     // Let expression
                     self.consume_token()?; // Let
                     let (identifier, identifier_span) = self.expect_identifier()?;
-                    self.consume_token()?; // Literal(Identifier)
+                    self.consume_token()?; // Identifier
                     let token = self.expect_token_from(&[TokenKind::Colon, TokenKind::Equal])?;
 
                     let mut value_type = None;
@@ -714,7 +714,7 @@ impl<'a, T: BufRead> Parser<'a, T> {
             TokenKind::Action => {
                 self.consume_token()?; // Action
                 let (identifier, identifier_span) = self.expect_identifier()?;
-                self.consume_token()?; // Literal(Identifier)
+                self.consume_token()?; // Identifier
                 self.expect_token_from(&[TokenKind::ParenLeft])?;
                 self.consume_token()?; // ParenLeft
                 let arguments = self.parse_argument_list()?;
@@ -814,7 +814,7 @@ impl<'a, T: BufRead> Parser<'a, T> {
 
         while !matches!(self.current_token_kind(), Some(TokenKind::ParenRight)) {
             let (identifier, identifier_span) = self.expect_identifier()?;
-            self.consume_token()?; // Literal(Identifier)
+            self.consume_token()?; // Identifier
             self.expect_token_from(&[TokenKind::Colon])?;
             self.consume_token()?; // Colon
             let parameter_type = self.parse_type(&[TokenKind::Comma, TokenKind::ParenRight])?;
@@ -830,6 +830,51 @@ impl<'a, T: BufRead> Parser<'a, T> {
         }
 
         Ok(ParameterList(parameters.into_boxed_slice()))
+    }
+
+    fn parse_slider_range(&mut self) -> crate::Result<VariableKind> {
+        let (min, max) = match self.current_token_kind() {
+            Some(TokenKind::Dot2) => {
+                // No min or max specified
+                self.consume_token()?; // Dot2
+                self.expect_token_from(&[TokenKind::Colon, TokenKind::ParenRight])?;
+                (None, None)
+            }
+            Some(TokenKind::RangeInclusive) => {
+                // Only max specified
+                self.consume_token()?; // RangeInclusive
+                let max = self.parse_expression(None, &[TokenKind::Colon, TokenKind::ParenRight])?;
+                (None, Some(Box::new(max)))
+            }
+            _ => {
+                // Min and possibly max specified
+                let min = self.parse_expression(None, &[TokenKind::Dot2, TokenKind::RangeInclusive])?;
+                if let Some(TokenKind::Dot2) = self.current_token_kind() {
+                    // No max specified
+                    self.consume_token()?; // Dot2
+                    self.expect_token_from(&[TokenKind::Colon, TokenKind::ParenRight])?;
+                    (Some(Box::new(min)), None)
+                }
+                else {
+                    // Both min and max specified
+                    self.consume_token()?; // RangeInclusive
+                    let max = self.parse_expression(None, &[TokenKind::Colon, TokenKind::ParenRight])?;
+                    (Some(Box::new(min)), Some(Box::new(max)))
+                }
+            }
+        };
+
+        let mut step = None;
+        if let Some(TokenKind::Colon) = self.current_token_kind() {
+            self.consume_token()?; // Colon
+            step = Some(Box::new(self.parse_expression(None, &[TokenKind::ParenRight])?));
+        }
+
+        Ok(VariableKind::Slider {
+            min,
+            max,
+            step,
+        })
     }
 
     pub fn parse_declaration(&mut self) -> crate::Result<Option<Declaration>> {
@@ -853,7 +898,7 @@ impl<'a, T: BufRead> Parser<'a, T> {
                 self.consume_token()?; // Let
 
                 let (identifier, identifier_span) = self.expect_identifier()?;
-                self.consume_token()?; // Literal(Identifier)
+                self.consume_token()?; // Identifier
 
                 let mut parameters = None;
                 if let Some(TokenKind::ParenLeft) = self.current_token_kind() {
@@ -883,8 +928,16 @@ impl<'a, T: BufRead> Parser<'a, T> {
                 self.consume_token()?; // Var
                 let variable_kind = match self.current_token_kind() {
                     Some(TokenKind::Timer) => {
-                        self.consume_token()?;
+                        self.consume_token()?; // Timer
                         VariableKind::Timer
+                    }
+                    Some(TokenKind::Slider) => {
+                        self.consume_token()?; // Slider
+                        self.expect_token_from(&[TokenKind::ParenLeft])?;
+                        self.consume_token()?; // ParenLeft
+                        let slider = self.parse_slider_range()?;
+                        self.consume_token()?; // ParenRight
+                        slider
                     }
                     _ => {
                         VariableKind::Default
@@ -892,7 +945,7 @@ impl<'a, T: BufRead> Parser<'a, T> {
                 };
 
                 let (identifier, identifier_span) = self.expect_identifier()?;
-                self.consume_token()?; // Literal(Identifier)
+                self.consume_token()?; // Identifier
 
                 self.expect_token_from(&[TokenKind::Colon])?;
                 self.consume_token()?; // Colon
@@ -915,7 +968,7 @@ impl<'a, T: BufRead> Parser<'a, T> {
                 self.consume_token()?; // Action
 
                 let (identifier, identifier_span) = self.expect_identifier()?;
-                self.consume_token()?; // Literal(Identifier)
+                self.consume_token()?; // Identifier
 
                 self.expect_token_from(&[TokenKind::ParenLeft])?;
                 self.consume_token()?; // ParenLeft
@@ -938,7 +991,7 @@ impl<'a, T: BufRead> Parser<'a, T> {
                 self.consume_token()?; // Enum
 
                 let (identifier, identifier_span) = self.expect_identifier()?;
-                self.consume_token()?; // Literal(Identifier)
+                self.consume_token()?; // Identifier
 
                 self.expect_token_from(&[TokenKind::CurlyLeft])?;
                 self.consume_token()?; // CurlyLeft
@@ -946,7 +999,7 @@ impl<'a, T: BufRead> Parser<'a, T> {
 
                 while !matches!(self.current_token_kind(), Some(TokenKind::CurlyRight)) {
                     let (identifier, identifier_span) = self.expect_identifier()?;
-                    self.consume_token()?; // Literal(Identifier)
+                    self.consume_token()?; // Identifier
                     let token = self.expect_token_from(&[
                         TokenKind::Equal,
                         TokenKind::Comma,
@@ -1056,7 +1109,7 @@ impl<'a, T: BufRead> Parser<'a, T> {
 
                         while !matches!(self.current_token_kind(), Some(TokenKind::Semicolon | TokenKind::CurlyRight)) {
                             let (attribute_key, attribute_key_span) = self.expect_identifier()?;
-                            self.consume_token()?; // Literal(Identifier)
+                            self.consume_token()?; // Identifier
 
                             let token = self.expect_token_from(&[TokenKind::ParenLeft, TokenKind::CurlyLeft])?;
                             let attribute_value = match token.kind {
