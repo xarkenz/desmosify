@@ -781,6 +781,9 @@ impl std::fmt::Display for TickerDeclaration {
 pub enum PublicLineKind {
     Expression(Expression),
     Action(ActionExpression),
+    Slider {
+        var_identifier: Rc<str>,
+    },
 }
 
 impl std::fmt::Display for PublicLineKind {
@@ -788,6 +791,7 @@ impl std::fmt::Display for PublicLineKind {
         match self {
             Self::Expression(expression) => write!(f, "{expression}"),
             Self::Action(action) => write!(f, "{action}"),
+            Self::Slider { var_identifier } => write!(f, "slider {var_identifier}"),
         }
     }
 }

@@ -292,6 +292,12 @@ pub enum ErrorKind {
     },
     ExpectedAction,
     ExpectedGlobalOrActionReference,
+    MultipleSlidersForVariable {
+        identifier: Box<str>,
+    },
+    InvalidSliderReference {
+        identifier: Box<str>,
+    },
 }
 
 impl std::fmt::Display for ErrorKind {
@@ -541,6 +547,12 @@ impl std::fmt::Display for ErrorKind {
             }
             Self::ExpectedGlobalOrActionReference => {
                 write!(f, "expected a global or action referenced by identifier")
+            }
+            Self::MultipleSlidersForVariable { identifier } => {
+                write!(f, "variable '{identifier}' has already been assigned a public slider")
+            }
+            Self::InvalidSliderReference { identifier } => {
+                write!(f, "global '{identifier}' cannot be used as a slider")
             }
         }
     }

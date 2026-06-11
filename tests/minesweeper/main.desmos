@@ -26,16 +26,16 @@ enum TileState {
 
 // Config
 
-var slider(2 ..= 40) board_size: int = 20;
-var slider(1 ..= current_size ** 2 - 1) mine_count: int = 75;
+var slider(2 ..= 40 : 1) board_size: int = 20;
+var slider(1 ..= current_size ** 2 - 1 : 1) mine_count: int = 60;
 var border_units: real = 0.5;
 
 // Variables
 
 var mode: Mode = Mode.Initial;
-var current_size: int = board_size;
-var tiles: [Tile] = [Tile.Empty; board_size ** 2];
-var tile_states: [TileState] = [TileState.Hidden; board_size ** 2];
+var current_size: int = 20;
+var tiles: [Tile] = [Tile.Empty; 20 ** 2];
+var tile_states: [TileState] = [TileState.Hidden; 20 ** 2];
 var spread_indices: [int] = [];
 
 // Definitions
@@ -183,11 +183,11 @@ public {
     "Click on any tile to start the game. Clicking the left half of a tile reveals it, the right half flags it. Clicking a flag clears the flag without revealing the space.";
     "I would like to extend a formal apology to those trying to play on mobile. I'm working on it...";
     "Also, undo and redo work as you would expect, so if you explode and are a dirty cheater you can pretend it never happened.";
-    "The settings below are applied the next time the board is regenerated. (You will actually be able to change these here in the future. I just haven't implemented that in my compiler yet.)";
+    "The settings below are applied the next time the board is regenerated.";
     "Board size (both width and height, for now):";
-    board_size;
+    slider board_size;
     "Number of mines hidden in the board:";
-    mine_count;
+    slider mine_count;
     "Click the arrow to generate a new board:";
     action reset();
     "Click the arrow to forfeit and show the solution:";
@@ -222,7 +222,7 @@ display {
         view(grid + (0.5, -0.5)),
         view(grid + (-0.5, -0.5)),
         view(grid + (-0.5, 0.5)),
-    ): color(tile_colors), line(1, 1), fill(1);
+    ): color(tile_colors), line(1, 0.5), fill(1);
 
     // Board debugging
     // view(grid): color(0), label(@concat("${", @target_symbol(tiles), "}"));
@@ -239,7 +239,7 @@ display {
         @include_data("images/mine.png"),
         "mine icon",
         {tiles == Tile.Mine &&
-            (tile_states == TileState.Flagged || tile_states == TileState.Flagged) &&
+            (tile_states == TileState.Hidden || tile_states == TileState.Flagged) &&
             (mode == Mode.Loss || mode == Mode.Win): view(grid)},
         0.8 * tile_units, 0.8 * tile_units,
     );
@@ -327,13 +327,13 @@ display {
 
     // Popup panel
     @polygon({
-        mode == Mode.Loss || mode == Mode.Win: [(-0.5, -0.25), (-0.5, 0.25), (0.5, 0.25), (0.5, -0.25)] * board_units
+        mode == Mode.Loss || mode == Mode.Win: [(-0.6, -0.25), (-0.6, 0.25), (0.6, 0.25), (0.6, -0.25)] * board_units
     }): color(@hsv(0, 0, 1)), fill(0.7);
     // @image(
     //     @include_data("images/close.png"),
     //     "close button",
     //     {mode == Mode.Loss || mode == Mode.Win: (0.4375, 0.1875) * board_units},
-    //     0.0625 * board_size, 0.0625 * board_size,
+    //     0.0625 * current_size, 0.0625 * current_size,
     //     0.2,
     // ): click { mode := Mode.Play };
 

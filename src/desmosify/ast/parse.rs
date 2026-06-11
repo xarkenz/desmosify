@@ -1072,6 +1072,19 @@ impl<'a, T: BufRead> Parser<'a, T> {
 
                             self.expect_token_from(&[TokenKind::Semicolon, TokenKind::CurlyRight])?;
                         }
+                        TokenKind::Slider => {
+                            self.consume_token()?; // Slider
+                            let (var_identifier, span) = self.expect_identifier()?;
+                            self.consume_token()?; // Identifier
+                            lines.push(PublicLine {
+                                kind: PublicLineKind::Slider {
+                                    var_identifier,
+                                },
+                                span,
+                            });
+
+                            self.expect_token_from(&[TokenKind::Semicolon, TokenKind::CurlyRight])?;
+                        }
                         _ => {
                             let expression = self.parse_expression(None, &[TokenKind::Semicolon, TokenKind::CurlyRight])?;
                             lines.push(PublicLine {

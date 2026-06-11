@@ -57,6 +57,7 @@ pub struct ProgramTicker {
 pub enum ProgramPublicLine {
     Expression(Value),
     Action(ActionValue),
+    Variable(ProgramVariable),
 }
 
 #[derive(Clone, Debug)]

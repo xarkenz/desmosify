@@ -1811,12 +1811,12 @@ impl<'target> GraphExpressionListBuilder<'target> {
         }
     }
 
-    pub fn add_program_immutable(&mut self, immutable: &ProgramImmutable) -> crate::Result<()> {
+    pub fn translate_program_immutable(&mut self, immutable: &ProgramImmutable, folder_id: Option<String>) -> crate::Result<Box<dyn GraphEntry>> {
         let value = self.translate_value(&immutable.value)?;
 
-        self.global_entries.push(Box::new(GraphExpressionEntry {
+        Ok(Box::new(GraphExpressionEntry {
             id: self.target_info.create_entry_id(),
-            folder_id: Some(GLOBALS_FOLDER_ID.into()),
+            folder_id,
             expression: GraphExpression::Binary {
                 kind: GraphBinaryKind::Equal,
                 lhs: Box::new(match &immutable.parameters {
@@ -1835,12 +1835,16 @@ impl<'target> GraphExpressionListBuilder<'target> {
                 rhs: Box::new(value),
             },
             ..Default::default()
-        }));
+        }))
+    }
 
+    pub fn add_program_immutable(&mut self, immutable: &ProgramImmutable) -> crate::Result<()> {
+        let entry = self.translate_program_immutable(immutable, Some(GLOBALS_FOLDER_ID.into()))?;
+        self.global_entries.push(entry);
         Ok(())
     }
 
-    pub fn add_program_variable(&mut self, variable: &ProgramVariable) -> crate::Result<()> {
+    pub fn translate_program_variable(&mut self, variable: &ProgramVariable, folder_id: Option<String>) -> crate::Result<Box<dyn GraphEntry>> {
         let value = self.translate_value(&variable.value)?;
 
         let slider = match &variable.kind {
@@ -1864,9 +1868,9 @@ impl<'target> GraphExpressionListBuilder<'target> {
             }),
         };
 
-        self.global_entries.push(Box::new(GraphExpressionEntry {
+        Ok(Box::new(GraphExpressionEntry {
             id: self.target_info.create_entry_id(),
-            folder_id: Some(GLOBALS_FOLDER_ID.into()),
+            folder_id,
             expression: GraphExpression::Binary {
                 kind: GraphBinaryKind::Equal,
                 lhs: Box::new(self.target_info.get_global_symbol(&variable.identifier)),
@@ -1874,17 +1878,21 @@ impl<'target> GraphExpressionListBuilder<'target> {
             },
             slider,
             ..Default::default()
-        }));
+        }))
+    }
 
+    pub fn add_program_variable(&mut self, variable: &ProgramVariable) -> crate::Result<()> {
+        let entry = self.translate_program_variable(variable, Some(GLOBALS_FOLDER_ID.into()))?;
+        self.global_entries.push(entry);
         Ok(())
     }
 
-    pub fn add_program_action(&mut self, program_action: &ProgramAction) -> crate::Result<()> {
+    pub fn translate_program_action(&mut self, program_action: &ProgramAction, folder_id: Option<String>) -> crate::Result<Box<dyn GraphEntry>> {
         let action = self.translate_action_value(&program_action.action)?;
 
-        self.action_entries.push(Box::new(GraphExpressionEntry {
+        Ok(Box::new(GraphExpressionEntry {
             id: self.target_info.create_entry_id(),
-            folder_id: Some(ACTIONS_FOLDER_ID.into()),
+            folder_id,
             expression: GraphExpression::Binary {
                 kind: GraphBinaryKind::Equal,
                 lhs: Box::new(GraphExpression::Binary {
@@ -1900,7 +1908,13 @@ impl<'target> GraphExpressionListBuilder<'target> {
                 rhs: Box::new(action),
             },
             ..Default::default()
-        }));
+        }))
+    }
+
+    pub fn add_program_action(&mut self, program_action: &ProgramAction) -> crate::Result<()> {
+        let entry = self.translate_program_action(program_action, Some(ACTIONS_FOLDER_ID.into()))?;
+
+        self.action_entries.push(entry);
 
         Ok(())
     }
@@ -1955,6 +1969,9 @@ impl<'target> GraphExpressionListBuilder<'target> {
                     expression: self.translate_action_value(action)?,
                     ..Default::default()
                 })
+            }
+            ProgramPublicLine::Variable(variable) => {
+                self.translate_program_variable(variable, None)?
             }
         };
         self.public_entries.push(entry);

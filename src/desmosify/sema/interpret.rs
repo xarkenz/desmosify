@@ -63,14 +63,18 @@ pub fn interpret_program(source_paths: &[PathBuf], target: &mut dyn Target, cont
         }
     }
 
+    let ticker = interpret_ticker_declarations(source_paths, target, context)?;
+    let public = interpret_public_declarations(source_paths, target, context, &mut variables)?;
+    let display = interpret_display_declarations(source_paths, target, context)?;
+
     Ok(Program {
         enumerations: enumerations.into_boxed_slice(),
         immutables: immutables.into_boxed_slice(),
         variables: variables.into_boxed_slice(),
         actions: actions.into_boxed_slice(),
-        ticker: interpret_ticker_declarations(source_paths, target, context)?,
-        public: interpret_public_declarations(source_paths, target, context)?,
-        display: interpret_display_declarations(source_paths, target, context)?,
+        ticker,
+        public,
+        display,
     })
 }
 
@@ -157,6 +161,7 @@ pub fn interpret_variable_definition(
     value_type: &Type,
     value: &Expression,
 ) -> crate::Result<ProgramVariable> {
+    // TODO: timer and slider should be restricted to certain types, should also affect slider step
     let kind = match kind {
         VariableKind::Default => ProgramVariableKind::Default,
         VariableKind::Timer => ProgramVariableKind::Timer,
@@ -280,6 +285,7 @@ pub fn interpret_public_declarations(
     source_paths: &[PathBuf],
     target: &mut dyn Target,
     context: &GlobalContext,
+    variables: &mut Vec<ProgramVariable>,
 ) -> crate::Result<Option<ProgramPublic>> {
     let mut lines = Vec::new();
 
@@ -293,6 +299,41 @@ pub fn interpret_public_declarations(
                 }
                 PublicLineKind::Action(action) => {
                     ProgramPublicLine::Action(interpret_action_expression(target, context, &local_context, action)?)
+                }
+                PublicLineKind::Slider { var_identifier } => {
+                    let var_index = variables
+                        .iter()
+                        .position(|variable| &variable.identifier == var_identifier)
+                        .ok_or_else(|| {
+                            // We can provide some pretty good diagnostics for this error.
+                            let Some(definition) = context.find_definition(var_identifier) else {
+                                return Box::new(crate::Error {
+                                    kind: crate::ErrorKind::UndefinedIdentifier {
+                                        identifier: var_identifier.as_ref().into(),
+                                    },
+                                    span: Some(line.span),
+                                })
+                            };
+                            if matches!(definition.definition.kind, DefinitionKind::Value(ValueDefinition::Variable { .. })) {
+                                Box::new(crate::Error {
+                                    kind: crate::ErrorKind::MultipleSlidersForVariable {
+                                        identifier: var_identifier.as_ref().into(),
+                                    },
+                                    span: Some(line.span),
+                                })
+                            }
+                            else {
+                                Box::new(crate::Error {
+                                    kind: crate::ErrorKind::InvalidSliderReference {
+                                        identifier: var_identifier.as_ref().into(),
+                                    },
+                                    span: Some(line.span),
+                                })
+                            }
+                        })?;
+
+                    // Steal the variable and put it in the public list
+                    ProgramPublicLine::Variable(variables.remove(var_index))
                 }
             });
         }
