@@ -784,14 +784,33 @@ pub enum PublicLineKind {
     Slider {
         var_identifier: Rc<str>,
     },
+    Folder {
+        label: Rc<str>,
+        lines: Box<[PublicLine]>,
+    },
 }
 
 impl std::fmt::Display for PublicLineKind {
     fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
         match self {
-            Self::Expression(expression) => write!(f, "{expression}"),
-            Self::Action(action) => write!(f, "{action}"),
-            Self::Slider { var_identifier } => write!(f, "slider {var_identifier}"),
+            Self::Expression(expression) => write!(f, "{expression};"),
+            Self::Action(action) => write!(f, "{action};"),
+            Self::Slider { var_identifier } => write!(f, "slider {var_identifier};"),
+            Self::Folder { label, lines } => {
+                write!(f, "folder {label:?} ")?;
+                match lines.as_ref() {
+                    [] => {
+                        write!(f, "{{}}")
+                    }
+                    [first, rest @ ..] => {
+                        write!(f, "{{ {first}")?;
+                        for line in rest {
+                            write!(f, " {line}")?;
+                        }
+                        write!(f, " }}")
+                    }
+                }
+            }
         }
     }
 }
@@ -823,7 +842,7 @@ impl std::fmt::Display for PublicDeclaration {
             [first, rest @ ..] => {
                 write!(f, "public {{ {first}")?;
                 for line in rest {
-                    write!(f, "; {line}")?;
+                    write!(f, " {line}")?;
                 }
                 write!(f, " }}")
             }

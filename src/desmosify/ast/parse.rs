@@ -877,6 +877,69 @@ impl<'a, T: BufRead> Parser<'a, T> {
         })
     }
 
+    fn parse_public_line(&mut self) -> crate::Result<PublicLine> {
+        let first_token = self.get_token()?;
+        let start_span = first_token.span;
+
+        match &first_token.kind {
+            TokenKind::Action => {
+                // Defer to general action parsing even though this is known to be an action call
+                let action = self.parse_action(&[TokenKind::Semicolon, TokenKind::CurlyRight])?;
+
+                Ok(PublicLine {
+                    span: action.span,
+                    kind: PublicLineKind::Action(action),
+                })
+            }
+            TokenKind::Slider => {
+                self.consume_token()?; // Slider
+                let (var_identifier, identifier_span) = self.expect_identifier()?;
+                self.consume_token()?; // Identifier
+                self.expect_token_from(&[TokenKind::Semicolon, TokenKind::CurlyRight])?;
+
+                Ok(PublicLine {
+                    kind: PublicLineKind::Slider {
+                        var_identifier,
+                    },
+                    span: start_span.expand_to(identifier_span),
+                })
+            }
+            TokenKind::Folder => {
+                self.consume_token()?; // Folder
+                let (label, label_span) = self.expect_string()?;
+                self.consume_token()?; // String
+                self.expect_token_from(&[TokenKind::CurlyLeft])?;
+                self.consume_token()?; // CurlyLeft
+                let mut lines = Vec::new();
+
+                while !matches!(self.current_token_kind(), Some(TokenKind::CurlyRight)) {
+                    lines.push(self.parse_public_line()?);
+
+                    if let Some(TokenKind::Semicolon) = self.current_token_kind() {
+                        self.consume_token()?; // Semicolon
+                    }
+                }
+                self.consume_token()?; // CurlyRight
+
+                Ok(PublicLine {
+                    kind: PublicLineKind::Folder {
+                        label,
+                        lines: lines.into_boxed_slice(),
+                    },
+                    span: start_span.expand_to(label_span),
+                })
+            }
+            _ => {
+                let expression = self.parse_expression(None, &[TokenKind::Semicolon, TokenKind::CurlyRight])?;
+
+                Ok(PublicLine {
+                    span: expression.span,
+                    kind: PublicLineKind::Expression(expression),
+                })
+            }
+        }
+    }
+
     pub fn parse_declaration(&mut self) -> crate::Result<Option<Declaration>> {
         if self.current_token().is_none() {
             return Ok(None)
@@ -1062,37 +1125,7 @@ impl<'a, T: BufRead> Parser<'a, T> {
                 let mut lines = Vec::new();
 
                 while !matches!(self.current_token_kind(), Some(TokenKind::CurlyRight)) {
-                    match &self.get_token()?.kind {
-                        TokenKind::Action => {
-                            let action = self.parse_action(&[])?;
-                            lines.push(PublicLine {
-                                span: action.span,
-                                kind: PublicLineKind::Action(action),
-                            });
-
-                            self.expect_token_from(&[TokenKind::Semicolon, TokenKind::CurlyRight])?;
-                        }
-                        TokenKind::Slider => {
-                            self.consume_token()?; // Slider
-                            let (var_identifier, span) = self.expect_identifier()?;
-                            self.consume_token()?; // Identifier
-                            lines.push(PublicLine {
-                                kind: PublicLineKind::Slider {
-                                    var_identifier,
-                                },
-                                span,
-                            });
-
-                            self.expect_token_from(&[TokenKind::Semicolon, TokenKind::CurlyRight])?;
-                        }
-                        _ => {
-                            let expression = self.parse_expression(None, &[TokenKind::Semicolon, TokenKind::CurlyRight])?;
-                            lines.push(PublicLine {
-                                span: expression.span,
-                                kind: PublicLineKind::Expression(expression),
-                            });
-                        }
-                    }
+                    lines.push(self.parse_public_line()?);
 
                     if let Some(TokenKind::Semicolon) = self.current_token_kind() {
                         self.consume_token()?; // Semicolon

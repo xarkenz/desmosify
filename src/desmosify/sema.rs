@@ -61,8 +61,17 @@ pub enum ProgramPublicLine {
 }
 
 #[derive(Clone, Debug)]
+pub enum ProgramPublicEntry {
+    Line(ProgramPublicLine),
+    Folder {
+        label: Rc<str>,
+        lines: Box<[ProgramPublicLine]>,
+    },
+}
+
+#[derive(Clone, Debug)]
 pub struct ProgramPublic {
-    pub lines: Box<[ProgramPublicLine]>,
+    pub entries: Box<[ProgramPublicEntry]>,
 }
 
 #[derive(Clone, Debug)]

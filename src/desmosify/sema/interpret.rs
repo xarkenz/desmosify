@@ -1,7 +1,7 @@
 use std::path::PathBuf;
 use std::rc::Rc;
-use crate::ast::{ActionExpression, ActionExpressionKind, BinaryOperation, DefinitionKind, DisplayAttribute, DisplayAttributeValue, Expression, IndexOperation, ExpressionKind, ParameterList, PublicLineKind, TypeDefinition, UnaryOperation, ValueDefinition, VariableKind, EnumerationVariant};
-use crate::sema::{Program, ProgramAction, ProgramEnumeration, ProgramImmutable, ProgramPublic, ProgramPublicLine, ProgramTicker, ProgramVariable, ProgramVariableKind};
+use crate::ast::{ActionExpression, ActionExpressionKind, BinaryOperation, DefinitionKind, DisplayAttribute, DisplayAttributeValue, Expression, IndexOperation, ExpressionKind, ParameterList, PublicLineKind, TypeDefinition, UnaryOperation, ValueDefinition, VariableKind, EnumerationVariant, PublicLine};
+use crate::sema::{Program, ProgramAction, ProgramEnumeration, ProgramImmutable, ProgramPublic, ProgramPublicEntry, ProgramPublicLine, ProgramTicker, ProgramVariable, ProgramVariableKind};
 use crate::sema::context::{GlobalContext, LocalContext};
 use crate::sema::display::{DragMode, LabelOrientation, LineStyle, PointStyle, ProgramDisplay, ProgramDisplayAttribute, ProgramDisplayAttributeKind, ProgramDisplayElement};
 use crate::sema::types::{ListState, Type};
@@ -287,65 +287,97 @@ pub fn interpret_public_declarations(
     context: &GlobalContext,
     variables: &mut Vec<ProgramVariable>,
 ) -> crate::Result<Option<ProgramPublic>> {
-    let mut lines = Vec::new();
+    let mut entries = Vec::new();
 
     for declaration in context.public_declarations() {
         let local_context = LocalContext::new(&source_paths[declaration.span.source_id]);
 
         for line in &declaration.lines {
-            lines.push(match &line.kind {
-                PublicLineKind::Expression(expression) => {
-                    ProgramPublicLine::Expression(interpret_expression(target, context, &local_context, expression)?)
+            entries.push(match &line.kind {
+                PublicLineKind::Expression(..) |
+                PublicLineKind::Action(..) |
+                PublicLineKind::Slider { .. } => {
+                    ProgramPublicEntry::Line(interpret_public_line(target, context, variables, &local_context, line)?)
                 }
-                PublicLineKind::Action(action) => {
-                    ProgramPublicLine::Action(interpret_action_expression(target, context, &local_context, action)?)
-                }
-                PublicLineKind::Slider { var_identifier } => {
-                    let var_index = variables
-                        .iter()
-                        .position(|variable| &variable.identifier == var_identifier)
-                        .ok_or_else(|| {
-                            // We can provide some pretty good diagnostics for this error.
-                            let Some(definition) = context.find_definition(var_identifier) else {
-                                return Box::new(crate::Error {
-                                    kind: crate::ErrorKind::UndefinedIdentifier {
-                                        identifier: var_identifier.as_ref().into(),
-                                    },
-                                    span: Some(line.span),
-                                })
-                            };
-                            if matches!(definition.definition.kind, DefinitionKind::Value(ValueDefinition::Variable { .. })) {
-                                Box::new(crate::Error {
-                                    kind: crate::ErrorKind::MultipleSlidersForVariable {
-                                        identifier: var_identifier.as_ref().into(),
-                                    },
-                                    span: Some(line.span),
-                                })
-                            }
-                            else {
-                                Box::new(crate::Error {
-                                    kind: crate::ErrorKind::InvalidSliderReference {
-                                        identifier: var_identifier.as_ref().into(),
-                                    },
-                                    span: Some(line.span),
-                                })
-                            }
-                        })?;
-
-                    // Steal the variable and put it in the public list
-                    ProgramPublicLine::Variable(variables.remove(var_index))
+                PublicLineKind::Folder { label, lines } => {
+                    ProgramPublicEntry::Folder {
+                        label: label.clone(),
+                        lines: lines
+                            .iter()
+                            .map(|line| interpret_public_line(target, context, variables, &local_context, line))
+                            .collect::<crate::Result<_>>()?,
+                    }
                 }
             });
         }
     }
 
-    if lines.is_empty() {
+    if entries.is_empty() {
         Ok(None)
     }
     else {
         Ok(Some(ProgramPublic {
-            lines: lines.into_boxed_slice(),
+            entries: entries.into_boxed_slice(),
         }))
+    }
+}
+
+fn interpret_public_line(
+    target: &mut dyn Target,
+    context: &GlobalContext,
+    variables: &mut Vec<ProgramVariable>,
+    local_context: &LocalContext,
+    line: &PublicLine,
+) -> crate::Result<ProgramPublicLine> {
+    match &line.kind {
+        PublicLineKind::Expression(expression) => {
+            Ok(ProgramPublicLine::Expression(interpret_expression(target, context, local_context, expression)?))
+        }
+        PublicLineKind::Action(action) => {
+            Ok(ProgramPublicLine::Action(interpret_action_expression(target, context, local_context, action)?))
+        }
+        PublicLineKind::Slider { var_identifier } => {
+            let var_index = variables
+                .iter()
+                .position(|variable| &variable.identifier == var_identifier)
+                .ok_or_else(|| {
+                    // We can provide some pretty good diagnostics for this error.
+                    let Some(definition) = context.find_definition(var_identifier) else {
+                        return Box::new(crate::Error {
+                            kind: crate::ErrorKind::UndefinedIdentifier {
+                                identifier: var_identifier.as_ref().into(),
+                            },
+                            span: Some(line.span),
+                        })
+                    };
+                    if matches!(definition.definition.kind, DefinitionKind::Value(ValueDefinition::Variable { .. })) {
+                        Box::new(crate::Error {
+                            kind: crate::ErrorKind::MultipleSlidersForVariable {
+                                identifier: var_identifier.as_ref().into(),
+                            },
+                            span: Some(line.span),
+                        })
+                    }
+                    else {
+                        Box::new(crate::Error {
+                            kind: crate::ErrorKind::InvalidSliderReference {
+                                identifier: var_identifier.as_ref().into(),
+                            },
+                            span: Some(line.span),
+                        })
+                    }
+                })?;
+
+            // Steal the variable and put it in the public list
+            Ok(ProgramPublicLine::Variable(variables.remove(var_index)))
+        }
+        PublicLineKind::Folder { .. } => {
+            // If this function has been called, the assumption is that a folder is not allowed.
+            Err(Box::new(crate::Error {
+                kind: crate::ErrorKind::CannotNestFolders,
+                span: Some(line.span),
+            }))
+        }
     }
 }
 

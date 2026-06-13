@@ -298,6 +298,7 @@ pub enum ErrorKind {
     InvalidSliderReference {
         identifier: Box<str>,
     },
+    CannotNestFolders,
 }
 
 impl std::fmt::Display for ErrorKind {
@@ -553,6 +554,9 @@ impl std::fmt::Display for ErrorKind {
             }
             Self::InvalidSliderReference { identifier } => {
                 write!(f, "global '{identifier}' cannot be used as a slider")
+            }
+            Self::CannotNestFolders => {
+                write!(f, "folders cannot contain other folders")
             }
         }
     }

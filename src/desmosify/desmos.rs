@@ -16,6 +16,8 @@ pub trait GraphEntry : ToJson + std::fmt::Debug {
     fn id(&self) -> &str;
 }
 
+// TODO: Rc<str> should be used in a lot of places instead of String
+
 #[derive(Debug)]
 pub struct GraphFolderEntry {
     pub id: String,

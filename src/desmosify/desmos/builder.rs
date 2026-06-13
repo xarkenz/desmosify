@@ -1,7 +1,7 @@
 use crate::ast::RangeKind;
 use crate::desmos::{GraphBinaryKind, GraphEntry, GraphExpression, GraphExpressionEntry, GraphExpressionList, GraphFolderEntry, GraphImageEntry, GraphInequalityKind, GraphSlider, GraphSliderLoopMode, GraphTextEntry, GraphTicker, GraphUnaryKind};
 use crate::desmos::target::DesmosTargetInfo;
-use crate::sema::{Program, ProgramAction, ProgramImmutable, ProgramPublicLine, ProgramTicker, ProgramVariable, ProgramVariableKind};
+use crate::sema::{Program, ProgramAction, ProgramImmutable, ProgramPublicEntry, ProgramPublicLine, ProgramTicker, ProgramVariable, ProgramVariableKind};
 use crate::sema::display::{ImageValue, ProgramDisplayAttributeKind, ProgramDisplayElement};
 use crate::sema::types::Type;
 use crate::sema::values::{ActionValue, ActionValueKind, BinaryKind, ColorKind, DoubleReducerKind, IndexKind, InequalityKind, MathematicalConstant, ParameterizedReducerKind, ReducerKind, UnaryKind, Value, ValueKind};
@@ -1935,7 +1935,7 @@ impl<'target> GraphExpressionListBuilder<'target> {
         Ok(())
     }
 
-    pub fn add_public_line(&mut self, public_line: &ProgramPublicLine) -> crate::Result<()> {
+    pub fn add_public_line(&mut self, public_line: &ProgramPublicLine, folder_id: Option<String>) -> crate::Result<()> {
         let id = self.target_info.create_entry_id();
         let entry: Box<dyn GraphEntry> = match public_line {
             ProgramPublicLine::Expression(value) => match &value.kind {
@@ -1944,13 +1944,14 @@ impl<'target> GraphExpressionListBuilder<'target> {
                     if text.is_empty() {
                         Box::new(GraphExpressionEntry {
                             id,
+                            folder_id,
                             ..Default::default()
                         })
                     }
                     else {
                         Box::new(GraphTextEntry {
                             id,
-                            folder_id: None,
+                            folder_id,
                             text: text.to_string(),
                         })
                     }
@@ -1958,6 +1959,7 @@ impl<'target> GraphExpressionListBuilder<'target> {
                 _ => {
                     Box::new(GraphExpressionEntry {
                         id,
+                        folder_id,
                         expression: self.translate_value(value)?,
                         ..Default::default()
                     })
@@ -1966,17 +1968,42 @@ impl<'target> GraphExpressionListBuilder<'target> {
             ProgramPublicLine::Action(action) => {
                 Box::new(GraphExpressionEntry {
                     id,
+                    folder_id,
                     expression: self.translate_action_value(action)?,
                     ..Default::default()
                 })
             }
             ProgramPublicLine::Variable(variable) => {
-                self.translate_program_variable(variable, None)?
+                self.translate_program_variable(variable, folder_id)?
             }
         };
         self.public_entries.push(entry);
 
         Ok(())
+    }
+
+    pub fn add_public_entry(&mut self, public_entry: &ProgramPublicEntry) -> crate::Result<()> {
+        match public_entry {
+            ProgramPublicEntry::Line(public_line) => {
+                self.add_public_line(public_line, None)
+            }
+            ProgramPublicEntry::Folder { label, lines } => {
+                let folder_id = self.target_info.create_entry_id();
+                let folder_entry = Box::new(GraphFolderEntry {
+                    id: folder_id.clone(),
+                    title: label.to_string(),
+                    collapsed: true,
+                    secret: false,
+                });
+                self.public_entries.push(folder_entry);
+
+                for line in lines {
+                    self.add_public_line(line, Some(folder_id.clone()))?;
+                }
+
+                Ok(())
+            }
+        }
     }
 
     pub fn add_display_element(&mut self, element: &ProgramDisplayElement) -> crate::Result<()> {
@@ -2120,8 +2147,8 @@ impl<'target> GraphExpressionListBuilder<'target> {
         }
         self.set_program_ticker(program.ticker.as_ref())?;
         if let Some(public) = &program.public {
-            for public_line in &public.lines {
-                self.add_public_line(public_line)?;
+            for public_entry in &public.entries {
+                self.add_public_entry(public_entry)?;
             }
         }
         if let Some(display) = &program.display {
