@@ -7,13 +7,13 @@ nav_order: 1
 
 # **Desmosify**
 
-Create graphs in plain text
+Write code, compile and run in Desmos.
 
 ```
 public {
-    "Current fibonacci number:";
+    "Current fibonacci number";
     num_b;
-    "Get next number:";
+    "Get next number";
     action next();
 }
 
@@ -30,3 +30,9 @@ action next() {
 
 Desmosify is a programming language which is based around the structure of a
 [Desmos]({{site.desmos_url}}/) graph, and which can be compiled into such a graph.
+
+[Desmodder](https://www.desmodder.com/) (unaffiliated) has a similar tool in the form of text mode; however, unlike
+Desmodder's text mode, the goal of Desmosify is *not* to have 1-to-1 parity with Desmos graphs. Instead, Desmosify uses
+its own defined semantics, and provides additional compile-time features such as type checking and constant evaluation
+before generating Desmos graphs. It also is designed to work locally, which makes it more self-contained, though it does
+make debugging harder.
