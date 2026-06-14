@@ -19,6 +19,7 @@ pub fn get_core_intrinsics(target: &dyn Target) -> impl Iterator<Item = (&'stati
             ("width_pixels", ValueKind::ViewportWidth),
             ("height_pixels", ValueKind::ViewportHeight),
             ("target", ValueKind::Str(target.name().into())),
+            ("transparent_image_data", ValueKind::Str("data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAAAXNSR0IArs4c6QAAAAtJREFUGFdjYAACAAAFAAGq1chRAAAAAElFTkSuQmCC".into())),
         ])
 }
 

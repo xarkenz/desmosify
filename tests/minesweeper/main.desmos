@@ -26,14 +26,16 @@ enum TileState {
 
 // Configuration variables
 
-var slider(2 ..= 40 : 1) board_size: int = 20;
-var slider(1 ..= current_size ** 2 - 1 : 1) mine_count: int = 60;
+var slider(2 ..= 40 : 1) board_width: int = 18;
+var slider(2 ..= 40 : 1) board_height: int = 14;
+var slider(1 ..= current_width * current_height - 1 : 1) mine_count: int = 40;
 var slider(0 ..= 2.5 : 0.25) border_units: real = 0.5;
 
 // Variables
 
 var mode: Mode = Mode.Initial;
-var current_size: int = 20;
+var current_width: int = 18;
+var current_height: int = 14;
 var tiles: [Tile] = [Tile.Empty; 20 ** 2];
 var tile_states: [TileState] = [TileState.Hidden; 20 ** 2];
 var spread_indices: [int] = [];
@@ -42,8 +44,8 @@ var spread_indices: [int] = [];
 
 let grid: [(int, int)] = [
     (x, y)
-    for y in [0 ..< current_size]
-    for x in [0 ..< current_size]
+    for y in [0 ..< current_height]
+    for x in [0 ..< current_width]
 ];
 
 let current_mine_count: int = @total(tiles == Tile.Mine);
@@ -57,18 +59,18 @@ let populate_tiles(initial_tiles: [Tile]): [Tile] = [
 ];
 
 let count_adjacent_mines(tiles: [Tile], index: int): int =
-    let has_left = index % board_size != 1 in
-    let has_right = index % board_size != 0 in
-    let has_down = index > board_size in
-    let has_up = index <= @count(tiles) - board_size in
+    let has_left = index % current_width != 1 in
+    let has_right = index % current_width != 0 in
+    let has_down = index > current_width in
+    let has_up = index <= @count(tiles) - current_width in
     (has_left && tiles[index - 1] == Tile.Mine) +
     (has_right && tiles[index + 1] == Tile.Mine) +
-    (has_down && tiles[index - board_size] == Tile.Mine) +
-    (has_up && tiles[index + board_size] == Tile.Mine) +
-    (has_left && has_down && tiles[index - 1 - board_size] == Tile.Mine) +
-    (has_left && has_up && tiles[index - 1 + board_size] == Tile.Mine) +
-    (has_right && has_down && tiles[index + 1 - board_size] == Tile.Mine) +
-    (has_right && has_up && tiles[index + 1 + board_size] == Tile.Mine);
+    (has_down && tiles[index - current_width] == Tile.Mine) +
+    (has_up && tiles[index + current_width] == Tile.Mine) +
+    (has_left && has_down && tiles[index - 1 - current_width] == Tile.Mine) +
+    (has_left && has_up && tiles[index - 1 + current_width] == Tile.Mine) +
+    (has_right && has_down && tiles[index + 1 - current_width] == Tile.Mine) +
+    (has_right && has_up && tiles[index + 1 + current_width] == Tile.Mine);
 
 let is_adjacent_to_any(test_index: int, indices: [int]): bool = @any([
     @max(@abs(grid[test_index].x - grid[index].x), @abs(grid[test_index].y - grid[index].y)) <= 1
@@ -86,7 +88,6 @@ let is_solving_move(move_index: int, move_state: TileState): bool = @all([
 
 // Utilities
 
-// TODO: generics would be nice here
 let set_item(list: [any], index: int, value: any): [any] = {
     [1 ..= @count(list)] == index: value,
     list
@@ -99,11 +100,30 @@ let insert_item(list: [any], index: int, value: any): [any] = @join(
 
 // Actions
 
+action easy_preset() {
+    board_width := 10,
+    board_height := 8,
+    mine_count := 10,
+}
+
+action medium_preset() {
+    board_width := 18,
+    board_height := 14,
+    mine_count := 40,
+}
+
+action hard_preset() {
+    board_width := 24,
+    board_height := 20,
+    mine_count := 99,
+}
+
 action reset() {
     mode := Mode.Initial,
-    current_size := board_size,
-    tiles := [Tile.Empty; board_size ** 2],
-    tile_states := [TileState.Hidden; board_size ** 2],
+    current_width := board_width,
+    current_height := board_height,
+    tiles := [Tile.Empty; board_width * board_height],
+    tile_states := [TileState.Hidden; board_width * board_height],
 }
 
 ticker {
@@ -186,16 +206,20 @@ public {
     "I would like to extend a formal apology to those trying to play on mobile. I'm working on it...";
     "Also, undo and redo work as you would expect, so if you explode and are a dirty cheater you can pretend it never happened.";
 
+    "First, set the board size and mine count (or select one of the provided presets by clicking the corresponding arrow).";
+    action easy_preset();
+    action medium_preset();
+    action hard_preset();
+    "Board size:";
+    slider board_width;
+    slider board_height;
+    "Number of mines hidden in the board:";
+    slider mine_count;
+
     "Click the arrow to generate a new board:";
     action reset();
     "Click the arrow to forfeit and show the solution:";
     action solve();
-
-    "The settings below are applied the next time the board is regenerated.";
-    "Board size (both width and height, for now):";
-    slider board_size;
-    "Number of mines hidden in the board:";
-    slider mine_count;
 
     folder "Configuration Options" {
         "Padding between the board and the edge of the graph, in units:";
@@ -217,12 +241,12 @@ let tile_colors: [color] =
         tile_states == TileState.Flagged: mark_colors[i],
     };
 
-let width_units: real = 20;
-let height_units: real = 20 * (@height_pixels / @width_pixels);
-let board_units: real = @min(width_units, height_units) * (1 - border_units / 10);
-let tile_units: real = board_units / current_size;
+let width_units: real = 20 - 2 * border_units;
+let height_units: real = 20 * (@height_pixels / @width_pixels) - 2 * border_units;
+let board_scale: real = @min(width_units / current_width, height_units / current_height);
 
-let view(point: (real, real)+): (real, real)+ = board_units * (-0.5, -0.5) + tile_units * (point + (0.5, 0.5));
+let view(point: (real, real)+): (real, real)+ =
+    board_scale * ((current_width, current_height) / -2 + point + (0.5, 0.5));
 
 display {
     // Board
@@ -239,112 +263,110 @@ display {
     // Tiles
     @image(
         @include_data("images/flag.png"),
-        "flag icon",
+        "Flag tile",
         {tile_states == TileState.Flagged: view(grid)},
-        0.8 * tile_units, 0.8 * tile_units,
-        {mode == Mode.Play: 1, tiles == Tile.Mine: 0, 0.5},
+        0.8 * board_scale, 0.8 * board_scale,
+        {mode != Mode.Loss && mode != Mode.Win: 1, tiles == Tile.Mine: 0, 0.5},
     );
     @image(
         @include_data("images/mine.png"),
-        "mine icon",
+        "Mine tile",
         {tiles == Tile.Mine &&
             (tile_states == TileState.Hidden || tile_states == TileState.Flagged) &&
             (mode == Mode.Loss || mode == Mode.Win): view(grid)},
-        0.8 * tile_units, 0.8 * tile_units,
+        0.8 * board_scale, 0.8 * board_scale,
     );
     @image(
         @include_data("images/explosion.png"),
-        "explosion icon",
+        "Explosion tile",
         {tiles == Tile.Mine && tile_states == TileState.Revealed: view(grid)},
-        1.2 * tile_units, 1.2 * tile_units,
+        1.2 * board_scale, 1.2 * board_scale,
     );
     @image(
         @include_data("images/one.png"),
-        "1",
+        "Tile 1",
         {tiles == Tile.One && tile_states == TileState.Revealed: view(grid)},
-        0.7 * tile_units, 0.7 * tile_units,
+        0.7 * board_scale, 0.7 * board_scale,
     );
     @image(
         @include_data("images/two.png"),
-        "2",
+        "Tile 2",
         {tiles == Tile.Two && tile_states == TileState.Revealed: view(grid)},
-        0.7 * tile_units, 0.7 * tile_units,
+        0.7 * board_scale, 0.7 * board_scale,
     );
     @image(
         @include_data("images/three.png"),
-        "3",
+        "Tile 3",
         {tiles == Tile.Three && tile_states == TileState.Revealed: view(grid)},
-        0.7 * tile_units, 0.7 * tile_units,
+        0.7 * board_scale, 0.7 * board_scale,
     );
     @image(
         @include_data("images/four.png"),
-        "4",
+        "Tile 4",
         {tiles == Tile.Four && tile_states == TileState.Revealed: view(grid)},
-        0.7 * tile_units, 0.7 * tile_units,
+        0.7 * board_scale, 0.7 * board_scale,
     );
     @image(
         @include_data("images/five.png"),
-        "5",
+        "Tile 5",
         {tiles == Tile.Five && tile_states == TileState.Revealed: view(grid)},
-        0.7 * tile_units, 0.7 * tile_units,
+        0.7 * board_scale, 0.7 * board_scale,
     );
     @image(
         @include_data("images/six.png"),
-        "6",
+        "Tile 6",
         {tiles == Tile.Six && tile_states == TileState.Revealed: view(grid)},
-        0.7 * tile_units, 0.7 * tile_units,
+        0.7 * board_scale, 0.7 * board_scale,
     );
     @image(
         @include_data("images/seven.png"),
-        "7",
+        "Tile 7",
         {tiles == Tile.Seven && tile_states == TileState.Revealed: view(grid)},
-        0.7 * tile_units, 0.7 * tile_units,
+        0.7 * board_scale, 0.7 * board_scale,
     );
     @image(
         @include_data("images/eight.png"),
-        "8",
+        "Tile 8",
         {tiles == Tile.Eight && tile_states == TileState.Revealed: view(grid)},
-        0.7 * tile_units, 0.7 * tile_units,
+        0.7 * board_scale, 0.7 * board_scale,
     );
 
     // Interactions
     @image(
-        @include_data("images/transparent.png"),
-        "reveal tile interaction",
+        @transparent_image_data,
+        "Reveal tile interaction",
         {(mode == Mode.Initial || mode == Mode.Play) && tile_states == TileState.Hidden: view(grid)},
-        tile_units, tile_units,
+        board_scale, board_scale,
         0.6,
     ):
         hovered(@include_data("images/hover_reveal.png")),
         pressed(@include_data("images/hover_reveal.png")),
         click { action reveal(@index) };
     @image(
-        @include_data("images/transparent.png"),
-        "flag tile interaction",
+        @transparent_image_data,
+        "Flag tile interaction",
         {(mode == Mode.Initial || mode == Mode.Play) && tile_states == TileState.Hidden: view(grid + (0.25, 0))},
-        0.5 * tile_units, tile_units,
+        0.5 * board_scale, board_scale,
     ):
         hovered(@include_data("images/hover_flag.png")),
         pressed(@include_data("images/hover_flag.png")),
         click { action flag(@index) };
     @image(
-        @include_data("images/transparent.png"),
-        "unflag tile interaction",
+        @transparent_image_data,
+        "Unflag tile interaction",
         {(mode == Mode.Initial || mode == Mode.Play) && tile_states == TileState.Flagged: view(grid)},
-        tile_units, tile_units,
+        board_scale, board_scale,
     ): click { action unflag(@index) };
 
     // Popup panel
     @polygon({
-        mode == Mode.Loss || mode == Mode.Win: [(-0.6, -0.25), (-0.6, 0.25), (0.6, 0.25), (0.6, -0.25)] * board_units
+        mode == Mode.Loss || mode == Mode.Win: [
+            (-0.6 * current_width, -0.25 * current_height),
+            (-0.6 * current_width, 0.25 * current_height),
+            (0.6 * current_width, 0.25 * current_height),
+            (0.6 * current_width, -0.25 * current_height),
+        ] * board_scale
     }): color(@hsv(0, 0, 1)), fill(0.7);
-    // @image(
-    //     @include_data("images/close.png"),
-    //     "close button",
-    //     {mode == Mode.Loss || mode == Mode.Win: (0.4375, 0.1875) * board_units},
-    //     0.0625 * current_size, 0.0625 * current_size,
-    //     0.2,
-    // ): click { mode := Mode.Play };
 
     // Messages
     {mode == Mode.Loss: (0, 0)}:
