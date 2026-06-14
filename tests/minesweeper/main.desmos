@@ -3,6 +3,7 @@ enum Mode {
     Play,
     Win,
     Loss,
+    Cheated,
 }
 
 enum Tile {
@@ -127,10 +128,10 @@ action reset() {
 }
 
 ticker {
-    action tick(),
+    action tick(@dt),
 }
 
-action tick() {
+action tick(dt: real) {
     if @count(spread_indices) > 0 then {
         tile_states := {
             tile_states == TileState.Hidden && [
@@ -145,13 +146,16 @@ action tick() {
                 for index in [1 ..= @count(tiles)]
             ]
         ],
-    }
-    else disable,
+    },
+    if mode == Mode.Loss || mode == Mode.Win then {
+        end_anim_timer := end_anim_timer + dt / 1000,
+    },
 }
 
 action reveal(index: int) {
     tile_states := set_item(tile_states, index, TileState.Revealed),
     if mode == Mode.Initial then {
+        mode := Mode.Play,
         tiles := populate_tiles(insert_item(
             @shuffle({
                 [1 ..< @count(tiles)] <= mine_count: Tile.Mine,
@@ -164,20 +168,22 @@ action reveal(index: int) {
     }
     elif tiles[index] == Tile.Empty then {
         spread_indices := @join(spread_indices, index),
-    },
-    mode := {
-        mode == Mode.Initial: Mode.Play,
-        tiles[index] == Tile.Mine: Mode.Loss,
-        is_solving_move(index, TileState.Revealed): Mode.Win,
-        mode
-    },
+    }
+    elif tiles[index] == Tile.Mine then {
+        mode := Mode.Loss,
+        end_anim_timer := 0,
+    }
+    elif is_solving_move(index, TileState.Revealed) then {
+        mode := Mode.Win,
+        end_anim_timer := 0,
+    }
 }
 
 action flag(index: int) {
     tile_states := set_item(tile_states, index, TileState.Flagged),
-    mode := {
-        is_solving_move(index, TileState.Flagged): Mode.Win,
-        mode
+    if is_solving_move(index, TileState.Flagged) then {
+        mode := Mode.Win,
+        end_anim_timer := 0,
     },
 }
 
@@ -191,7 +197,7 @@ action solve() {
             tiles == Tile.Mine: TileState.Flagged,
             TileState.Revealed
         },
-        mode := Mode.Play,
+        mode := Mode.Cheated,
     }
     else disable,
 }
@@ -230,16 +236,21 @@ public {
 
 // Display
 
+var end_anim_timer: real = 0;
+
 let grass_colors: [color] = @hsv([145, 140], [0.8, 0.75], [0.75, 0.8]);
 let dirt_colors: [color] = @hsv([30, 33], [0.3, 0.275], [0.875, 0.9]);
-let mark_colors: [color] = {mode == Mode.Win: grass_colors, @hsv([7, 10], [0.7, 0.65], [0.875, 0.9])};
+let mark_colors: [color] = @hsv([7, 10], [0.7, 0.65], [0.875, 0.9]);
 
 let tile_colors: [color] =
     let i = (grid.x + grid.y) % 2 + 1 in
     {
         tile_states == TileState.Hidden: grass_colors[i],
         tile_states == TileState.Revealed: {tiles == Tile.Mine: mark_colors[i], dirt_colors[i]},
-        tile_states == TileState.Flagged: mark_colors[i],
+        tile_states == TileState.Flagged: {
+            mode == Mode.Win: @okhsv((end_anim_timer * 90 + (grid.y - grid.x) * 18) % 360, 0.6, 1),
+            mark_colors[i]
+        },
     };
 
 let width_units: real = 20 - 2 * border_units;
