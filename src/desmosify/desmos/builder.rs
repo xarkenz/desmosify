@@ -1777,16 +1777,21 @@ impl<'target> GraphExpressionListBuilder<'target> {
                 })
             }
             ActionValueKind::ActionCall { action, arguments, .. } => {
-                Ok(GraphExpression::Binary {
-                    kind: GraphBinaryKind::Call,
-                    lhs: Box::new(self.translate_value(action)?),
-                    rhs: Box::new(GraphExpression::Sequence {
-                        elements: arguments
-                            .iter()
-                            .map(|argument| self.translate_value(argument))
-                            .collect::<crate::Result<_>>()?,
-                    }),
-                })
+                if arguments.is_empty() {
+                    self.translate_value(action)
+                }
+                else {
+                    Ok(GraphExpression::Binary {
+                        kind: GraphBinaryKind::Call,
+                        lhs: Box::new(self.translate_value(action)?),
+                        rhs: Box::new(GraphExpression::Sequence {
+                            elements: arguments
+                                .iter()
+                                .map(|argument| self.translate_value(argument))
+                                .collect::<crate::Result<_>>()?,
+                        }),
+                    })
+                }
             }
             ActionValueKind::Conditional { condition_consequents, alternative } => {
                 Ok(GraphExpression::Unary {
@@ -1895,15 +1900,19 @@ impl<'target> GraphExpressionListBuilder<'target> {
             folder_id,
             expression: GraphExpression::Binary {
                 kind: GraphBinaryKind::Equal,
-                lhs: Box::new(GraphExpression::Binary {
-                    kind: GraphBinaryKind::Call,
-                    lhs: Box::new(self.target_info.get_action_symbol(&program_action.identifier)),
-                    rhs: Box::new(GraphExpression::Sequence {
-                        elements: program_action.parameters
-                            .iter()
-                            .map(|parameter| self.target_info.get_local_symbol(parameter.id))
-                            .collect(),
-                    }),
+                lhs: Box::new(if program_action.parameters.is_empty() {
+                    self.target_info.get_action_symbol(&program_action.identifier)
+                } else {
+                    GraphExpression::Binary {
+                        kind: GraphBinaryKind::Call,
+                        lhs: Box::new(self.target_info.get_action_symbol(&program_action.identifier)),
+                        rhs: Box::new(GraphExpression::Sequence {
+                            elements: program_action.parameters
+                                .iter()
+                                .map(|parameter| self.target_info.get_local_symbol(parameter.id))
+                                .collect(),
+                        }),
+                    }
                 }),
                 rhs: Box::new(action),
             },

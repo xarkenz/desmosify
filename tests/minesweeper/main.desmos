@@ -36,8 +36,8 @@ var slider(0 ..= 2.5 : 0.25) border_units: real = 0.5;
 var mode: Mode = Mode.Initial;
 var current_width: int = 18;
 var current_height: int = 14;
-var tiles: [Tile] = [Tile.Empty; 20 ** 2];
-var tile_states: [TileState] = [TileState.Hidden; 20 ** 2];
+var tiles: [Tile] = [Tile.Empty; 18 * 14];
+var tile_states: [TileState] = [TileState.Hidden; 18 * 14];
 var spread_indices: [int] = [];
 
 // Definitions
@@ -205,11 +205,12 @@ public {
     "Click on any tile to start the game. Clicking the left half of a tile reveals it, the right half flags it. Clicking a flag clears the flag without revealing the space.";
     "I would like to extend a formal apology to those trying to play on mobile. I'm working on it...";
     "Also, undo and redo work as you would expect, so if you explode and are a dirty cheater you can pretend it never happened.";
-
+    "";
     "First, set the board size and mine count (or select one of the provided presets by clicking the corresponding arrow).";
     action easy_preset();
     action medium_preset();
     action hard_preset();
+
     "Board size:";
     slider board_width;
     slider board_height;
