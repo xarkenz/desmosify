@@ -16,6 +16,20 @@ pub fn get_core_intrinsics(target: &dyn Target) -> impl Iterator<Item = (&'stati
             ("pi", ValueKind::Mathematical(MathematicalConstant::Pi)),
             ("tau", ValueKind::Mathematical(MathematicalConstant::Tau)),
             ("e", ValueKind::Mathematical(MathematicalConstant::E)),
+            ("black", ValueKind::Color {
+                kind: ColorKind::Hsv,
+                value_1: Box::new(ValueKind::Int(0).into()),
+                value_2: Box::new(ValueKind::Int(0).into()),
+                value_3: Box::new(ValueKind::Int(0).into()),
+                list_state: None,
+            }),
+            ("white", ValueKind::Color {
+                kind: ColorKind::Hsv,
+                value_1: Box::new(ValueKind::Int(0).into()),
+                value_2: Box::new(ValueKind::Int(0).into()),
+                value_3: Box::new(ValueKind::Int(1).into()),
+                list_state: None,
+            }),
             ("width_pixels", ValueKind::ViewportWidth),
             ("height_pixels", ValueKind::ViewportHeight),
             ("target", ValueKind::Str(target.name().into())),
@@ -183,7 +197,8 @@ pub const CORE_INTRINSIC_FUNCTIONS: &[&IntrinsicFunction] = &[
     // &PDF,
     // &CDF,
     // &INVERSE_CDF,
-    // &RANDOM,
+    &RANDOM,
+    &CHOOSE_RANDOM,
     // Statistical Tests
     // &TTEST,
     // &TSCORE,
@@ -887,7 +902,74 @@ pub static ALL: IntrinsicFunction = IntrinsicFunction {
 
 // INVERSE_CDF
 
-// RANDOM
+fn interpret_random_call_end(
+    arguments: impl IntoIterator<Item = Value>,
+    source: Option<Box<Value>>,
+    source_type: Type,
+) -> crate::Result<ValueKind> {
+    let mut arguments = arguments.into_iter();
+
+    if let Some(sample_count) = arguments.next() {
+        let sample_count = sample_count.coerce_to(&Type::Int, false)?;
+
+        if let Some(seed) = arguments.next() {
+            let seed = seed.coerce_to(&Type::Real, false)?;
+
+            Ok(ValueKind::SeededRandom {
+                source,
+                sample_count: Box::new(sample_count),
+                seed: Box::new(seed),
+                result_type: source_type.into_list(ListState::IsList),
+            })
+        }
+        else {
+            Ok(ValueKind::Random {
+                source,
+                sample_count: Some(Box::new(sample_count)),
+                result_type: source_type.into_list(ListState::IsList),
+            })
+        }
+    }
+    else {
+        Ok(ValueKind::Random {
+            source,
+            sample_count: None,
+            result_type: source_type,
+        })
+    }
+}
+
+pub static RANDOM: IntrinsicFunction = IntrinsicFunction {
+    identifier: "random",
+    min_arity: 0,
+    max_arity: Some(2),
+    interpret_call: |_, _, _, arguments| {
+        interpret_random_call_end(arguments, None, Type::Real)
+    },
+};
+
+pub static CHOOSE_RANDOM: IntrinsicFunction = IntrinsicFunction {
+    identifier: "choose_random",
+    min_arity: 1,
+    max_arity: Some(3),
+    interpret_call: |_, _, _, arguments| {
+        let mut arguments = arguments.into_iter();
+
+        let source = arguments.next().unwrap();
+        let source_type = match source.get_type().into_flatten_list() {
+            (Some(ListState::IsList), item_type) if item_type != Type::Distribution => item_type,
+            (None, Type::Distribution) => Type::Real,
+            _ => return Err(Box::new(crate::Error {
+                kind: crate::ErrorKind::ExpectedListOrDistributionType {
+                    got_type: source.get_type().to_string(),
+                },
+                span: source.span,
+            }))
+        };
+
+        interpret_random_call_end(arguments, Some(Box::new(source)), source_type)
+    },
+};
 
 // ------ Statistical Tests ------
 

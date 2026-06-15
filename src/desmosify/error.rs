@@ -235,6 +235,9 @@ pub enum ErrorKind {
     ExpectedListType {
         got_type: String,
     },
+    ExpectedListOrDistributionType {
+        got_type: String,
+    },
     ExpectedFunctionType {
         got_type: String,
     },
@@ -470,6 +473,9 @@ impl std::fmt::Display for ErrorKind {
             }
             Self::ExpectedListType { got_type } => {
                 write!(f, "expected a list, got '{got_type}'")
+            }
+            Self::ExpectedListOrDistributionType { got_type } => {
+                write!(f, "expected a list or distribution, got '{got_type}'")
             }
             Self::ExpectedFunctionType { got_type } => {
                 write!(f, "expected a function, got '{got_type}'")

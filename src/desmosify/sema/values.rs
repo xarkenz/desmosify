@@ -304,6 +304,17 @@ pub enum ValueKind {
         value_3: Box<Value>,
         list_state: Option<ListState>,
     },
+    Random {
+        source: Option<Box<Value>>,
+        sample_count: Option<Box<Value>>,
+        result_type: Type,
+    },
+    SeededRandom {
+        source: Option<Box<Value>>,
+        sample_count: Box<Value>,
+        seed: Box<Value>,
+        result_type: Type,
+    },
     Join {
         values: Box<[Value]>,
         result_type: Type,
@@ -501,6 +512,12 @@ impl ValueKind {
             Self::Sort { list, .. } => {
                 list.get_type()
             }
+            Self::Random { result_type, .. } => {
+                result_type.clone()
+            }
+            Self::SeededRandom { result_type, .. } => {
+                result_type.clone()
+            }
             Self::Shuffle { list, .. } => {
                 list.get_type()
             }
@@ -597,7 +614,7 @@ impl ValueKind {
         }
     }
 
-    pub fn coerce_to(self, target_type: &Type, allow_broadcast: bool, span: Option<crate::Span>) -> crate::Result<Self> {
+    pub fn coerce_to(self, target_type: &Type, allow_list: bool, span: Option<crate::Span>) -> crate::Result<Self> {
         let self_type = self.get_type();
         let (self_list, self_type) = self_type.flatten_list();
         let (target_list, target_type) = target_type.flatten_list();
@@ -610,7 +627,7 @@ impl ValueKind {
             span,
         });
 
-        if !ListState::can_coerce(self_list, target_list, allow_broadcast) {
+        if !ListState::can_coerce(self_list, target_list, allow_list) {
             Err(mismatched_types_error())
         }
         else if self_type == target_type || matches!(self_type, Type::Any) || matches!(target_type, Type::Any) {
@@ -787,6 +804,25 @@ impl std::fmt::Debug for ValueKind {
                 }
                 tuple.finish()
             }
+            Self::Random { source, sample_count, .. } => {
+                write!(f, "Random<{self_type}>")?;
+                let mut tuple = f.debug_tuple("");
+                if let Some(source) = source {
+                    tuple.field(source);
+                }
+                if let Some(sample_count) = sample_count {
+                    tuple.field(sample_count);
+                }
+                tuple.finish()
+            }
+            Self::SeededRandom { source, sample_count, seed, .. } => {
+                write!(f, "Random<{self_type}>")?;
+                let mut tuple = f.debug_tuple("");
+                if let Some(source) = source {
+                    tuple.field(source);
+                }
+                tuple.field(sample_count).field(seed).finish()
+            }
             Self::Shuffle { list, seed } => {
                 write!(f, "Shuffle<{self_type}>")?;
                 let mut tuple = f.debug_tuple("");
@@ -905,8 +941,8 @@ impl Value {
         self
     }
 
-    pub fn coerce_to(mut self, target_type: &Type, allow_broadcast: bool) -> crate::Result<Self> {
-        self.kind = self.kind.coerce_to(target_type, allow_broadcast, self.span)?;
+    pub fn coerce_to(mut self, target_type: &Type, allow_list: bool) -> crate::Result<Self> {
+        self.kind = self.kind.coerce_to(target_type, allow_list, self.span)?;
         Ok(self)
     }
 

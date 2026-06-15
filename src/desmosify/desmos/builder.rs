@@ -785,6 +785,32 @@ impl<'target> GraphExpressionListBuilder<'target> {
                     }),
                 })
             }
+            ValueKind::Random { source, sample_count, .. } => {
+                Ok(GraphExpression::Binary {
+                    kind: GraphBinaryKind::Call,
+                    lhs: Box::new(GraphExpression::OperatorName("random".into())),
+                    rhs: Box::new(GraphExpression::Sequence {
+                        elements: source.as_deref()
+                            .into_iter()
+                            .chain(sample_count.as_deref())
+                            .map(|argument| self.translate_value(argument))
+                            .collect::<crate::Result<_>>()?,
+                    }),
+                })
+            }
+            ValueKind::SeededRandom { source, sample_count, seed, .. } => {
+                Ok(GraphExpression::Binary {
+                    kind: GraphBinaryKind::Call,
+                    lhs: Box::new(GraphExpression::OperatorName("random".into())),
+                    rhs: Box::new(GraphExpression::Sequence {
+                        elements: source.as_deref()
+                            .into_iter()
+                            .chain([sample_count.as_ref(), seed.as_ref()])
+                            .map(|argument| self.translate_value(argument))
+                            .collect::<crate::Result<_>>()?,
+                    }),
+                })
+            }
             ValueKind::Shuffle { list, seed } => {
                 Ok(GraphExpression::Binary {
                     kind: GraphBinaryKind::Call,
