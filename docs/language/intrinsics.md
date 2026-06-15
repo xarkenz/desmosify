@@ -262,6 +262,19 @@ intrinsics can be used. There are a few notations which may be unfamiliar:
 @round(x: real+): int+
 ```
 
+{: #abs }
+### `@abs` — Absolute value
+
+```
+// T: real | int
+@abs(x: T+): T+
+
+// @abs(5) => 5
+// @abs(-5) => 5
+// @abs(0) => 0
+```
+
+
 {: #sign }
 ### `@sign` — Sign value
 
@@ -415,10 +428,9 @@ Compute the number of values in `values`.
 ### `@total` — Total of values
 
 ```
-// T: real | int | bool
-// U (derived from T): real | int | int
-@total(..values: T+): U+
-@total(values: [T]): U
+// T: real | int
+@total(..values: T+): T+
+@total(values: [T]): T
 
 // @total(1, 2, 3) => 6
 // @total([1 ..= 5]) => 15
@@ -426,9 +438,71 @@ Compute the number of values in `values`.
 
 Compute the sum of all values in `values`. `bool` values are interpreted as 0 or 1.
 
+{: #any }
+### `@any` — At least one value is `true`
+
+```
+@any(..values: bool+): bool+
+@any(values: [bool]): bool
+
+// @any(false, true, false) => true
+// @any(false, false, false) => false
+// @any([1 ..= 10] == 7) => true
+// @any([1 ..= 10] == 11) => false
+// @any([]) => false
+```
+
+Return `true` if least one input value is `true`, or `false` otherwise. This is roughly equivalent to
+`@total(values) > 0`.
+
+{: #all }
+### `@all` — No values are `false`
+
+```
+@all(..values: bool+): bool+
+@all(values: [bool]): bool
+
+// @all(true, true, true) => true
+// @all(true, false, true) => false
+// @all([1 ..= 10] < 11) => true
+// @all([1 ..= 10] < 7) => false
+// @all([]) => true
+```
+
+Return `false` if at least one input value is `false` or `true` otherwise. This is roughly equivalent to
+`@total(!values) == 0`.
+
 ## Visualizations
 
 ## Distributions
+
+{: #random }
+### `@random` — Generate random values in [0, 1)
+
+```
+@random(): real
+@random(sample_count: int): [real]
+@random(sample_count: int, seed: real): [real]
+
+// @random() => e.g. 0.7238...
+// @random(2) => e.g. [0.6329..., 0.0174...]
+```
+
+{: #choose_random }
+### `@choose_random` — Choose random values from a list/distribution
+
+```
+// T: any
+@choose_random(list: [T]): T
+@choose_random(list: [T], sample_count: int): [T]
+@choose_random(list: [T], sample_count: int, seed: real): [T]
+@choose_random(dist: distribution): real
+@choose_random(dist: distribution, sample_count: int): [real]
+@choose_random(dist: distribution, sample_count: int, seed: real): [real]
+
+// @choose_random([1 ..= 10]) => e.g. 6
+// @choose_random([1 ..= 10], 3) => e.g. [4, 10, 9]
+```
 
 ## Statistical Tests
 
@@ -638,6 +712,20 @@ Translate `object` by a given displacement (either `displacement` or the displac
 
 ## Color
 
+{: #black }
+### `@black` — Pure black color
+
+```
+@black: color
+```
+
+{: #white }
+### `@white` — Pure white color
+
+```
+@white: color
+```
+
 {: #rgb }
 ### `@rgb` — Create a color in sRGB space
 
@@ -811,6 +899,16 @@ Create an image using the provided data `url` (often obtained from [`@include_da
 `display` block, this displays an image centered at `center` with the provided `width`/`height` (in units), `opacity`,
 and `angle` (in radians). If `background` is set to `true`, the image is layered in the background of the graph;
 otherwise, it is layered according to its order in the `display` block.
+
+{: #transparent_image_data }
+### `@transparent_image_data` — Transparent image data URL
+
+```
+@transparent_image_data: str
+```
+
+The data URL provided by this intrinsic represents a 1&times;1 pixel transparent PNG image and can be used to create a
+transparent image (often to provide an invisible clickable rectangle).
 
 {: #concat }
 ### `@concat` — Concatenate strings
