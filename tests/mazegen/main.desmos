@@ -11,9 +11,7 @@ public {
 }
 
 // Ticker action
-ticker {
-    action step(),
-}
+ticker = action step;
 
 enum State {
     IDLE,

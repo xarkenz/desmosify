@@ -127,9 +127,7 @@ action reset() {
     tile_states := [TileState.Hidden; board_width * board_height],
 }
 
-ticker {
-    action tick(@dt),
-}
+ticker = action tick;
 
 action tick(dt: real) {
     if @count(spread_indices) > 0 then {
@@ -369,7 +367,7 @@ display {
     ):
         hovered(@include_data("images/hover_reveal.png")),
         pressed(@include_data("images/hover_reveal.png")),
-        click { action reveal(@index) };
+        click(action reveal);
     @image(
         @transparent_image_data,
         "Flag tile interaction",
@@ -378,13 +376,13 @@ display {
     ):
         hovered(@include_data("images/hover_flag.png")),
         pressed(@include_data("images/hover_flag.png")),
-        click { action flag(@index) };
+        click(action flag);
     @image(
         @transparent_image_data,
         "Unflag tile interaction",
         {(mode == Mode.Initial || mode == Mode.Play) && tile_states == TileState.Flagged: view(grid)},
         board_scale, board_scale,
-    ): click { action unflag(@index) };
+    ): click(action unflag);
 
     // Explosion effect
     @polygon({mode == Mode.Loss: view(grid[last_revealed_index]) + 20 * (@cbrt(end_anim_timer + 1) - 1) * explosion_effect}):

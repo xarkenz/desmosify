@@ -408,6 +408,10 @@ pub enum ValueKind {
         arguments: Box<[Value]>,
         return_type: Type,
     },
+    InlineAction {
+        parameters: Box<[LocalReference]>,
+        action: Box<ActionValue>,
+    },
 }
 
 impl ValueKind {
@@ -569,6 +573,14 @@ impl ValueKind {
             Self::UserFunctionCall { return_type, .. } => {
                 return_type.clone()
             }
+            Self::InlineAction { parameters, .. } => {
+                Type::Action {
+                    parameter_types: parameters
+                        .iter()
+                        .map(|local| local.value_type.clone())
+                        .collect(),
+                }
+            }
         }
     }
 
@@ -630,12 +642,21 @@ impl ValueKind {
         if !ListState::can_coerce(self_list, target_list, allow_list) {
             Err(mismatched_types_error())
         }
-        else if self_type == target_type || matches!(self_type, Type::Any) || matches!(target_type, Type::Any) {
+        else if self_type == target_type {
             // The value shouldn't need to be transformed in any way
             Ok(self)
         }
+        else if !self_type.can_coerce_to(target_type) {
+            Err(mismatched_types_error())
+        }
         else {
             match (self, target_type) {
+                (Self::Undefined(..), _) => {
+                    Ok(Self::Undefined(target_type.clone()))
+                }
+                (Self::Infinity(..), _) => {
+                    Ok(Self::Infinity(target_type.clone()))
+                }
                 (Self::Int(value), Type::Real) => {
                     Ok(Self::Real(value as f64))
                 }
@@ -660,14 +681,7 @@ impl ValueKind {
                 (Self::EnumVariant { variant_ordinal, .. }, Type::Real) => {
                     Ok(Self::Real(variant_ordinal as f64))
                 }
-                (self_, _) => {
-                    if self_type.can_coerce_to(target_type) {
-                        Ok(self_)
-                    }
-                    else {
-                        Err(mismatched_types_error())
-                    }
-                }
+                (self_, _) => Ok(self_)
             }
         }
     }
@@ -909,6 +923,10 @@ impl std::fmt::Debug for ValueKind {
                 write!(f, "UserFunctionCall<{self_type}>")?;
                 f.debug_tuple("").field(function).field(arguments).finish()
             }
+            Self::InlineAction { parameters, action } => {
+                write!(f, "InlineAction<{self_type}>")?;
+                f.debug_tuple("").field(parameters).field(action).finish()
+            }
         }
     }
 }
@@ -984,7 +1002,7 @@ impl std::fmt::Debug for Value {
     }
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, PartialEq)]
 pub enum ActionValueKind {
     Disable,
     Compound {
@@ -1027,6 +1045,45 @@ impl ActionValueKind {
     }
 }
 
+impl std::fmt::Debug for ActionValueKind {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Disable => {
+                write!(f, "Disable")
+            }
+            Self::Compound { actions } => {
+                let mut tuple = f.debug_tuple("Compound");
+                for action in actions {
+                    tuple.field(action);
+                }
+                tuple.finish()
+            }
+            Self::Update { variable, value, .. } => {
+                f.debug_tuple("Update")
+                    .field(variable)
+                    .field(value)
+                    .finish()
+            }
+            Self::ActionCall { action, arguments } => {
+                f.debug_tuple("ActionCall")
+                    .field(action)
+                    .field(arguments)
+                    .finish()
+            }
+            Self::Conditional { condition_consequents, alternative } => {
+                condition_consequents
+                    .iter()
+                    .fold(
+                        &mut f.debug_tuple("Conditional"),
+                        |tuple, pair| tuple.field(pair),
+                    )
+                    .field(alternative)
+                    .finish()
+            }
+        }
+    }
+}
+
 #[derive(Clone)]
 pub struct ActionValue {
     pub kind: ActionValueKind,
@@ -1045,6 +1102,12 @@ impl ActionValue {
             },
             span: None,
         }
+    }
+}
+
+impl PartialEq for ActionValue {
+    fn eq(&self, other: &Self) -> bool {
+        self.kind == other.kind
     }
 }
 

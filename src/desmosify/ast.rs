@@ -392,6 +392,10 @@ pub enum ExpressionKind {
         value: Box<Expression>,
         inner: Box<Expression>,
     },
+    InlineAction {
+        parameters: ParameterList,
+        action: Box<ActionExpression>,
+    },
 }
 
 impl std::fmt::Display for ExpressionKind {
@@ -502,6 +506,9 @@ impl std::fmt::Display for ExpressionKind {
                     write!(f, ": {value_type}")?;
                 }
                 write!(f, " = {value} in {inner}")
+            }
+            Self::InlineAction { parameters, action } => {
+                write!(f, "action{parameters} {action}")
             }
         }
     }
@@ -763,7 +770,7 @@ impl std::fmt::Display for Definition {
 #[derive(Clone, Debug)]
 pub struct TickerDeclaration {
     pub interval_ms: Option<Box<Expression>>,
-    pub tick_action: Box<ActionExpression>,
+    pub tick_action: Box<Expression>,
     pub span: crate::Span,
 }
 
@@ -851,43 +858,25 @@ impl std::fmt::Display for PublicDeclaration {
 }
 
 #[derive(Clone, Debug)]
-pub enum DisplayAttributeValue {
-    Arguments(Box<[Expression]>),
-    Action(ActionExpression),
-}
-
-impl std::fmt::Display for DisplayAttributeValue {
-    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
-        match self {
-            Self::Arguments(arguments) => match arguments.as_ref() {
-                [] => {
-                    write!(f, "()")
-                }
-                [first, rest @ ..] => {
-                    write!(f, "({first}")?;
-                    for argument in rest {
-                        write!(f, ", {argument}")?;
-                    }
-                    write!(f, ")")
-                }
-            }
-            Self::Action(action) => {
-                write!(f, " {action}")
-            }
-        }
-    }
-}
-
-#[derive(Clone, Debug)]
 pub struct DisplayAttribute {
     pub key: Rc<str>,
     pub key_span: crate::Span,
-    pub value: DisplayAttributeValue,
+    pub arguments: Box<[Expression]>,
 }
 
 impl std::fmt::Display for DisplayAttribute {
     fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
-        write!(f, "{}{}", self.key, self.value)
+        write!(f, "{}", self.key)?;
+        match self.arguments.as_ref() {
+            [] => write!(f, "()"),
+            [first, rest @ ..] => {
+                write!(f, "({first}")?;
+                for argument in rest {
+                    write!(f, ", {argument}")?;
+                }
+                write!(f, ")")
+            }
+        }
     }
 }
 

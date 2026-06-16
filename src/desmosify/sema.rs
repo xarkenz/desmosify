@@ -80,7 +80,7 @@ pub struct Program {
     pub immutables: Box<[ProgramImmutable]>,
     pub variables: Box<[ProgramVariable]>,
     pub actions: Box<[ProgramAction]>,
-    pub ticker: Option<ProgramTicker>,
-    pub public: Option<ProgramPublic>,
-    pub display: Option<ProgramDisplay>,
+    pub ticker: ProgramTicker,
+    pub public: ProgramPublic,
+    pub display: ProgramDisplay,
 }

@@ -242,9 +242,31 @@ impl<'a, T: BufRead> Parser<'a, T> {
                 }
                 TokenKind::Action => {
                     self.consume_token()?; // Action
-                    let (identifier, _) = self.expect_identifier_or_keyword()?;
 
-                    ExpressionKind::ActionIdentifier(identifier)
+                    if let Some(TokenKind::ParenLeft) = self.current_token_kind() {
+                        // Inline action definition
+                        self.consume_token()?; // ParenLeft
+                        let parameters = self.parse_parameter_list()?;
+                        self.consume_token()?; // ParenRight
+
+                        let action_start_span = self.expect_token_from(&[TokenKind::CurlyLeft])?.span;
+                        self.consume_token()?; // CurlyLeft
+                        let action = self.parse_compound_action()?;
+
+                        ExpressionKind::InlineAction {
+                            parameters,
+                            action: Box::new(ActionExpression {
+                                kind: action,
+                                span: action_start_span.expand_to(self.current_span()),
+                            }),
+                        }
+                    }
+                    else {
+                        // Action reference
+                        let (identifier, _) = self.expect_identifier_or_keyword()?;
+
+                        ExpressionKind::ActionIdentifier(identifier)
+                    }
                 }
                 TokenKind::AtSign => {
                     self.consume_token()?; // AtSign
@@ -696,20 +718,7 @@ impl<'a, T: BufRead> Parser<'a, T> {
             }
             TokenKind::CurlyLeft => {
                 self.consume_token()?; // CurlyLeft
-                let mut actions = Vec::new();
-
-                while !matches!(self.current_token_kind(), Some(TokenKind::CurlyRight)) {
-                    let action = self.parse_action(&[TokenKind::Comma, TokenKind::CurlyRight])?;
-                    actions.push(action);
-
-                    if let Some(TokenKind::Comma) = self.current_token_kind() {
-                        self.consume_token()?; // Comma
-                    }
-                }
-
-                ActionExpressionKind::Compound {
-                    actions: actions.into_boxed_slice(),
-                }
+                self.parse_compound_action()?
             }
             TokenKind::Action => {
                 self.consume_token()?; // Action
@@ -806,6 +815,23 @@ impl<'a, T: BufRead> Parser<'a, T> {
         Ok(ActionExpression {
             kind: action_kind,
             span,
+        })
+    }
+
+    pub fn parse_compound_action(&mut self) -> crate::Result<ActionExpressionKind> {
+        let mut actions = Vec::new();
+
+        while !matches!(self.current_token_kind(), Some(TokenKind::CurlyRight)) {
+            let action = self.parse_action(&[TokenKind::Comma, TokenKind::CurlyRight])?;
+            actions.push(action);
+
+            if let Some(TokenKind::Comma) = self.current_token_kind() {
+                self.consume_token()?; // Comma
+            }
+        }
+
+        Ok(ActionExpressionKind::Compound {
+            actions: actions.into_boxed_slice(),
         })
     }
 
@@ -1038,14 +1064,20 @@ impl<'a, T: BufRead> Parser<'a, T> {
                 let parameters = self.parse_parameter_list()?;
                 self.consume_token()?; // ParenRight
 
-                self.expect_token_from(&[TokenKind::CurlyLeft])?;
-                let action = self.parse_action(&[])?;
+                let action_start_span = self.expect_token_from(&[TokenKind::CurlyLeft])?.span;
+                self.consume_token()?; // CurlyLeft
+                let action = self.parse_compound_action()?;
+                let action_span = action_start_span.expand_to(self.current_span());
+                self.consume_token()?; // CurlyRight
 
                 Ok(Some(Declaration::Definition(Definition {
                     identifier,
                     kind: DefinitionKind::Value(ValueDefinition::Action {
                         parameters,
-                        action: Box::new(action),
+                        action: Box::new(ActionExpression {
+                            kind: action,
+                            span: action_span,
+                        }),
                     }),
                     span: start_span.expand_to(identifier_span),
                 })))
@@ -1100,16 +1132,19 @@ impl<'a, T: BufRead> Parser<'a, T> {
             }
             TokenKind::Ticker => {
                 self.consume_token()?; // Ticker
+                self.expect_token_from(&[TokenKind::ParenLeft, TokenKind::Equal])?;
 
                 let mut interval_ms = None;
                 if let Some(TokenKind::ParenLeft) = self.current_token_kind() {
                     self.consume_token()?; // ParenLeft
                     interval_ms = Some(self.parse_expression(None, &[TokenKind::ParenRight])?);
                     self.consume_token()?; // ParenRight
+                    self.expect_token_from(&[TokenKind::Equal])?;
                 }
 
-                self.expect_token_from(&[TokenKind::CurlyLeft])?;
-                let tick_action = self.parse_action(&[])?;
+                self.consume_token()?; // Equal
+                let tick_action = self.parse_expression(None, &[TokenKind::Semicolon])?;
+                self.consume_token()?; // Semicolon
 
                 Ok(Some(Declaration::Ticker(TickerDeclaration {
                     interval_ms: interval_ms.map(Box::new),
@@ -1156,25 +1191,11 @@ impl<'a, T: BufRead> Parser<'a, T> {
                         while !matches!(self.current_token_kind(), Some(TokenKind::Semicolon | TokenKind::CurlyRight)) {
                             let (attribute_key, attribute_key_span) = self.expect_identifier()?;
                             self.consume_token()?; // Identifier
-
-                            let token = self.expect_token_from(&[TokenKind::ParenLeft, TokenKind::CurlyLeft])?;
-                            let attribute_value = match token.kind {
-                                TokenKind::ParenLeft => {
-                                    self.consume_token()?; // ParenLeft
-                                    let arguments = self.parse_argument_list()?;
-                                    element_span = element_span.expand_to(self.current_span());
-                                    self.consume_token()?; // ParenRight
-
-                                    DisplayAttributeValue::Arguments(arguments)
-                                }
-                                TokenKind::CurlyLeft => {
-                                    let action = self.parse_action(&[])?;
-                                    element_span = element_span.expand_to(action.span);
-
-                                    DisplayAttributeValue::Action(action)
-                                }
-                                _ => unreachable!()
-                            };
+                            self.expect_token_from(&[TokenKind::ParenLeft])?;
+                            self.consume_token()?; // ParenLeft
+                            let arguments = self.parse_argument_list()?;
+                            element_span = element_span.expand_to(self.current_span());
+                            self.consume_token()?; // ParenRight
 
                             let token = self.expect_token_from(&[TokenKind::Comma, TokenKind::Semicolon, TokenKind::CurlyRight])?;
                             if let TokenKind::Comma = token.kind {
@@ -1184,7 +1205,7 @@ impl<'a, T: BufRead> Parser<'a, T> {
                             attributes.push(DisplayAttribute {
                                 key: attribute_key,
                                 key_span: attribute_key_span,
-                                value: attribute_value,
+                                arguments,
                             })
                         }
                     }

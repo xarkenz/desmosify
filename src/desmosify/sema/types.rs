@@ -7,6 +7,21 @@ pub struct FunctionSignature {
     pub return_type: Type,
 }
 
+impl std::fmt::Display for FunctionSignature {
+    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+        match self.parameter_types.as_ref() {
+            [] => write!(f, "function(")?,
+            [first, rest @ ..] => {
+                write!(f, "function({first}")?;
+                for parameter_type in rest {
+                    write!(f, ", {parameter_type}")?;
+                }
+            }
+        }
+        write!(f, "): {}", self.return_type)
+    }
+}
+
 #[derive(Copy, Clone, PartialEq, Debug)]
 pub enum ListState {
     IsList,
@@ -370,6 +385,29 @@ impl Type {
         }
     }
 
+    pub fn require_action(&self, min_arity: usize, argument_types: &[Self]) -> crate::Result<&[Self]> {
+        if let Self::Action { parameter_types } = self {
+            if (min_arity ..= argument_types.len()).contains(&parameter_types.len())
+                && std::iter::zip(argument_types, parameter_types)
+                .all(|(argument_type, parameter_type)| argument_type.can_coerce_to(parameter_type))
+            {
+                return Ok(parameter_types)
+            }
+        }
+        Err(Box::new(crate::Error {
+            kind: crate::ErrorKind::ExpectedActionType {
+                expected_parameter_lists: (min_arity ..= argument_types.len())
+                    .map(|arity| argument_types[..arity]
+                        .iter()
+                        .map(ToString::to_string)
+                        .collect())
+                    .collect(),
+                got_type: self.to_string(),
+            },
+            span: None,
+        }))
+    }
+
     pub fn merge(&self, other: &Self) -> crate::Result<Self> {
         let (self_list, self_inner) = self.flatten_list();
         let (other_list, other_inner) = other.flatten_list();
@@ -454,8 +492,8 @@ impl Type {
 impl std::fmt::Display for Type {
     fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
         match self {
-            Self::Meta { .. } => write!(f, "<type>"),
-            Self::Any => write!(f, "?"),
+            Self::Meta { .. } => write!(f, "type"),
+            Self::Any => write!(f, "any"),
             Self::Complex => write!(f, "complex"),
             Self::Real => write!(f, "real"),
             Self::Int => write!(f, "int"),
@@ -487,9 +525,18 @@ impl std::fmt::Display for Type {
             Self::UserValue { type_identifier } => {
                 write!(f, "{type_identifier}")
             }
-            Self::UserFunction { .. } => write!(f, "<function>"),
-            Self::IntrinsicFunction { .. } => write!(f, "<intrinsic_function>"),
-            Self::Action { .. } => write!(f, "<action>"),
+            Self::UserFunction { signature } => signature.fmt(f),
+            Self::IntrinsicFunction { .. } => write!(f, "intrinsic_function"),
+            Self::Action { parameter_types } => match parameter_types.as_ref() {
+                [] => write!(f, "action()"),
+                [first, rest @ ..] => {
+                    write!(f, "action({first}")?;
+                    for parameter_type in rest {
+                        write!(f, ", {parameter_type}")?;
+                    }
+                    Ok(())
+                }
+            }
             Self::List { state, item_type } => match state {
                 ListState::IsList => write!(f, "[{item_type}]"),
                 ListState::MaybeList => write!(f, "{item_type}+"),

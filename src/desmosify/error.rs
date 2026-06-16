@@ -241,6 +241,10 @@ pub enum ErrorKind {
     ExpectedFunctionType {
         got_type: String,
     },
+    ExpectedActionType {
+        expected_parameter_lists: Vec<Vec<String>>,
+        got_type: String,
+    },
     ExpectedTypeValue,
     ExpectedEnumTypeValue,
     CannotMergeTypes {
@@ -273,12 +277,6 @@ pub enum ErrorKind {
         key: Box<str>,
     },
     DuplicatedDisplayAttribute {
-        key: Box<str>,
-    },
-    DisplayAttributeExpectedArguments {
-        key: Box<str>,
-    },
-    DisplayAttributeExpectedAction {
         key: Box<str>,
     },
     InvalidDisplayAttributeArity {
@@ -389,7 +387,7 @@ impl std::fmt::Display for ErrorKind {
                 write!(f, "expected an operand, got '{got_token}'")
             }
             Self::ExpectedOperation { got_token } => {
-                write!(f, "expected an operation, got '{got_token}'")
+                write!(f, "expected an operation or end of expression, got '{got_token}'")
             }
             Self::ExpectedType { got_token } => {
                 write!(f, "expected a type, got '{got_token}'")
@@ -480,6 +478,27 @@ impl std::fmt::Display for ErrorKind {
             Self::ExpectedFunctionType { got_type } => {
                 write!(f, "expected a function, got '{got_type}'")
             }
+            Self::ExpectedActionType { expected_parameter_lists, got_type } => {
+                write!(f, "expected an action accepting parameters ")?;
+                fn write_parameter_list(f: &mut std::fmt::Formatter, parameter_list: &[String]) -> std::fmt::Result {
+                    match parameter_list {
+                        [] => write!(f, "()"),
+                        [first, rest @ ..] => {
+                            write!(f, "({first}")?;
+                            for parameter in rest {
+                                write!(f, ", {parameter}")?;
+                            }
+                            Ok(())
+                        }
+                    }
+                }
+                write_parameter_list(f, &expected_parameter_lists[0])?;
+                for parameter_list in &expected_parameter_lists[1..] {
+                    write!(f, ", ")?;
+                    write_parameter_list(f, parameter_list)?
+                }
+                write!(f, "; got {got_type}")
+            }
             Self::ExpectedTypeValue => {
                 write!(f, "expected the name of a type")
             }
@@ -524,12 +543,6 @@ impl std::fmt::Display for ErrorKind {
             }
             Self::DuplicatedDisplayAttribute { key } => {
                 write!(f, "display attribute '{key}' is duplicated on this element")
-            }
-            Self::DisplayAttributeExpectedArguments { key } => {
-                write!(f, "display attribute '{key}' expects an argument list")
-            }
-            Self::DisplayAttributeExpectedAction { key } => {
-                write!(f, "display attribute '{key}' expects an action")
             }
             Self::InvalidDisplayAttributeArity { key, min, max, got } => {
                 if min == max {

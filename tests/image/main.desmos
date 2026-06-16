@@ -7,5 +7,5 @@ display {
         (0, 0), // center
         5, // width
         5, // height
-    ): click { clicked := true };
+    ): click(action() { clicked := true });
 }

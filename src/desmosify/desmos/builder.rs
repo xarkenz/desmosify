@@ -3,7 +3,6 @@ use crate::desmos::{GraphBinaryKind, GraphEntry, GraphExpression, GraphExpressio
 use crate::desmos::target::DesmosTargetInfo;
 use crate::sema::{Program, ProgramAction, ProgramImmutable, ProgramPublicEntry, ProgramPublicLine, ProgramTicker, ProgramVariable, ProgramVariableKind};
 use crate::sema::display::{ImageValue, ProgramDisplayAttributeKind, ProgramDisplayElement};
-use crate::sema::types::Type;
 use crate::sema::values::{ActionValue, ActionValueKind, BinaryKind, ColorKind, DoubleReducerKind, IndexKind, InequalityKind, MathematicalConstant, ParameterizedReducerKind, ReducerKind, UnaryKind, Value, ValueKind};
 
 pub const INTRINSICS_FOLDER_ID: &str = "desmosify_intrinsics";
@@ -42,30 +41,10 @@ impl<'target> GraphExpressionListBuilder<'target> {
             target_info,
             ticker: None,
             public_entries: Vec::new(),
-            intrinsic_entries: vec![Box::new(GraphFolderEntry {
-                id: INTRINSICS_FOLDER_ID.into(),
-                title: "desmosify:intrinsics".into(),
-                collapsed: true,
-                secret: false,
-            })],
-            global_entries: vec![Box::new(GraphFolderEntry {
-                id: GLOBALS_FOLDER_ID.into(),
-                title: "desmosify:globals".into(),
-                collapsed: true,
-                secret: false,
-            })],
-            action_entries: vec![Box::new(GraphFolderEntry {
-                id: ACTIONS_FOLDER_ID.into(),
-                title: "desmosify:actions".into(),
-                collapsed: true,
-                secret: false,
-            })],
-            display_entries: vec![Box::new(GraphFolderEntry {
-                id: DISPLAY_FOLDER_ID.into(),
-                title: "desmosify:display".into(),
-                collapsed: true,
-                secret: false,
-            })],
+            intrinsic_entries: Vec::new(),
+            global_entries: Vec::new(),
+            action_entries: Vec::new(),
+            display_entries: Vec::new(),
             next_dummy_noop_id: 0,
             dummy_unreachable_created: false,
             intrinsic_range_inclusive_created: false,
@@ -79,19 +58,33 @@ impl<'target> GraphExpressionListBuilder<'target> {
     }
 
     pub fn finish(mut self) -> GraphExpressionList {
-        self.public_entries.push(Box::new(GraphExpressionEntry {
-            id: self.target_info.create_entry_id(),
-            ..Default::default()
-        }));
+        fn finish_folder(id: &str, title: &str, mut entries: Vec<Box<dyn GraphEntry>>) -> Vec<Box<dyn GraphEntry>> {
+            if !entries.is_empty() {
+                entries.insert(0, Box::new(GraphFolderEntry {
+                    id: id.into(),
+                    title: title.into(),
+                    collapsed: true,
+                    secret: false,
+                }));
+            }
+            entries
+        }
+
+        if !self.public_entries.is_empty() {
+            self.public_entries.push(Box::new(GraphExpressionEntry {
+                id: self.target_info.create_entry_id(),
+                ..Default::default()
+            }));
+        }
 
         GraphExpressionList {
             ticker: self.ticker,
             entries: self.public_entries
                 .into_iter()
-                .chain(self.intrinsic_entries)
-                .chain(self.global_entries)
-                .chain(self.action_entries)
-                .chain(self.display_entries)
+                .chain(finish_folder(INTRINSICS_FOLDER_ID, "desmosify:intrinsics", self.intrinsic_entries))
+                .chain(finish_folder(GLOBALS_FOLDER_ID, "desmosify:globals", self.global_entries))
+                .chain(finish_folder(ACTIONS_FOLDER_ID, "desmosify:actions", self.action_entries))
+                .chain(finish_folder(DISPLAY_FOLDER_ID, "desmosify:display", self.display_entries))
                 .collect(),
         }
     }
@@ -642,33 +635,16 @@ impl<'target> GraphExpressionListBuilder<'target> {
         });
 
         match &value.kind {
-            ValueKind::Undefined(value_type) => {
-                // Create undefined using 0 / 0
-                Ok(GraphExpression::Binary {
-                    kind: GraphBinaryKind::Divide,
-                    lhs: Box::new(match value_type {
-                        Type::Point2 { .. } => GraphExpression::Unary {
-                            kind: GraphUnaryKind::Parentheses,
-                            inner: Box::new(GraphExpression::Sequence {
-                                elements: Vec::from([
-                                    GraphExpression::Integer(0),
-                                    GraphExpression::Integer(0),
-                                ]),
-                            }),
-                        },
-                        Type::Point3 { .. } => GraphExpression::Unary {
-                            kind: GraphUnaryKind::Parentheses,
-                            inner: Box::new(GraphExpression::Sequence {
-                                elements: Vec::from([
-                                    GraphExpression::Integer(0),
-                                    GraphExpression::Integer(0),
-                                    GraphExpression::Integer(0),
-                                ]),
-                            }),
-                        },
-                        _ => GraphExpression::Integer(0)
+            ValueKind::Undefined(..) => {
+                // Create undefined using the alternative branch of a piecewise. This is the best
+                // way to generate it reliably for any type that I can think of.
+                Ok(GraphExpression::Unary {
+                    kind: GraphUnaryKind::Piecewise,
+                    inner: Box::new(GraphExpression::Binary {
+                        kind: GraphBinaryKind::Equal,
+                        lhs: Box::new(GraphExpression::Integer(0)),
+                        rhs: Box::new(GraphExpression::Integer(1)),
                     }),
-                    rhs: Box::new(GraphExpression::Integer(0)),
                 })
             }
             ValueKind::Infinity(..) => {
@@ -1020,9 +996,38 @@ impl<'target> GraphExpressionListBuilder<'target> {
                     }),
                 })
             }
-            _ => {
-                Err(unsupported_error())
+            ValueKind::InlineAction { parameters, action } => {
+                let action = self.translate_action_value(action)?;
+                let action_symbol = self.target_info.create_inline_action_symbol();
+
+                let entry = Box::new(GraphExpressionEntry {
+                    id: self.target_info.create_entry_id(),
+                    folder_id: Some(ACTIONS_FOLDER_ID.into()),
+                    expression: GraphExpression::Binary {
+                        kind: GraphBinaryKind::Equal,
+                        lhs: Box::new(if parameters.is_empty() {
+                            action_symbol.clone()
+                        } else {
+                            GraphExpression::Binary {
+                                kind: GraphBinaryKind::Call,
+                                lhs: Box::new(action_symbol.clone()),
+                                rhs: Box::new(GraphExpression::Sequence {
+                                    elements: parameters
+                                        .iter()
+                                        .map(|parameter| self.target_info.get_local_symbol(parameter.id))
+                                        .collect(),
+                                }),
+                            }
+                        }),
+                        rhs: Box::new(action),
+                    },
+                    ..Default::default()
+                });
+                self.action_entries.push(entry);
+
+                Ok(action_symbol)
             }
+            _ => Err(unsupported_error())
         }
     }
 
@@ -1954,18 +1959,20 @@ impl<'target> GraphExpressionListBuilder<'target> {
         Ok(())
     }
 
-    pub fn set_program_ticker(&mut self, program_ticker: Option<&ProgramTicker>) -> crate::Result<()> {
-        self.ticker = match program_ticker {
-            Some(program_ticker) => Some(GraphTicker {
+    pub fn set_program_ticker(&mut self, program_ticker: &ProgramTicker) -> crate::Result<()> {
+        if program_ticker.tick_action.is_empty() {
+            self.ticker = None;
+        }
+        else {
+            self.ticker = Some(GraphTicker {
                 playing: true,
                 handler: self.translate_action_value(&program_ticker.tick_action)?,
                 min_step: match &program_ticker.interval_ms {
                     Some(interval_ms) => self.translate_value(interval_ms)?,
                     None => GraphExpression::Empty,
                 },
-            }),
-            None => None,
-        };
+            });
+        }
 
         Ok(())
     }
@@ -2180,16 +2187,12 @@ impl<'target> GraphExpressionListBuilder<'target> {
         for action in &program.actions {
             self.add_program_action(action)?;
         }
-        self.set_program_ticker(program.ticker.as_ref())?;
-        if let Some(public) = &program.public {
-            for public_entry in &public.entries {
-                self.add_public_entry(public_entry)?;
-            }
+        self.set_program_ticker(&program.ticker)?;
+        for public_entry in &program.public.entries {
+            self.add_public_entry(public_entry)?;
         }
-        if let Some(display) = &program.display {
-            for display_element in &display.elements {
-                self.add_display_element(display_element)?;
-            }
+        for display_element in &program.display.elements {
+            self.add_display_element(display_element)?;
         }
 
         Ok(())

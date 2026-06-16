@@ -100,7 +100,7 @@ impl GlobalContext {
                         let value_type = Type::Action {
                             parameter_types: parameters.0
                                 .iter()
-                                .map(|parameter| context.resolve_type(&parameter.parameter_type, true))
+                                .map(|parameter| context.resolve_type(&parameter.parameter_type, false))
                                 .collect::<crate::Result<_>>()?,
                         };
 
@@ -312,7 +312,6 @@ pub struct LocalContext<'a> {
     outer_context: Option<&'a Self>,
     source_path: &'a Path,
     locals: HashMap<Rc<str>, ValueKind>,
-    scoped_intrinsics: HashMap<&'static str, ValueKind>,
 }
 
 impl<'a> LocalContext<'a> {
@@ -321,7 +320,6 @@ impl<'a> LocalContext<'a> {
             outer_context: None,
             source_path,
             locals: HashMap::new(),
-            scoped_intrinsics: HashMap::new(),
         }
     }
 
@@ -330,7 +328,6 @@ impl<'a> LocalContext<'a> {
             outer_context: Some(self),
             source_path: self.source_path,
             locals: HashMap::new(),
-            scoped_intrinsics: HashMap::new(),
         }
     }
 
@@ -364,16 +361,6 @@ impl<'a> LocalContext<'a> {
     pub fn find_local(&self, identifier: &str) -> Option<&ValueKind> {
         self.locals.get(identifier).or_else(|| {
             self.outer_context.and_then(|context| context.find_local(identifier))
-        })
-    }
-
-    pub fn add_scoped_intrinsic(&mut self, identifier: &'static str, value: ValueKind) {
-        self.scoped_intrinsics.insert(identifier, value);
-    }
-
-    pub fn find_scoped_intrinsic(&self, identifier: &str) -> Option<&ValueKind> {
-        self.scoped_intrinsics.get(identifier).or_else(|| {
-            self.outer_context.and_then(|context| context.find_scoped_intrinsic(identifier))
         })
     }
 }
