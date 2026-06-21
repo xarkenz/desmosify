@@ -465,7 +465,7 @@ impl ValueKind {
                 Type::Bool
             }
             Self::EnumVariant { type_identifier, .. } => {
-                Type::UserValue {
+                Type::Enum {
                     type_identifier: type_identifier.clone(),
                 }
             }

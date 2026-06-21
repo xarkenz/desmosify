@@ -9,7 +9,8 @@ use crate::sema::values::{ActionValue, ActionValueKind, BinaryKind, ColorKind, D
 mod intrinsic;
 
 pub const INTRINSICS_FOLDER_ID: &str = "desmosify_intrinsics";
-pub const GLOBALS_FOLDER_ID: &str = "desmosify_globals";
+pub const IMMUTABLES_FOLDER_ID: &str = "desmosify_immutables";
+pub const VARIABLES_FOLDER_ID: &str = "desmosify_variables";
 pub const ACTIONS_FOLDER_ID: &str = "desmosify_actions";
 pub const DISPLAY_FOLDER_ID: &str = "desmosify_display";
 
@@ -18,7 +19,8 @@ pub struct GraphExpressionListBuilder<'target> {
     ticker: Option<GraphTicker>,
     public_entries: Vec<Box<dyn GraphEntry>>,
     intrinsic_entries: Vec<Box<dyn GraphEntry>>,
-    global_entries: Vec<Box<dyn GraphEntry>>,
+    immutable_entries: Vec<Box<dyn GraphEntry>>,
+    variable_entries: Vec<Box<dyn GraphEntry>>,
     action_entries: Vec<Box<dyn GraphEntry>>,
     display_entries: Vec<Box<dyn GraphEntry>>,
     next_dummy_noop_id: u64,
@@ -39,7 +41,8 @@ impl<'target> GraphExpressionListBuilder<'target> {
             ticker: None,
             public_entries: Vec::new(),
             intrinsic_entries: Vec::new(),
-            global_entries: Vec::new(),
+            immutable_entries: Vec::new(),
+            variable_entries: Vec::new(),
             action_entries: Vec::new(),
             display_entries: Vec::new(),
             next_dummy_noop_id: 0,
@@ -77,10 +80,11 @@ impl<'target> GraphExpressionListBuilder<'target> {
             ticker: self.ticker,
             entries: self.public_entries
                 .into_iter()
-                .chain(finish_folder(INTRINSICS_FOLDER_ID, "desmosify:intrinsics", self.intrinsic_entries))
-                .chain(finish_folder(GLOBALS_FOLDER_ID, "desmosify:globals", self.global_entries))
-                .chain(finish_folder(ACTIONS_FOLDER_ID, "desmosify:actions", self.action_entries))
-                .chain(finish_folder(DISPLAY_FOLDER_ID, "desmosify:display", self.display_entries))
+                .chain(finish_folder(INTRINSICS_FOLDER_ID, "desmosify: intrinsics", self.intrinsic_entries))
+                .chain(finish_folder(IMMUTABLES_FOLDER_ID, "desmosify: immutables", self.immutable_entries))
+                .chain(finish_folder(VARIABLES_FOLDER_ID, "desmosify: variables", self.variable_entries))
+                .chain(finish_folder(ACTIONS_FOLDER_ID, "desmosify: actions", self.action_entries))
+                .chain(finish_folder(DISPLAY_FOLDER_ID, "desmosify: display", self.display_entries))
                 .collect(),
         }
     }
@@ -456,13 +460,15 @@ impl<'target> GraphExpressionListBuilder<'target> {
                     Ok(GraphExpression::Binary {
                         kind: GraphBinaryKind::Call,
                         lhs: Box::new(match kind {
-                            RangeKind::Inclusive => self.intrinsics.index_range_to_inclusive(self.target_info),
-                            RangeKind::Exclusive => self.intrinsics.index_range_to_exclusive(self.target_info),
+                            RangeKind::Inclusive => self.intrinsics.index_range_inclusive(self.target_info),
+                            RangeKind::Exclusive => self.intrinsics.index_range_exclusive(self.target_info),
                         }),
                         rhs: Box::new(GraphExpression::Sequence {
                             elements: Vec::from([
                                 self.translate_value(list)?,
+                                GraphExpression::Integer(1),
                                 self.translate_value(to_index)?,
+                                GraphExpression::Integer(1),
                             ]),
                         }),
                     })
@@ -1389,15 +1395,15 @@ impl<'target> GraphExpressionListBuilder<'target> {
     }
 
     pub fn add_program_immutable(&mut self, immutable: &ProgramImmutable) -> crate::Result<()> {
-        let entry = self.translate_program_immutable(immutable, Some(GLOBALS_FOLDER_ID.into()))?;
-        self.global_entries.push(entry);
+        let entry = self.translate_program_immutable(immutable, Some(IMMUTABLES_FOLDER_ID.into()))?;
+        self.immutable_entries.push(entry);
         Ok(())
     }
 
     pub fn translate_program_variable(&mut self, variable: &ProgramVariable, folder_id: Option<String>) -> crate::Result<Box<dyn GraphEntry>> {
         let value = self.translate_value(&variable.value)?;
 
-        let slider = match &variable.kind {
+        let mut slider = match &variable.kind {
             ProgramVariableKind::Default => None,
             ProgramVariableKind::Timer => Some(GraphSlider {
                 loop_mode: GraphSliderLoopMode::PlayIndefinitely,
@@ -1418,6 +1424,19 @@ impl<'target> GraphExpressionListBuilder<'target> {
             }),
         };
 
+        if let Some((min, max, step)) = variable.value.get_type().value_range() {
+            let slider = slider.get_or_insert_default();
+            if let (Some(min), GraphExpression::Empty) = (&min, &slider.min) {
+                slider.min = self.translate_value(min)?;
+            }
+            if let (Some(max), GraphExpression::Empty) = (&max, &slider.max) {
+                slider.max = self.translate_value(max)?;
+            }
+            if let (Some(step), GraphExpression::Empty) = (&step, &slider.step) {
+                slider.step = self.translate_value(step)?;
+            }
+        }
+
         Ok(Box::new(GraphExpressionEntry {
             id: self.target_info.create_entry_id(),
             folder_id,
@@ -1432,8 +1451,8 @@ impl<'target> GraphExpressionListBuilder<'target> {
     }
 
     pub fn add_program_variable(&mut self, variable: &ProgramVariable) -> crate::Result<()> {
-        let entry = self.translate_program_variable(variable, Some(GLOBALS_FOLDER_ID.into()))?;
-        self.global_entries.push(entry);
+        let entry = self.translate_program_variable(variable, Some(VARIABLES_FOLDER_ID.into()))?;
+        self.variable_entries.push(entry);
         Ok(())
     }
 

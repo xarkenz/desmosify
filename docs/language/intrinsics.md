@@ -630,6 +630,18 @@ This intrinsic is *not* available on `--target desmos-graphing3d`.
 
 Construct a closed 2D polygon using `points`.
 
+{: #rect }
+### `@rect` — Construct a 2D rectangle
+
+```
+@rect(corner_1: (real, real), corner_2: (real, real)): polygon
+```
+
+{: .compatibility-note }
+This intrinsic is *not* available on `--target desmos-graphing3d`.
+
+Construct a 2D rectangle polygon with corners at `corner_1` and `corner_2`.
+
 ## Properties & Measurements
 
 {: #start }

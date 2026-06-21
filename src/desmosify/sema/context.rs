@@ -233,7 +233,7 @@ impl GlobalContext {
                                      value_type: Type::Meta { identifier },
                                      ..
                                  }) = self.find_definition(identifier) {
-                    Ok(Type::UserValue {
+                    Ok(Type::Enum {
                         type_identifier: identifier.clone(),
                     })
                 }

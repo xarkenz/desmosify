@@ -27,9 +27,9 @@ enum TileState {
 
 // Configuration variables
 
-var slider(2 ..= 40 : 1) board_width: int = 18;
-var slider(2 ..= 40 : 1) board_height: int = 14;
-var slider(1 ..= current_width * current_height - 1 : 1) mine_count: int = 40;
+var slider(2 ..= 40) board_width: int = 18;
+var slider(2 ..= 40) board_height: int = 14;
+var slider(1 ..= current_width * current_height - 1) mine_count: int = 40;
 var slider(0 ..= 2.5 : 0.25) border_units: real = 0.5;
 
 // Variables
@@ -408,5 +408,6 @@ display {
         label("`Congratulations!`", end_popup_opacity, 3, 0, "above");
     {mode == Mode.Loss || mode == Mode.Win: (0, 0)}:
         color(@black),
-        label(@concat("Change settings (if desired) and run `", @target_symbol(action reset), "` to start over."), end_popup_opacity, 1, 0, "below");
+        label(@concat("Click here or run `", @target_symbol(action reset), "` to start over."), end_popup_opacity, 1, 0, "below"),
+        click(action reset);
 }

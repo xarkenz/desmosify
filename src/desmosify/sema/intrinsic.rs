@@ -1365,7 +1365,7 @@ pub static ENUM_VALUES: IntrinsicFunction = IntrinsicFunction {
                 variant_ordinal: variants.len() as i64,
             }.into()),
             step: Box::new(ValueKind::Int(1).into()),
-            item_type: Type::UserValue {
+            item_type: Type::Enum {
                 type_identifier: identifier,
             },
         })
@@ -1399,7 +1399,7 @@ pub static ENUM_VALUE: IntrinsicFunction = IntrinsicFunction {
             .coerce_to(&Type::Int, true)?;
         let list_state = variant_ordinal.get_type().list_state();
 
-        let result_type = Type::UserValue {
+        let result_type = Type::Enum {
             type_identifier: identifier,
         };
 

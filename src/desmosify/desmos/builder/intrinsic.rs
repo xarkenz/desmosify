@@ -32,8 +32,6 @@ intrinsic_builder_definition! {
     index_range_inclusive,
     index_range_exclusive,
     index_range_from,
-    index_range_to_inclusive,
-    index_range_to_exclusive,
     rectangle,
 }
 
@@ -358,84 +356,6 @@ impl IntrinsicBuilder {
             };
 
             self.index_range_from = Some(Box::new(GraphExpressionEntry {
-                id: info.create_entry_id(),
-                folder_id: self.folder_id.clone(),
-                expression,
-                ..Default::default()
-            }));
-        }
-
-        symbol
-    }
-
-    pub fn index_range_to_inclusive(&mut self, info: &mut DesmosTargetInfo) -> GraphExpression {
-        let symbol = self.get_symbol("IdxRangeToInc");
-
-        if self.index_range_to_inclusive.is_none() {
-            let local_l = info.create_local_symbol();
-            let local_b = info.create_local_symbol();
-
-            // idx_range_to_inc(l, b) = idx_range_inc(l, 1, b, 1)
-            let expression = GraphExpression::Binary {
-                kind: GraphBinaryKind::Equal,
-                lhs: Box::new(GraphExpression::call(
-                    symbol.clone(),
-                    [local_l.clone(), local_b.clone()],
-                )),
-                rhs: Box::new(GraphExpression::Binary {
-                    kind: GraphBinaryKind::Call,
-                    lhs: Box::new(self.index_range_inclusive(info)),
-                    rhs: Box::new(GraphExpression::Sequence {
-                        elements: Vec::from([
-                            local_l.clone(),
-                            GraphExpression::Integer(1),
-                            local_b.clone(),
-                            GraphExpression::Integer(1),
-                        ]),
-                    }),
-                }),
-            };
-
-            self.index_range_to_inclusive = Some(Box::new(GraphExpressionEntry {
-                id: info.create_entry_id(),
-                folder_id: self.folder_id.clone(),
-                expression,
-                ..Default::default()
-            }));
-        }
-
-        symbol
-    }
-
-    pub fn index_range_to_exclusive(&mut self, info: &mut DesmosTargetInfo) -> GraphExpression {
-        let symbol = self.get_symbol("IdxRangeToExc");
-
-        if self.index_range_to_exclusive.is_none() {
-            let local_l = info.create_local_symbol();
-            let local_b = info.create_local_symbol();
-
-            // idx_range_to_exc(l, b) = idx_range_exc(l, 1, b, 1)
-            let expression = GraphExpression::Binary {
-                kind: GraphBinaryKind::Equal,
-                lhs: Box::new(GraphExpression::call(
-                    symbol.clone(),
-                    [local_l.clone(), local_b.clone()],
-                )),
-                rhs: Box::new(GraphExpression::Binary {
-                    kind: GraphBinaryKind::Call,
-                    lhs: Box::new(self.index_range_exclusive(info)),
-                    rhs: Box::new(GraphExpression::Sequence {
-                        elements: Vec::from([
-                            local_l.clone(),
-                            GraphExpression::Integer(1),
-                            local_b.clone(),
-                            GraphExpression::Integer(1),
-                        ]),
-                    }),
-                }),
-            };
-
-            self.index_range_to_exclusive = Some(Box::new(GraphExpressionEntry {
                 id: info.create_entry_id(),
                 folder_id: self.folder_id.clone(),
                 expression,

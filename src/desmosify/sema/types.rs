@@ -1,5 +1,6 @@
 use std::rc::Rc;
 use crate::sema::intrinsic::IntrinsicFunction;
+use crate::sema::values::{Value, ValueKind};
 
 #[derive(Clone, PartialEq, Debug)]
 pub struct FunctionSignature {
@@ -85,7 +86,7 @@ pub enum Type {
         y_type: Box<Self>,
         z_type: Box<Self>,
     },
-    UserValue {
+    Enum {
         type_identifier: Rc<str>,
     },
     UserFunction {
@@ -209,7 +210,7 @@ impl Type {
                 Point3 { x_type: self_x, y_type: self_y, z_type: self_z },
                 Point3 { x_type: target_x, y_type: target_y, z_type: target_z },
             ) => self_x.can_coerce_to(target_x) && self_y.can_coerce_to(target_y) && self_z.can_coerce_to(target_z),
-            (UserValue { .. }, Int | Real) => true,
+            (Enum { .. }, Int | Real) => true,
             _ => false
         }
     }
@@ -242,7 +243,7 @@ impl Type {
             Self::Image => false,
             Self::Point2 { .. } => true,
             Self::Point3 { .. } => true,
-            Self::UserValue { .. } => true,
+            Self::Enum { .. } => true,
             Self::UserFunction { .. } => false,
             Self::IntrinsicFunction(..) => false,
             Self::Action { .. } => false,
@@ -487,6 +488,23 @@ impl Type {
 
         Ok(result_type)
     }
+
+    pub fn value_range(&self) -> Option<(Option<Value>, Option<Value>, Option<Value>)> {
+        match self {
+            Self::Real => Some((None, None, None)),
+            Self::Int | Self::Enum { .. } => Some((
+                None,
+                None,
+                Some(ValueKind::Int(1).into()),
+            )),
+            Self::Bool => Some((
+                Some(ValueKind::Bool(false).into()),
+                Some(ValueKind::Bool(true).into()),
+                Some(ValueKind::Bool(true).into()),
+            )),
+            _ => None
+        }
+    }
 }
 
 impl std::fmt::Display for Type {
@@ -522,7 +540,7 @@ impl std::fmt::Display for Type {
             Self::Point3 { x_type, y_type, z_type } => {
                 write!(f, "({x_type}, {y_type}, {z_type})")
             }
-            Self::UserValue { type_identifier } => {
+            Self::Enum { type_identifier } => {
                 write!(f, "{type_identifier}")
             }
             Self::UserFunction { signature } => signature.fmt(f),
