@@ -116,6 +116,7 @@ pub enum BinaryKind {
     Vector3D,
     Circle,
     Sphere3D,
+    Rectangle,
 }
 
 #[derive(Copy, Clone, PartialEq, Debug)]

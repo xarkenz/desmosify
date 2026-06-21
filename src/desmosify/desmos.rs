@@ -772,6 +772,25 @@ pub enum GraphExpression {
 }
 
 impl GraphExpression {
+    pub fn call(callee: Self, arguments: impl IntoIterator<Item = Self>) -> Self {
+        Self::Binary {
+            kind: GraphBinaryKind::Call,
+            lhs: Box::new(callee),
+            rhs: Box::new(Self::Sequence {
+                elements: arguments.into_iter().collect(),
+            }),
+        }
+    }
+
+    pub fn wrap_sequence(kind: GraphUnaryKind, elements: impl IntoIterator<Item = Self>) -> Self {
+        Self::Unary {
+            kind,
+            inner: Box::new(Self::Sequence {
+                elements: elements.into_iter().collect(),
+            }),
+        }
+    }
+
     pub fn is_empty(&self) -> bool {
         matches!(self, Self::Empty)
     }

@@ -220,6 +220,7 @@ pub const CORE_INTRINSIC_FUNCTIONS: &[&IntrinsicFunction] = &[
     // &ANGLE,
     // &DIRECTED_ANGLE,
     &POLYGON,
+    &RECT,
     // &TRIANGLE3D,
     // &GLIDER,
     // Properties & Measurements
@@ -1085,6 +1086,10 @@ pub static SPHERE3D: IntrinsicFunction = binary_intrinsic!(
 
 pub static POLYGON: IntrinsicFunction = reducer_intrinsic!(
     "polygon", Some(Type::require_numeric_point_2d) => Polygon, Some(Type::Polygon)
+);
+
+pub static RECT: IntrinsicFunction = binary_intrinsic!(
+    "rect", (Type::real_point2(), Type::real_point2()) => Rectangle, Type::Polygon
 );
 
 // TRIANGLE3D

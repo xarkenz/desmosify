@@ -78,14 +78,10 @@ let is_adjacent_to_any(test_index: int, indices: [int]): bool = @any([
     for index in indices
 ]);
 
-let is_solving_move(move_index: int, move_state: TileState): bool = @all([
-    let state = {index == move_index: move_state, tile_states[index]} in
-    {
-        tiles[index] == Tile.Mine: state == TileState.Flagged,
-        state == TileState.Revealed
-    }
-    for index in [1 ..= @count(tiles)]
-]);
+let is_solved(test_tile_states: [TileState]): bool = @all({
+    tiles == Tile.Mine: test_tile_states == TileState.Flagged,
+    test_tile_states == TileState.Revealed
+});
 
 // Utilities
 
@@ -102,21 +98,21 @@ let insert_item(list: [any], index: int, value: any): [any] = @join(
 // Actions
 
 action easy_preset() {
-    board_width := 10,
-    board_height := 8,
-    mine_count := 10,
+    action preset(10, 8, 10),
 }
 
 action medium_preset() {
-    board_width := 18,
-    board_height := 14,
-    mine_count := 40,
+    action preset(18, 14, 40),
 }
 
 action hard_preset() {
-    board_width := 24,
-    board_height := 20,
-    mine_count := 99,
+    action preset(24, 20, 99),
+}
+
+action preset(width: int, height: int, count: int) {
+    board_width := width,
+    board_height := height,
+    mine_count := count,
 }
 
 action reset() {
@@ -129,32 +125,43 @@ action reset() {
 
 ticker = action tick;
 
+action update_tile_states(new_tile_states: [TileState]) {
+    tile_states := new_tile_states,
+    if is_solved(new_tile_states) then {
+        mode := Mode.Win,
+        end_anim_timer := 0,
+    },
+}
+
 action tick(dt: real) {
     if @count(spread_indices) > 0 then {
-        tile_states := {
+        action update_tile_states({
             tile_states == TileState.Hidden && [
                 is_adjacent_to_any(index, [spread_indices where tiles[spread_indices] == Tile.Empty])
                 for index in [1 ..= @count(tiles)]
             ]: TileState.Revealed,
             tile_states
-        },
+        }),
         spread_indices := [
             [1 ..= @count(tiles)] where tile_states == TileState.Hidden && tiles == Tile.Empty && [
                 is_adjacent_to_any(index, [spread_indices where tiles[spread_indices] == Tile.Empty])
                 for index in [1 ..= @count(tiles)]
             ]
         ],
-    },
-    if mode == Mode.Loss || mode == Mode.Win then {
+    }
+    elif mode == Mode.Initial then {
+        action reset(),
+    }
+    elif mode == Mode.Loss || mode == Mode.Win then {
         end_anim_timer := end_anim_timer + dt / 1000,
     },
 }
 
 action reveal(index: int) {
-    tile_states := set_item(tile_states, index, TileState.Revealed),
     last_revealed_index := index,
     if mode == Mode.Initial then {
         mode := Mode.Play,
+        tile_states := set_item(tile_states, index, TileState.Revealed),
         tiles := populate_tiles(insert_item(
             @shuffle({
                 [1 ..< @count(tiles)] <= mine_count: Tile.Mine,
@@ -165,26 +172,21 @@ action reveal(index: int) {
         )),
         spread_indices := [index],
     }
-    elif tiles[index] == Tile.Empty then {
-        spread_indices := @join(spread_indices, index),
-    }
-    elif tiles[index] == Tile.Mine then {
-        mode := Mode.Loss,
-        end_anim_timer := 0,
-        explosion_effect_values := @random(@count(explosion_effect_values)),
-    }
-    elif is_solving_move(index, TileState.Revealed) then {
-        mode := Mode.Win,
-        end_anim_timer := 0,
-    }
+    else {
+        action update_tile_states(set_item(tile_states, index, TileState.Revealed)),
+        if tiles[index] == Tile.Empty then {
+            spread_indices := @join(spread_indices, index),
+        }
+        elif tiles[index] == Tile.Mine then {
+            mode := Mode.Loss,
+            end_anim_timer := 0,
+            explosion_effect_values := @random(@count(explosion_effect_values)),
+        },
+    },
 }
 
 action flag(index: int) {
-    tile_states := set_item(tile_states, index, TileState.Flagged),
-    if is_solving_move(index, TileState.Flagged) then {
-        mode := Mode.Win,
-        end_anim_timer := 0,
-    },
+    action update_tile_states(set_item(tile_states, index, TileState.Flagged)),
 }
 
 action unflag(index: int) {
@@ -192,14 +194,14 @@ action unflag(index: int) {
 }
 
 action solve() {
-    if mode != Mode.Initial then {
+    if mode == Mode.Initial then disable
+    else {
         tile_states := {
             tiles == Tile.Mine: TileState.Flagged,
             TileState.Revealed
         },
         mode := Mode.Cheated,
-    }
-    else disable,
+    },
 }
 
 // Public interface
@@ -275,12 +277,7 @@ let end_popup_opacity: real = @min(1, {
 
 display {
     // Board
-    @polygon(
-        view(grid + (0.5, 0.5)),
-        view(grid + (0.5, -0.5)),
-        view(grid + (-0.5, -0.5)),
-        view(grid + (-0.5, 0.5)),
-    ): color(tile_colors), line(1, 0.5), fill(1);
+    @rect(view(grid - (0.5, 0.5)), view(grid + (0.5, 0.5))): color(tile_colors), line(1, 0.5), fill(1);
 
     // Board debugging
     // view(grid): color(0), label(@concat("${", @target_symbol(tiles), "}"));
