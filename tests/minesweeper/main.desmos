@@ -133,21 +133,19 @@ action update_tile_states(new_tile_states: [TileState]) {
     },
 }
 
+let is_spread_reveal_tile: [bool] = tile_states == TileState.Hidden && [
+    is_adjacent_to_any(index, [spread_indices where tiles[spread_indices] == Tile.Empty])
+    for index in [1 ..= @count(tiles)]
+];
+let spread_reveal_indices: [int] = [[1 ..= @count(tiles)] where is_spread_reveal_tile];
+
 action tick(dt: real) {
     if @count(spread_indices) > 0 then {
         action update_tile_states({
-            tile_states == TileState.Hidden && [
-                is_adjacent_to_any(index, [spread_indices where tiles[spread_indices] == Tile.Empty])
-                for index in [1 ..= @count(tiles)]
-            ]: TileState.Revealed,
+            is_spread_reveal_tile: TileState.Revealed,
             tile_states
         }),
-        spread_indices := [
-            [1 ..= @count(tiles)] where tile_states == TileState.Hidden && tiles == Tile.Empty && [
-                is_adjacent_to_any(index, [spread_indices where tiles[spread_indices] == Tile.Empty])
-                for index in [1 ..= @count(tiles)]
-            ]
-        ],
+        spread_indices := [[1 ..= @count(tiles)] where is_spread_reveal_tile && tiles == Tile.Empty],
     }
     elif mode == Mode.Initial then {
         action reset(),
@@ -155,6 +153,25 @@ action tick(dt: real) {
     elif mode == Mode.Loss || mode == Mode.Win then {
         end_anim_timer := end_anim_timer + dt / 1000,
     },
+    tile_particle_origin := @join(
+        [tile_particle_origin where tile_particle_time < particle_max_time],
+        grid[spread_reveal_indices],
+    ),
+    tile_particle_random := @join(
+        [tile_particle_random where tile_particle_time < particle_max_time],
+        (@random(@count(spread_reveal_indices)), @random(@count(spread_reveal_indices)))
+    ),
+    tile_particle_time := @join(
+        [tile_particle_time where tile_particle_time < particle_max_time] + dt / 1000,
+        [0; @count(spread_reveal_indices)],
+    ),
+    tile_particle_color := @join(
+        [tile_particle_color where tile_particle_time < particle_max_time],
+        tile_colors[spread_reveal_indices],
+    ),
+    flag_particle_origin := [flag_particle_origin where flag_particle_time < particle_max_time],
+    flag_particle_random := [flag_particle_random where flag_particle_time < particle_max_time],
+    flag_particle_time := [flag_particle_time where flag_particle_time < particle_max_time] + dt / 1000,
 }
 
 action reveal(index: int) {
@@ -183,6 +200,10 @@ action reveal(index: int) {
             explosion_effect_values := @random(@count(explosion_effect_values)),
         },
     },
+    tile_particle_origin := @join(tile_particle_origin, grid[index]),
+    tile_particle_random := @join(tile_particle_random, (@random(), @random())),
+    tile_particle_time := @join(tile_particle_time, 0),
+    tile_particle_color := @join(tile_particle_color, tile_colors[index]),
 }
 
 action flag(index: int) {
@@ -191,6 +212,9 @@ action flag(index: int) {
 
 action unflag(index: int) {
     tile_states := set_item(tile_states, index, TileState.Hidden),
+    flag_particle_origin := @join(flag_particle_origin, grid[index]),
+    flag_particle_random := @join(flag_particle_random, (@random(), @random())),
+    flag_particle_time := @join(flag_particle_time, 0),
 }
 
 action solve() {
@@ -238,6 +262,7 @@ public {
 
 // Display
 
+let background_color: color = @hsv(155, 0.9, 0.55);
 let grass_colors: [color] = @hsv([145, 140], [0.8, 0.75], [0.75, 0.8]);
 let dirt_colors: [color] = @hsv([30, 33], [0.3, 0.275], [0.875, 0.9]);
 let mark_colors: [color] = @hsv([7, 10], [0.7, 0.65], [0.875, 0.9]);
@@ -253,12 +278,43 @@ let tile_colors: [color] =
         },
     };
 
+let pixels_to_units: real = 20 / @width_pixels;
 let width_units: real = 20 - 2 * border_units;
 let height_units: real = 20 * (@height_pixels / @width_pixels) - 2 * border_units;
 let board_scale: real = @min(width_units / current_width, height_units / current_height);
 
 let view(point: (real, real)+): (real, real)+ =
     board_scale * ((current_width, current_height) / -2 + point + (0.5, 0.5));
+
+let particle_max_time: real = 1;
+
+// TODO: this would be a prime usage of structs
+var tile_particle_origin: [(int, int)] = [];
+var tile_particle_random: [(real, real)] = [];
+var tile_particle_time: [real] = [];
+var tile_particle_color: [color] = [];
+
+var flag_particle_origin: [(int, int)] = [];
+var flag_particle_random: [(real, real)] = [];
+var flag_particle_time: [real] = [];
+
+let particle_pos(origin: (real, real)+, random: (real, real)+, time: real+): (real, real)+ = origin + time * (
+    5 * (random.x - 0.5),
+    2 * random.y - 3 * time,
+);
+let particle_angle(random: (real, real)+, time: real+): real+ = time * (0.5 - random.x) * @tau;
+
+let tile_particle_pos: [(real, real)] = particle_pos(tile_particle_origin, tile_particle_random, tile_particle_time);
+let flag_particle_pos: [(real, real)] = particle_pos(flag_particle_origin, flag_particle_random, flag_particle_time);
+let tile_particle_angle: [real] = particle_angle(tile_particle_random, tile_particle_time);
+let flag_particle_angle: [real] = particle_angle(flag_particle_random, flag_particle_time);
+
+let square_points(to_corner: (real, real)): [(real, real)] = [
+    to_corner,
+    (-to_corner.y, to_corner.x),
+    -to_corner,
+    (to_corner.y, -to_corner.x),
+];
 
 var last_revealed_index: int = 0;
 var end_anim_timer: real = 0;
@@ -276,8 +332,16 @@ let end_popup_opacity: real = @min(1, {
 });
 
 display {
+    // Background
+    @rect((-100, -100), (100, 100)):
+        color(background_color),
+        fill(1);
+
     // Board
-    @rect(view(grid - (0.5, 0.5)), view(grid + (0.5, 0.5))): color(tile_colors), line(1, 0.5), fill(1);
+    @rect(view(grid - (0.5, 0.5)), view(grid + (0.5, 0.5))):
+        color(tile_colors),
+        line(1, 0.5),
+        fill(1);
 
     // Board debugging
     // view(grid): color(0), label(@concat("${", @target_symbol(tiles), "}"));
@@ -354,6 +418,21 @@ display {
         0.7 * board_scale, 0.7 * board_scale,
     );
 
+    // Particles
+    [@polygon(view(tile_particle_pos[index] + square_points(
+        (@sqrt(2) / 2) * (@cos(@pi / 4 + tile_particle_angle[index]), @sin(@pi / 4 + tile_particle_angle[index]))
+    ))) for index in [1 ..= @count(tile_particle_pos)]]:
+        color(tile_particle_color),
+        fill(1 - tile_particle_time / particle_max_time);
+    @image(
+        @include_data("images/flag.png"),
+        "Flag particle",
+        view(flag_particle_pos),
+        0.8 * board_scale, 0.8 * board_scale,
+        1 - flag_particle_time / particle_max_time,
+        flag_particle_angle,
+    );
+
     // Interactions
     @image(
         @transparent_image_data,
@@ -392,22 +471,22 @@ display {
     // Popup panel
     @polygon({
         mode == Mode.Loss || mode == Mode.Win: [
-            (-0.6 * current_width, -0.25 * current_height),
-            (-0.6 * current_width, 0.25 * current_height),
-            (0.6 * current_width, 0.25 * current_height),
-            (0.6 * current_width, -0.25 * current_height),
-        ] * board_scale
-    }): color(@white), fill(0.7 * end_popup_opacity);
+            (-300, -100),
+            (-250, 100),
+            (300, 100),
+            (250, -100),
+        ] * pixels_to_units * board_scale
+    }): color(@white), fill(0.8 * end_popup_opacity);
 
     // Messages
     {mode == Mode.Loss: (0, 0)}:
         color(mark_colors[1]),
-        label("`Game\\ over...`", end_popup_opacity, 3, 0, "above");
+        label("`Game\\ over...`", end_popup_opacity, 3, 0, "above", false);
     {mode == Mode.Win: (0, 0)}:
         color(grass_colors[1]),
-        label("`Congratulations!`", end_popup_opacity, 3, 0, "above");
-    {mode == Mode.Loss || mode == Mode.Win: (0, 0)}:
+        label("`Congratulations!`", end_popup_opacity, 3, 0, "above", false);
+    {mode == Mode.Loss || mode == Mode.Win: (0, -50) * pixels_to_units}:
         color(@black),
-        label(@concat("Click here or run `", @target_symbol(action reset), "` to start over."), end_popup_opacity, 1, 0, "below"),
+        label(@concat("Click here or run `", @target_symbol(action reset), "` to start over."), end_popup_opacity, 1, 0, "center", false),
         click(action reset);
 }
