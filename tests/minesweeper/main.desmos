@@ -25,11 +25,20 @@ enum TileState {
     Flagged,
 }
 
+enum ControlScheme {
+    Halves,
+    DoubleClick,
+}
+
 // Configuration variables
 
 var slider(2 ..= 40) board_width: int = 18;
 var slider(2 ..= 40) board_height: int = 14;
 var slider(1 ..= current_width * current_height - 1) mine_count: int = 40;
+// TODO: make the slider range the default here lol this is annoying
+var slider(ControlScheme.Halves ..= ControlScheme.DoubleClick) control_scheme: ControlScheme = ControlScheme.Halves;
+var view_mode: bool = false;
+var slider(0.5 ..= 5 : 0.25) double_click_max_delay: real = 2;
 var slider(0 ..= 2.5 : 0.25) border_units: real = 0.5;
 
 // Variables
@@ -48,8 +57,6 @@ let grid: [(int, int)] = [
     for y in [0 ..< current_height]
     for x in [0 ..< current_width]
 ];
-
-let current_mine_count: int = @total(tiles == Tile.Mine);
 
 let populate_tiles(initial_tiles: [Tile]): [Tile] = [
     {
@@ -147,12 +154,17 @@ action tick(dt: real) {
         }),
         spread_indices := [[1 ..= @count(tiles)] where is_spread_reveal_tile && tiles == Tile.Empty],
     }
+    elif single_click_index >= 1 && double_click_time_left == 0 then {
+        action flag(single_click_index),
+        single_click_index := 0,
+    }
     elif mode == Mode.Initial then {
         action reset(),
     }
     elif mode == Mode.Loss || mode == Mode.Win then {
         end_anim_timer := end_anim_timer + dt / 1000,
     },
+    double_click_time_left := @max(0, double_click_time_left - dt / 1000),
     tile_particle_origin := @join(
         [tile_particle_origin where tile_particle_time < particle_max_time],
         grid[spread_reveal_indices],
@@ -217,6 +229,22 @@ action unflag(index: int) {
     flag_particle_time := @join(flag_particle_time, 0),
 }
 
+action single_click(index: int) {
+    if single_click_index >= 1 then {
+        // We don't need to check for a win condition since this action can only be run if the player clicked on
+        // another hidden tile, and a solved board can't have any hidden tiles.
+        tile_states := set_item(tile_states, single_click_index, TileState.Flagged),
+    },
+    single_click_index := index,
+    double_click_time_left := double_click_max_delay,
+}
+
+action double_click() {
+    action reveal(single_click_index),
+    single_click_index := 0,
+    double_click_time_left := 0,
+}
+
 action solve() {
     if mode == Mode.Initial then disable
     else {
@@ -234,33 +262,46 @@ public {
     "Minesweeper: Desmos Edition";
     "Created by Sean Clarke (@xarkenz)";
     "Fun fact: I made this graph using a compiler which I also created called Desmosify! The source code for this graph can be found at https://github.com/xarkenz/desmosify/blob/main/tests/minesweeper/main.desmos.";
-    "Click on any tile to start the game. Clicking the left half of a tile reveals it, the right half flags it. Clicking a flag clears the flag without revealing the space.";
-    "I would like to extend a formal apology to those trying to play on mobile. I'm working on it...";
+    "Firstly, you'll want to pick a control scheme using this slider:\n\n0 (halves) - Better suited for playing with a mouse. Click the left half of a tile to reveal it, the right half to flag it. Clicking a flag removes the flag without revealing the space.\n\n1 (double-click) - Better suited for playing on a touchscreen. Tap once on a tile to flag it, or twice to reveal it. Tapping a flag removes the flag without revealing the space.";
+    slider control_scheme;
+    "Once you have decided on a control scheme, select a board below and reveal a tile to start the game.";
     "Also, undo and redo work as you would expect, so if you explode and are a dirty cheater you can pretend it never happened.";
+
     "";
-    "First, set the board size and mine count (or select one of the provided presets by clicking the corresponding arrow).";
+    "Select a difficulty preset, or create a custom board.";
     action easy_preset();
     action medium_preset();
     action hard_preset();
+    folder "Custom board..." {
+        "Board size:";
+        slider board_width;
+        slider board_height;
+        "Number of mines hidden in the board:";
+        slider mine_count;
+    }
 
-    "Board size:";
-    slider board_width;
-    slider board_height;
-    "Number of mines hidden in the board:";
-    slider mine_count;
-
-    "Click the arrow to generate a new board:";
+    "";
+    "Slide this to 1 to make it easier to zoom and move the view around.";
+    slider view_mode;
+    "Use this action to start over with a new board.";
     action reset();
-    "Click the arrow to forfeit and show the solution:";
+    "Use this action to forfeit and show the solution.";
     action solve();
 
-    folder "Configuration Options" {
+    "";
+    folder "Configuration options..." {
+        "Maximum delay between the first and second click in a double click, in seconds:";
+        slider double_click_max_delay;
         "Padding between the board and the edge of the graph, in units:";
         slider border_units;
     }
 }
 
-// Display
+// Display/interface
+
+var single_click_index: int = 0;
+var double_click_time_left: real = 0;
+let interactions_active: bool = !view_mode && @count(spread_indices) == 0;
 
 let background_color: color = @hsv(155, 0.9, 0.55);
 let grass_colors: [color] = @hsv([145, 140], [0.8, 0.75], [0.75, 0.8]);
@@ -436,8 +477,8 @@ display {
     // Interactions
     @image(
         @transparent_image_data,
-        "Reveal tile interaction",
-        {(mode == Mode.Initial || mode == Mode.Play) && tile_states == TileState.Hidden: view(grid)},
+        "Reveal tile interaction - Halves only",
+        {interactions_active && control_scheme == ControlScheme.Halves && (mode == Mode.Initial || mode == Mode.Play) && tile_states == TileState.Hidden: view(grid)},
         board_scale, board_scale,
         0.6,
     ):
@@ -446,8 +487,8 @@ display {
         click(action reveal);
     @image(
         @transparent_image_data,
-        "Flag tile interaction",
-        {(mode == Mode.Initial || mode == Mode.Play) && tile_states == TileState.Hidden: view(grid + (0.25, 0))},
+        "Flag tile interaction - Halves only",
+        {interactions_active && control_scheme == ControlScheme.Halves && (mode == Mode.Initial || mode == Mode.Play) && tile_states == TileState.Hidden: view(grid + (0.25, 0))},
         0.5 * board_scale, board_scale,
     ):
         hovered(@include_data("images/hover_flag.png")),
@@ -455,10 +496,22 @@ display {
         click(action flag);
     @image(
         @transparent_image_data,
-        "Unflag tile interaction",
-        {(mode == Mode.Initial || mode == Mode.Play) && tile_states == TileState.Flagged: view(grid)},
+        "Single click interaction - DoubleClick only",
+        {interactions_active && control_scheme == ControlScheme.DoubleClick && (mode == Mode.Initial || mode == Mode.Play) && tile_states == TileState.Hidden: view(grid)},
+        board_scale, board_scale,
+    ): click(action single_click);
+    @image(
+        @transparent_image_data,
+        "Unflag tile interaction - Halves and DoubleClick",
+        {interactions_active && (mode == Mode.Initial || mode == Mode.Play) && tile_states == TileState.Flagged: view(grid)},
         board_scale, board_scale,
     ): click(action unflag);
+    /// Double click interaction - DoubleClick only
+    @rect(view(grid[single_click_index] - (0.5, 0.5)), view(grid[single_click_index] + (0.5, 0.5))):
+        color(@white),
+        line(double_click_time_left / double_click_max_delay, 6),
+        fill(0.6 * (double_click_time_left / double_click_max_delay)),
+        click(action double_click);
 
     // Explosion effect
     @polygon({mode == Mode.Loss: view(grid[last_revealed_index]) + 20 * (@cbrt(end_anim_timer + 1) - 1) * explosion_effect}):
@@ -475,7 +528,7 @@ display {
             (-250, 100),
             (300, 100),
             (250, -100),
-        ] * pixels_to_units * board_scale
+        ] * pixels_to_units
     }): color(@white), fill(0.8 * end_popup_opacity);
 
     // Messages
