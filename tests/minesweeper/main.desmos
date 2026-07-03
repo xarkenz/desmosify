@@ -261,7 +261,26 @@ action solve() {
 public {
     "Minesweeper: Desmos Edition";
     "Created by Sean Clarke (@xarkenz)";
-    "Fun fact: I made this graph using a compiler which I also created called Desmosify! The source code for this graph can be found at https://github.com/xarkenz/desmosify/blob/main/tests/minesweeper/main.desmos.";
+    folder "About this graph..." {
+        @concat(
+            "Fun fact: I made this graph using a compiler which I also created called Desmosify! ",
+            "The source code for this graph can be found at https://github.com/xarkenz/desmosify/blob/main/tests/minesweeper/main.desmos.\n\n",
+            "This is partially an old graph (the original is at https://www.desmos.com/calculator/af4c011ad9). ",
+            "However, once I rewrote it in Desmosify, I went through a lot of iterations to improve it and remake parts of it. ",
+            "So, is it really an old graph? I suppose that's for you to decide.\n\n",
+            "There were a few difficult parts with this game: board generation, revealing empty space, and control schemes, to name a few. ",
+            "Below are some details on the specifics of each of those:\n\n",
+            "The first tile you reveal will never be a mine since the board is generated in that moment, and that generation shuffles the mines in all tiles except the one you reveal.\n\n",
+            "Revealing empty space is tricky to do in a performant way, and I would know—if you check out my old graph, this aspect is very slow. ",
+            "In the old version, every tile is checked on every tick to see whether it should be auto-revealed. ",
+            "This version keeps a list of tiles to check instead; if the list is empty, nothing gets checked.\n\n",
+            "The most frustrating problem, in my opinion, is the control scheme. ",
+            "My original solution, which I've kept around, is to divide each tile into halves for left and right clicking, but that's not mobile-friendly, so I developed a single-click/double-click alternative. ",
+            "Double-clicking is annoying, though, since it often lags and drop the second click if it's too soon. Oh well. ",
+            "There's also the issue that you can't use touch controls like pinching and dragging to control the viewport on mobile if your finger starts on a clickable object, so I developed a separate mode to get around that.",
+        );
+    }
+
     "Firstly, you'll want to pick a control scheme using this slider:\n\n0 (halves) - Better suited for playing with a mouse. Click the left half of a tile to reveal it, the right half to flag it. Clicking a flag removes the flag without revealing the space.\n\n1 (double-click) - Better suited for playing on a touchscreen. Tap once on a tile to flag it, or twice to reveal it. Tapping a flag removes the flag without revealing the space.";
     slider control_scheme;
     "Once you have decided on a control scheme, select a board below and reveal a tile to start the game.";
