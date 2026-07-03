@@ -1,14 +1,17 @@
+use std::collections::HashMap;
 use std::path::PathBuf;
 use std::rc::Rc;
 use crate::ast::{ActionExpression, ActionExpressionKind, BinaryOperation, DefinitionKind, DisplayAttribute, Expression, IndexOperation, ExpressionKind, ParameterList, PublicLineKind, TypeDefinition, UnaryOperation, ValueDefinition, VariableKind, EnumerationVariant, PublicLine};
 use crate::sema::{Program, ProgramAction, ProgramEnumeration, ProgramImmutable, ProgramPublic, ProgramPublicEntry, ProgramPublicLine, ProgramTicker, ProgramVariable, ProgramVariableKind};
 use crate::sema::context::{GlobalContext, LocalContext};
 use crate::sema::display::{DragMode, LabelOrientation, LineStyle, PointStyle, ProgramDisplay, ProgramDisplayAttribute, ProgramDisplayAttributeKind, ProgramDisplayElement};
+use crate::sema::symbol::Symbol;
 use crate::sema::types::{ListState, Type};
 use crate::sema::values::{ActionValue, ActionValueKind, GlobalReference, LocalReference, Value, IndexKind, ValueKind, ListMapLoop, BinaryKind, UnaryKind, ActionReference, InequalityKind};
 use crate::target::Target;
 
 pub fn interpret_program(source_paths: &[PathBuf], target: &mut dyn Target, context: &GlobalContext) -> crate::Result<Program> {
+    let mut symbol_values = HashMap::new();
     let mut enumerations = Vec::new();
     let mut immutables = Vec::new();
     let mut variables = Vec::new();
@@ -22,6 +25,7 @@ pub fn interpret_program(source_paths: &[PathBuf], target: &mut dyn Target, cont
                 enumerations.push(interpret_enumeration_definition(
                     target,
                     context,
+                    &mut symbol_values,
                     local_context,
                     identifier.clone(),
                     variants,
@@ -31,6 +35,7 @@ pub fn interpret_program(source_paths: &[PathBuf], target: &mut dyn Target, cont
                 immutables.push(interpret_let_definition(
                     target,
                     context,
+                    &mut symbol_values,
                     local_context,
                     identifier.clone(),
                     parameters.as_ref(),
@@ -42,6 +47,7 @@ pub fn interpret_program(source_paths: &[PathBuf], target: &mut dyn Target, cont
                 variables.push(interpret_variable_definition(
                     target,
                     context,
+                    &mut symbol_values,
                     local_context,
                     identifier.clone(),
                     kind,
@@ -53,6 +59,7 @@ pub fn interpret_program(source_paths: &[PathBuf], target: &mut dyn Target, cont
                 actions.push(interpret_action_definition(
                     target,
                     context,
+                    &mut symbol_values,
                     local_context,
                     identifier.clone(),
                     parameters,
@@ -81,10 +88,18 @@ pub fn interpret_program(source_paths: &[PathBuf], target: &mut dyn Target, cont
 pub fn interpret_enumeration_definition(
     target: &mut dyn Target,
     context: &GlobalContext,
+    symbol_values: &mut HashMap<Symbol, Value>,
     local_context: LocalContext,
     identifier: Rc<str>,
     variants: &[EnumerationVariant],
 ) -> crate::Result<ProgramEnumeration> {
+    symbol_values.insert(
+        Symbol::Global(identifier.clone()),
+        ValueKind::Type {
+            identifier: identifier.clone(),
+        }.into(),
+    );
+
     let mut values: Vec<(Rc<str>, Value)> = Vec::with_capacity(variants.len());
 
     for variant in variants {
@@ -116,7 +131,7 @@ pub fn interpret_enumeration_definition(
 
     Ok(ProgramEnumeration {
         identifier,
-        values: values.into_boxed_slice(),
+        value_identifiers: values,
     })
 }
 
@@ -193,6 +208,7 @@ pub fn interpret_variable_definition(
 pub fn interpret_action_definition(
     target: &mut dyn Target,
     context: &GlobalContext,
+    symbol_values: &mut HashMap<Symbol, Value>,
     mut local_context: LocalContext,
     identifier: Rc<str>,
     parameters: &ParameterList,
@@ -205,6 +221,14 @@ pub fn interpret_action_definition(
     let typed_parameters = process_parameters(target, &mut local_context, parameters, parameter_types);
 
     let action = interpret_action_expression(target, context, &local_context, action)?;
+
+    symbol_values.insert(
+        Symbol::Action(identifier.clone()),
+        ValueKind::Action(ActionReference {
+            identifier: identifier.clone(),
+            action_type: action_type.clone(),
+        }).into(),
+    );
 
     Ok(ProgramAction {
         identifier,

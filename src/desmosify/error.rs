@@ -300,6 +300,9 @@ pub enum ErrorKind {
         identifier: Box<str>,
     },
     CannotNestFolders,
+    CyclicDefinitions {
+        identifier: Box<str>,
+    },
 }
 
 impl std::fmt::Display for ErrorKind {
@@ -576,6 +579,9 @@ impl std::fmt::Display for ErrorKind {
             }
             Self::CannotNestFolders => {
                 write!(f, "folders cannot contain other folders")
+            }
+            Self::CyclicDefinitions { identifier } => {
+                write!(f, "cyclic definition detected for '{identifier}'")
             }
         }
     }

@@ -1,25 +1,27 @@
+use std::collections::HashMap;
 use std::rc::Rc;
 use crate::sema::display::ProgramDisplay;
+use crate::sema::symbol::Symbol;
 use crate::sema::values::{ActionValue, LocalReference, Value};
 
 pub mod context;
 pub mod display;
 pub mod interpret;
 pub mod intrinsic;
+pub mod symbol;
 pub mod types;
 pub mod values;
 
 #[derive(Clone, Debug)]
 pub struct ProgramEnumeration {
     pub identifier: Rc<str>,
-    pub values: Box<[(Rc<str>, Value)]>,
+    pub value_identifiers: Box<[Rc<str>]>,
 }
 
 #[derive(Clone, Debug)]
 pub struct ProgramImmutable {
     pub identifier: Rc<str>,
     pub parameters: Option<Box<[LocalReference]>>,
-    pub value: Value,
 }
 
 #[derive(Clone, Debug)]
@@ -37,7 +39,6 @@ pub enum ProgramVariableKind {
 pub struct ProgramVariable {
     pub identifier: Rc<str>,
     pub kind: ProgramVariableKind,
-    pub value: Value,
 }
 
 #[derive(Clone, Debug)]
@@ -76,6 +77,7 @@ pub struct ProgramPublic {
 
 #[derive(Clone, Debug)]
 pub struct Program {
+    pub symbol_values: HashMap<Symbol, Value>,
     pub enumerations: Box<[ProgramEnumeration]>,
     pub immutables: Box<[ProgramImmutable]>,
     pub variables: Box<[ProgramVariable]>,

@@ -727,8 +727,10 @@ pub static UNIQUE: IntrinsicFunction = IntrinsicFunction {
             .require_flatten_list()
             .map_err(|error| error.with_span(list.span))?;
 
-        Ok(ValueKind::Unique {
-            list: Box::new(list),
+        Ok(ValueKind::Unary {
+            kind: UnaryKind::Unique,
+            result_type: list.get_type(),
+            operand: Box::new(list),
         })
     },
 };

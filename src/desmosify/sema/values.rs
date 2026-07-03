@@ -84,6 +84,7 @@ pub enum UnaryKind {
     Sqrt,
     Cbrt,
     Factorial,
+    Unique,
     MidpointOfSegment,
     VectorStart,
     VectorEnd,
@@ -328,9 +329,6 @@ pub enum ValueKind {
         list: Box<Value>,
         seed: Option<Box<Value>>,
     },
-    Unique {
-        list: Box<Value>,
-    },
     Dilation {
         object: Box<Value>,
         point: Box<Value>,
@@ -524,9 +522,6 @@ impl ValueKind {
                 result_type.clone()
             }
             Self::Shuffle { list, .. } => {
-                list.get_type()
-            }
-            Self::Unique { list } => {
                 list.get_type()
             }
             Self::Dilation { result_type, .. } => {
@@ -847,10 +842,6 @@ impl std::fmt::Debug for ValueKind {
                 }
                 tuple.finish()
             }
-            Self::Unique { list } => {
-                write!(f, "Unique<{self_type}>")?;
-                f.debug_tuple("").field(list).finish()
-            }
             Self::Dilation { object, point, factor, .. } => {
                 write!(f, "Dilation<{self_type}>")?;
                 f.debug_tuple("").field(object).field(point).field(factor).finish()
@@ -932,6 +923,187 @@ impl std::fmt::Debug for ValueKind {
     }
 }
 
+macro_rules! try_visit_value_kind_match {
+    ($kind:expr, $method:ident, $f:expr $(,)?) => {
+        match ($kind) {
+            ValueKind::Type { .. } => {}
+            ValueKind::Undefined(..) => {}
+            ValueKind::Infinity(_) => {}
+            ValueKind::Real(_) => {}
+            ValueKind::Mathematical(_) => {}
+            ValueKind::Int(_) => {}
+            ValueKind::Bool(_) => {}
+            ValueKind::EnumVariant { .. } => {}
+            ValueKind::Str(_) => {}
+            ValueKind::Image(_, _) => {}
+            ValueKind::IntrinsicFunction(_) => {}
+            ValueKind::Global(_) => {}
+            ValueKind::Action(_) => {}
+            ValueKind::Local(_) => {}
+            ValueKind::ViewportWidth => {}
+            ValueKind::ViewportHeight => {}
+            ValueKind::TickerDt => {}
+            ValueKind::ClickIndex => {}
+            ValueKind::Unary { operand, .. } => {
+                operand.$method($f)?;
+            }
+            ValueKind::Binary { lhs, rhs, .. } => {
+                lhs.$method($f)?;
+                rhs.$method($f)?;
+            }
+            ValueKind::InequalityChain { lhs, chain, .. } => {
+                lhs.$method($f)?;
+                for (_, rhs) in chain {
+                    rhs.$method($f)?;
+                }
+            }
+            ValueKind::Reducer { list, .. } => {
+                list.$method($f)?;
+            }
+            ValueKind::ArgumentsReducer { arguments, .. } => {
+                for argument in arguments {
+                    argument.$method($f)?;
+                }
+            }
+            ValueKind::DoubleReducer { list_1, list_2, .. } => {
+                list_1.$method($f)?;
+                list_2.$method($f)?;
+            }
+            ValueKind::ParameterizedReducer { list, parameter, .. } => {
+                list.$method($f)?;
+                parameter.$method($f)?;
+            }
+            ValueKind::Color { value_1, value_2, value_3, .. } => {
+                value_1.$method($f)?;
+                value_2.$method($f)?;
+                value_3.$method($f)?;
+            }
+            ValueKind::Random { source, sample_count, .. } => {
+                if let Some(source) = source {
+                    source.$method($f)?;
+                }
+                if let Some(sample_count) = sample_count {
+                    sample_count.$method($f)?;
+                }
+            }
+            ValueKind::SeededRandom { source, sample_count, seed, .. } => {
+                if let Some(source) = source {
+                    source.$method($f)?;
+                }
+                sample_count.$method($f)?;
+                seed.$method($f)?;
+            }
+            ValueKind::Join { values, .. } => {
+                for value in values {
+                    value.$method($f)?;
+                }
+            }
+            ValueKind::Sort { list, key_list } => {
+                list.$method($f)?;
+                if let Some(key_list) = key_list {
+                    key_list.$method($f)?;
+                }
+            }
+            ValueKind::Shuffle { list, seed } => {
+                list.$method($f)?;
+                if let Some(seed) = seed {
+                    seed.$method($f)?;
+                }
+            }
+            ValueKind::Dilation { object, point, factor, .. } => {
+                object.$method($f)?;
+                point.$method($f)?;
+                factor.$method($f)?;
+            }
+            ValueKind::Rotation { object, point, angle, .. } => {
+                object.$method($f)?;
+                point.$method($f)?;
+                angle.$method($f)?;
+            }
+            ValueKind::Reflection { object, line, .. } => {
+                object.$method($f)?;
+                line.$method($f)?;
+            }
+            ValueKind::TranslationByPoints { object, point_1, point_2, .. } => {
+                object.$method($f)?;
+                point_1.$method($f)?;
+                point_2.$method($f)?;
+            }
+            ValueKind::TranslationByVector { object, vector, .. } => {
+                object.$method($f)?;
+                vector.$method($f)?;
+            }
+            ValueKind::Point2 { x, y, .. } => {
+                x.$method($f)?;
+                y.$method($f)?;
+            }
+            ValueKind::Point3 { x, y, z, .. } => {
+                x.$method($f)?;
+                y.$method($f)?;
+                z.$method($f)?;
+            }
+            ValueKind::List { items, .. } => {
+                for item in items {
+                    item.$method($f)?;
+                }
+            }
+            ValueKind::ListRange { start, end, step, .. } => {
+                start.$method($f)?;
+                end.$method($f)?;
+                step.$method($f)?;
+            }
+            ValueKind::ListFill { value, count } => {
+                value.$method($f)?;
+                count.$method($f)?;
+            }
+            ValueKind::ListMap { loops, value } => {
+                for map_loop in loops {
+                    map_loop.list.$method($f)?;
+                }
+                value.$method($f)?;
+            }
+            ValueKind::ListFilter { list, condition, .. } => {
+                list.$method($f)?;
+                condition.$method($f)?;
+            }
+            ValueKind::Index { list, kind, .. } => {
+                list.$method($f)?;
+                match kind {
+                    IndexKind::Single { index } => {
+                        index.$method($f)?;
+                    }
+                    IndexKind::Range { from_index, to_index, step, .. } => {
+                        from_index.$method($f)?;
+                        to_index.$method($f)?;
+                        step.$method($f)?;
+                    }
+                    IndexKind::RangeFrom { from_index, step } => {
+                        from_index.$method($f)?;
+                        step.$method($f)?;
+                    }
+                    IndexKind::RangeTo { to_index, .. } => {
+                        to_index.$method($f)?;
+                    }
+                }
+            }
+            ValueKind::Conditional { condition_consequents, alternative, .. } => {
+                for (condition, consequent) in condition_consequents {
+                    condition.$method($f)?;
+                    consequent.$method($f)?;
+                }
+                alternative.$method($f)?;
+            }
+            ValueKind::UserFunctionCall { function, arguments, .. } => {
+                function.$method($f)?;
+                for argument in arguments {
+                    argument.$method($f)?;
+                }
+            }
+            ValueKind::InlineAction { .. } => {}
+        }
+    };
+}
+
 #[derive(Clone)]
 pub struct Value {
     pub kind: ValueKind,
@@ -979,6 +1151,36 @@ impl Value {
                 },
                 span: self.span,
             }))
+    }
+
+    pub fn visit_postorder<F>(&self, mut f: F)
+    where
+        F: FnMut(&Self),
+    {
+        let _ = self.try_visit_postorder(|value| Ok(f(value)));
+    }
+
+    pub fn visit_postorder_mut<F>(&mut self, mut f: F)
+    where
+        F: FnMut(&mut Self),
+    {
+        let _ = self.try_visit_postorder_mut(|value| Ok(f(value)));
+    }
+
+    pub fn try_visit_postorder<F>(&self, mut f: F) -> crate::Result<()>
+    where
+        F: FnMut(&Self) -> crate::Result<()>,
+    {
+        try_visit_value_kind_match!(&self.kind, try_visit_postorder, &mut f);
+        f(self)
+    }
+
+    pub fn try_visit_postorder_mut<F>(&mut self, mut f: F) -> crate::Result<()>
+    where
+        F: FnMut(&mut Self) -> crate::Result<()>,
+    {
+        try_visit_value_kind_match!(&mut self.kind, try_visit_postorder_mut, &mut f);
+        f(self)
     }
 }
 
