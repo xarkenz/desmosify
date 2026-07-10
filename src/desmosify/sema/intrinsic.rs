@@ -161,6 +161,7 @@ pub const CORE_INTRINSIC_FUNCTIONS: &[&IntrinsicFunction] = &[
     &SORT,
     &SHUFFLE,
     &UNIQUE,
+    &PREFIX_SUM,
     // Statistics
     &MEAN,
     // &MEDIAN,
@@ -729,6 +730,25 @@ pub static UNIQUE: IntrinsicFunction = IntrinsicFunction {
 
         Ok(ValueKind::Unique {
             list: Box::new(list),
+        })
+    },
+};
+
+pub static PREFIX_SUM: IntrinsicFunction = IntrinsicFunction {
+    identifier: "prefix_sum",
+    min_arity: 1,
+    max_arity: Some(1),
+    interpret_call: |_, _, _, arguments| {
+        let list = arguments.into_iter().next().unwrap();
+        list.get_type()
+            .require_flatten_list()
+            .and_then(|item_type| item_type.require_numeric_or_point().map(|()| item_type))
+            .map_err(|error| error.with_span(list.span))?;
+
+        Ok(ValueKind::Unary {
+            kind: UnaryKind::PrefixSum,
+            result_type: list.get_type(),
+            operand: Box::new(list),
         })
     },
 };

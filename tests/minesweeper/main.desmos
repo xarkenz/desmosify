@@ -32,12 +32,13 @@ enum ControlScheme {
 
 // Configuration variables
 
-var slider(2 ..= 40) board_width: int = 18;
-var slider(2 ..= 40) board_height: int = 14;
-var slider(1 ..= current_width * current_height - 1) mine_count: int = 40;
+var slider(4 ..= 40) board_width: int = 18;
+var slider(4 ..= 40) board_height: int = 14;
+var slider(1 ..= current_width * current_height - 9) mine_count: int = 40;
 // TODO: make the slider range the default here lol this is annoying
 var slider(ControlScheme.Halves ..= ControlScheme.DoubleClick) control_scheme: ControlScheme = ControlScheme.Halves;
 var view_mode: bool = false;
+var start_on_empty_tile: bool = true;
 var slider(0.5 ..= 5 : 0.25) double_click_max_delay: real = 2;
 var slider(0 ..= 2.5 : 0.25) border_units: real = 0.5;
 
@@ -57,31 +58,21 @@ let grid: [(int, int)] = [
     for y in [0 ..< current_height]
     for x in [0 ..< current_width]
 ];
+let tile_count: int = current_width * current_height;
 
-let populate_tiles(initial_tiles: [Tile]): [Tile] = [
-    {
-        initial_tiles[index] == Tile.Mine: Tile.Mine,
-        @enum_value(Tile, count_adjacent_mines(initial_tiles, index))
-    }
-    for index in [1 ..= @count(initial_tiles)]
+let adjacent_offsets: [(int, int)] = [
+    (1, 0), (1, 1), (0, 1), (-1, 1), (-1, 0), (-1, -1), (0, -1), (1, -1),
 ];
 
-let count_adjacent_mines(tiles: [Tile], index: int): int =
-    let has_left = index % current_width != 1 in
-    let has_right = index % current_width != 0 in
-    let has_down = index > current_width in
-    let has_up = index <= @count(tiles) - current_width in
-    (has_left && tiles[index - 1] == Tile.Mine) +
-    (has_right && tiles[index + 1] == Tile.Mine) +
-    (has_down && tiles[index - current_width] == Tile.Mine) +
-    (has_up && tiles[index + current_width] == Tile.Mine) +
-    (has_left && has_down && tiles[index - 1 - current_width] == Tile.Mine) +
-    (has_left && has_up && tiles[index - 1 + current_width] == Tile.Mine) +
-    (has_right && has_down && tiles[index + 1 - current_width] == Tile.Mine) +
-    (has_right && has_up && tiles[index + 1 + current_width] == Tile.Mine);
+let is_in_bounds(point: (int, int)+): bool+ = 0 <= point.x < current_width && 0 <= point.y < current_height;
+
+let points_are_adjacent(point_1: (int, int)+, point_2: (int, int)+): bool+ = @max(
+    @abs(point_1.x - point_2.x),
+    @abs(point_1.y - point_2.y),
+) <= 1;
 
 let is_adjacent_to_any(test_index: int, indices: [int]): bool = @any([
-    @max(@abs(grid[test_index].x - grid[index].x), @abs(grid[test_index].y - grid[index].y)) <= 1
+    points_are_adjacent(grid[test_index], grid[index])
     for index in indices
 ]);
 
@@ -142,9 +133,9 @@ action update_tile_states(new_tile_states: [TileState]) {
 
 let is_spread_reveal_tile: [bool] = tile_states == TileState.Hidden && [
     is_adjacent_to_any(index, [spread_indices where tiles[spread_indices] == Tile.Empty])
-    for index in [1 ..= @count(tiles)]
+    for index in [1 ..= tile_count]
 ];
-let spread_reveal_indices: [int] = [[1 ..= @count(tiles)] where is_spread_reveal_tile];
+let spread_reveal_indices: [int] = [[1 ..= tile_count] where is_spread_reveal_tile];
 
 action tick(dt: real) {
     if @count(spread_indices) > 0 then {
@@ -152,7 +143,7 @@ action tick(dt: real) {
             is_spread_reveal_tile: TileState.Revealed,
             tile_states
         }),
-        spread_indices := [[1 ..= @count(tiles)] where is_spread_reveal_tile && tiles == Tile.Empty],
+        spread_indices := [[1 ..= tile_count] where is_spread_reveal_tile && tiles == Tile.Empty],
     }
     elif single_click_index >= 1 && double_click_time_left == 0 then {
         action flag(single_click_index),
@@ -164,42 +155,77 @@ action tick(dt: real) {
     elif mode == Mode.Loss || mode == Mode.Win then {
         end_anim_timer := end_anim_timer + dt / 1000,
     },
-    double_click_time_left := @max(0, double_click_time_left - dt / 1000),
-    tile_particle_origin := @join(
-        [tile_particle_origin where tile_particle_time < particle_max_time],
-        grid[spread_reveal_indices],
-    ),
-    tile_particle_random := @join(
-        [tile_particle_random where tile_particle_time < particle_max_time],
-        (@random(@count(spread_reveal_indices)), @random(@count(spread_reveal_indices)))
-    ),
-    tile_particle_time := @join(
-        [tile_particle_time where tile_particle_time < particle_max_time] + dt / 1000,
-        [0; @count(spread_reveal_indices)],
-    ),
-    tile_particle_color := @join(
-        [tile_particle_color where tile_particle_time < particle_max_time],
-        tile_colors[spread_reveal_indices],
-    ),
-    flag_particle_origin := [flag_particle_origin where flag_particle_time < particle_max_time],
-    flag_particle_random := [flag_particle_random where flag_particle_time < particle_max_time],
-    flag_particle_time := [flag_particle_time where flag_particle_time < particle_max_time] + dt / 1000,
+    if double_click_time_left > 0 then {
+        double_click_time_left := @max(0, double_click_time_left - dt / 1000),
+    },
+    if @count(tile_particle_origin) + @count(spread_reveal_indices) > 0 then {
+        tile_particle_origin := @join(
+            [tile_particle_origin where tile_particle_time < particle_max_time],
+            grid[spread_reveal_indices],
+        ),
+        tile_particle_random := @join(
+            [tile_particle_random where tile_particle_time < particle_max_time],
+            (@random(@count(spread_reveal_indices)), @random(@count(spread_reveal_indices)))
+        ),
+        tile_particle_time := @join(
+            [tile_particle_time where tile_particle_time < particle_max_time] + dt / 1000,
+            [0; @count(spread_reveal_indices)],
+        ),
+        tile_particle_color := @join(
+            [tile_particle_color where tile_particle_time < particle_max_time],
+            tile_colors[spread_reveal_indices],
+        ),
+    },
+    if @count(flag_particle_origin) > 0 then {
+        flag_particle_origin := [flag_particle_origin where flag_particle_time < particle_max_time],
+        flag_particle_random := [flag_particle_random where flag_particle_time < particle_max_time],
+        flag_particle_time := [flag_particle_time where flag_particle_time < particle_max_time] + dt / 1000,
+    },
 }
+
+let count_adjacent_mines(tiles: [Tile], index: int): int =
+//    @total(tiles == Tile.Mine && points_are_adjacent(grid, grid[index]));
+    let has_left = index % current_width != 1 in
+    let has_right = index % current_width != 0 in
+    let has_down = index > current_width in
+    let has_up = index <= tile_count - current_width in
+    count_adjacent_mines_impl(tiles, index, has_left, has_right, has_down, has_up);
+
+let count_adjacent_mines_impl(tiles: [Tile], index: int, has_left: bool, has_right: bool, has_down: bool, has_up: bool): int =
+    (has_left && tiles[index - 1] == Tile.Mine) +
+    (has_right && tiles[index + 1] == Tile.Mine) +
+    (has_down && tiles[index - current_width] == Tile.Mine) +
+    (has_up && tiles[index + current_width] == Tile.Mine) +
+    (has_left && has_down && tiles[index - 1 - current_width] == Tile.Mine) +
+    (has_left && has_up && tiles[index - 1 + current_width] == Tile.Mine) +
+    (has_right && has_down && tiles[index + 1 - current_width] == Tile.Mine) +
+    (has_right && has_up && tiles[index + 1 + current_width] == Tile.Mine);
+
+let deposit_mines(mine_pool: [Tile], possible_mine_tiles: [bool]): [Tile] = {
+    !possible_mine_tiles: Tile.Empty,
+    mine_pool[@prefix_sum(possible_mine_tiles)]
+};
+
+let populate_number_tiles(initial_tiles: [Tile]): [Tile] = [
+    {
+        initial_tiles[index] == Tile.Mine: Tile.Mine,
+        @enum_value(Tile, count_adjacent_mines(initial_tiles, index))
+    }
+    for index in [1 ..= tile_count]
+];
+
+let generate_board(seed: real, possible_mine_tiles: [bool]): [Tile] = populate_number_tiles(deposit_mines(
+    @shuffle({
+        [1 ..= @total(possible_mine_tiles)] <= mine_count: Tile.Mine,
+        Tile.Empty
+    }, seed),
+    possible_mine_tiles,
+));
 
 action reveal(index: int) {
     last_revealed_index := index,
     if mode == Mode.Initial then {
-        mode := Mode.Play,
-        tile_states := set_item(tile_states, index, TileState.Revealed),
-        tiles := populate_tiles(insert_item(
-            @shuffle({
-                [1 ..< @count(tiles)] <= mine_count: Tile.Mine,
-                Tile.Empty
-            }),
-            index,
-            Tile.Empty,
-        )),
-        spread_indices := [index],
+        action reveal_first_tile(index),
     }
     else {
         action update_tile_states(set_item(tile_states, index, TileState.Revealed)),
@@ -216,6 +242,16 @@ action reveal(index: int) {
     tile_particle_random := @join(tile_particle_random, (@random(), @random())),
     tile_particle_time := @join(tile_particle_time, 0),
     tile_particle_color := @join(tile_particle_color, tile_colors[index]),
+}
+
+action reveal_first_tile(index: int) {
+    mode := Mode.Play,
+    tile_states := set_item(tile_states, index, TileState.Revealed),
+    tiles := generate_board(@random(), {
+        start_on_empty_tile: !points_are_adjacent(grid, grid[index]),
+        [1 ..= tile_count] != index
+    }),
+    spread_indices := [index],
 }
 
 action flag(index: int) {
@@ -309,6 +345,8 @@ public {
 
     "";
     folder "Configuration options..." {
+        "Slide to 1 to guarantee that the starting tile is empty (this is the default behavior):";
+        slider start_on_empty_tile;
         "Maximum delay between the first and second click in a double click, in seconds:";
         slider double_click_max_delay;
         "Padding between the board and the edge of the graph, in units:";

@@ -805,6 +805,13 @@ impl<'target> GraphExpressionListBuilder<'target> {
                     self.translate_value(operand)?,
                 ))
             }
+            UnaryKind::PrefixSum => {
+                Ok(GraphExpression::Binary {
+                    kind: GraphBinaryKind::Call,
+                    lhs: Box::new(self.intrinsics.prefix_sum(self.target_info)),
+                    rhs: Box::new(self.translate_value(operand)?),
+                })
+            }
         }
     }
 

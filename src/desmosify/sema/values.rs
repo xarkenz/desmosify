@@ -87,6 +87,7 @@ pub enum UnaryKind {
     MidpointOfSegment,
     VectorStart,
     VectorEnd,
+    PrefixSum,
 }
 
 #[derive(Copy, Clone, PartialEq, Debug)]

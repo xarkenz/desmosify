@@ -2,11 +2,11 @@ use crate::desmos::{GraphBinaryKind, GraphEntry, GraphExpression, GraphExpressio
 use crate::desmos::target::DesmosTargetInfo;
 
 macro_rules! intrinsic_builder_definition {
-    ($($intrinsic:ident,)*) => {
+    ($($intrinsic:ident),* $(,)?) => {
         pub struct IntrinsicBuilder {
             folder_id: Option<String>,
             prefix: GraphExpression,
-            $($intrinsic: Option<Box<dyn GraphEntry>>,)*
+            $($intrinsic: Box<[Box<dyn GraphEntry>]>,)*
         }
 
         impl IntrinsicBuilder {
@@ -14,7 +14,7 @@ macro_rules! intrinsic_builder_definition {
                 Self {
                     folder_id,
                     prefix,
-                    $($intrinsic: None,)*
+                    $($intrinsic: Default::default()),*
                 }
             }
 
@@ -23,7 +23,7 @@ macro_rules! intrinsic_builder_definition {
                     $(.chain(self.$intrinsic))*
             }
         }
-    }
+    };
 }
 
 intrinsic_builder_definition! {
@@ -33,6 +33,7 @@ intrinsic_builder_definition! {
     index_range_exclusive,
     index_range_from,
     rectangle,
+    prefix_sum,
 }
 
 impl IntrinsicBuilder {
@@ -44,10 +45,19 @@ impl IntrinsicBuilder {
         }
     }
 
+    pub fn create_expression_entry(&mut self, info: &mut DesmosTargetInfo, expression: GraphExpression) -> Box<dyn GraphEntry> {
+        Box::new(GraphExpressionEntry {
+            id: info.create_entry_id(),
+            folder_id: self.folder_id.clone(),
+            expression,
+            ..Default::default()
+        })
+    }
+
     pub fn range_inclusive(&mut self, info: &mut DesmosTargetInfo) -> GraphExpression {
         let symbol = self.get_symbol("RangeInc");
 
-        if self.range_inclusive.is_none() {
+        if self.range_inclusive.is_empty() {
             let local_a = info.create_local_symbol();
             let local_b = info.create_local_symbol();
             let local_s = info.create_local_symbol();
@@ -130,12 +140,9 @@ impl IntrinsicBuilder {
                 }),
             };
 
-            self.range_inclusive = Some(Box::new(GraphExpressionEntry {
-                id: info.create_entry_id(),
-                folder_id: self.folder_id.clone(),
-                expression,
-                ..Default::default()
-            }));
+            self.range_inclusive = [
+                self.create_expression_entry(info, expression),
+            ].into();
         }
 
         symbol
@@ -144,7 +151,7 @@ impl IntrinsicBuilder {
     pub fn range_exclusive(&mut self, info: &mut DesmosTargetInfo) -> GraphExpression {
         let symbol = self.get_symbol("RangeExc");
 
-        if self.range_exclusive.is_none() {
+        if self.range_exclusive.is_empty() {
             let local_a = info.create_local_symbol();
             let local_b = info.create_local_symbol();
             let local_s = info.create_local_symbol();
@@ -199,12 +206,9 @@ impl IntrinsicBuilder {
                 }),
             };
 
-            self.range_exclusive = Some(Box::new(GraphExpressionEntry {
-                id: info.create_entry_id(),
-                folder_id: self.folder_id.clone(),
-                expression,
-                ..Default::default()
-            }));
+            self.range_exclusive = [
+                self.create_expression_entry(info, expression),
+            ].into();
         }
 
         symbol
@@ -213,7 +217,7 @@ impl IntrinsicBuilder {
     pub fn index_range_inclusive(&mut self, info: &mut DesmosTargetInfo) -> GraphExpression {
         let symbol = self.get_symbol("IdxRangeInc");
 
-        if self.index_range_inclusive.is_none() {
+        if self.index_range_inclusive.is_empty() {
             let local_l = info.create_local_symbol();
             let local_a = info.create_local_symbol();
             let local_b = info.create_local_symbol();
@@ -255,12 +259,9 @@ impl IntrinsicBuilder {
                 }),
             };
 
-            self.index_range_inclusive = Some(Box::new(GraphExpressionEntry {
-                id: info.create_entry_id(),
-                folder_id: self.folder_id.clone(),
-                expression,
-                ..Default::default()
-            }));
+            self.index_range_inclusive = [
+                self.create_expression_entry(info, expression),
+            ].into();
         }
 
         symbol
@@ -269,7 +270,7 @@ impl IntrinsicBuilder {
     pub fn index_range_exclusive(&mut self, info: &mut DesmosTargetInfo) -> GraphExpression {
         let symbol = self.get_symbol("IdxRangeExc");
 
-        if self.index_range_exclusive.is_none() {
+        if self.index_range_exclusive.is_empty() {
             let local_l = info.create_local_symbol();
             let local_a = info.create_local_symbol();
             let local_b = info.create_local_symbol();
@@ -311,12 +312,9 @@ impl IntrinsicBuilder {
                 }),
             };
 
-            self.index_range_exclusive = Some(Box::new(GraphExpressionEntry {
-                id: info.create_entry_id(),
-                folder_id: self.folder_id.clone(),
-                expression,
-                ..Default::default()
-            }));
+            self.index_range_exclusive = [
+                self.create_expression_entry(info, expression),
+            ].into();
         }
 
         symbol
@@ -325,12 +323,12 @@ impl IntrinsicBuilder {
     pub fn index_range_from(&mut self, info: &mut DesmosTargetInfo) -> GraphExpression {
         let symbol = self.get_symbol("IdxRangeFrom");
 
-        if self.index_range_from.is_none() {
+        if self.index_range_from.is_empty() {
             let local_l = info.create_local_symbol();
             let local_a = info.create_local_symbol();
             let local_s = info.create_local_symbol();
 
-            // idx_range_from(l, a, s) = idx_range_inc(l, a, count(l), s)
+            // idx_range_from(l, a, s) = idx_range_inc(l, a, l.count, s)
             let expression = GraphExpression::Binary {
                 kind: GraphBinaryKind::Equal,
                 lhs: Box::new(GraphExpression::call(
@@ -345,9 +343,9 @@ impl IntrinsicBuilder {
                             local_l.clone(),
                             local_a.clone(),
                             GraphExpression::Binary {
-                                kind: GraphBinaryKind::Call,
-                                lhs: Box::new(GraphExpression::OperatorName("count".into())),
-                                rhs: Box::new(local_l.clone()),
+                                kind: GraphBinaryKind::Dot,
+                                lhs: Box::new(local_l.clone()),
+                                rhs: Box::new(GraphExpression::OperatorName("count".into())),
                             },
                             local_s.clone(),
                         ]),
@@ -355,12 +353,9 @@ impl IntrinsicBuilder {
                 }),
             };
 
-            self.index_range_from = Some(Box::new(GraphExpressionEntry {
-                id: info.create_entry_id(),
-                folder_id: self.folder_id.clone(),
-                expression,
-                ..Default::default()
-            }));
+            self.index_range_from = [
+                self.create_expression_entry(info, expression),
+            ].into();
         }
 
         symbol
@@ -369,7 +364,7 @@ impl IntrinsicBuilder {
     pub fn rectangle(&mut self, info: &mut DesmosTargetInfo) -> GraphExpression {
         let symbol = self.get_symbol("Rect");
 
-        if self.rectangle.is_none() {
+        if self.rectangle.is_empty() {
             let local_p1 = info.create_local_symbol();
             let local_p2 = info.create_local_symbol();
 
@@ -413,12 +408,125 @@ impl IntrinsicBuilder {
                 )),
             };
 
-            self.rectangle = Some(Box::new(GraphExpressionEntry {
-                id: info.create_entry_id(),
-                folder_id: self.folder_id.clone(),
-                expression,
-                ..Default::default()
-            }));
+            self.rectangle = [
+                self.create_expression_entry(info, expression),
+            ].into();
+        }
+
+        symbol
+    }
+
+    /// Nevin Brackett-Rozinsky O(n) Prefix Sum (Wackscope Algorithm)
+    ///
+    /// https://www.desmos.com/calculator/p091kr6k84
+    pub fn prefix_sum(&mut self, info: &mut DesmosTargetInfo) -> GraphExpression {
+        let symbol = self.get_symbol("PrefixSumNW");
+
+        if self.prefix_sum.is_empty() {
+            let helper_symbol = self.get_symbol("PrefixSumNWHelper");
+            let local_list = info.create_local_symbol();
+            let local_index = info.create_local_symbol();
+            let local_wackscope_list = info.create_local_symbol();
+
+            // prefix_sum_nw(list) = {
+            //     list.count <= 1: list,
+            //     prefix_sum_nw_helper([1 ... list.count]) with wackscope_list = list
+            // }
+            let expression = GraphExpression::Binary {
+                kind: GraphBinaryKind::Equal,
+                lhs: Box::new(GraphExpression::call(
+                    symbol.clone(),
+                    [local_list.clone()],
+                )),
+                rhs: Box::new(GraphExpression::wrap_sequence(GraphUnaryKind::Piecewise, [
+                    GraphExpression::Binary {
+                        kind: GraphBinaryKind::Colon,
+                        lhs: Box::new(GraphExpression::InequalityChain {
+                            lhs: Box::new(GraphExpression::Binary {
+                                kind: GraphBinaryKind::Dot,
+                                lhs: Box::new(local_list.clone()),
+                                rhs: Box::new(GraphExpression::OperatorName("count".into())),
+                            }),
+                            chain: Vec::from([(
+                                GraphInequalityKind::LessEqual,
+                                GraphExpression::Integer(1),
+                            )]),
+                        }),
+                        rhs: Box::new(local_list.clone()),
+                    },
+                    GraphExpression::Binary {
+                        kind: GraphBinaryKind::With,
+                        lhs: Box::new(GraphExpression::call(
+                            helper_symbol.clone(),
+                            [GraphExpression::Unary {
+                                kind: GraphUnaryKind::List,
+                                inner: Box::new(GraphExpression::Binary {
+                                    kind: GraphBinaryKind::Range,
+                                    lhs: Box::new(GraphExpression::Integer(1)),
+                                    rhs: Box::new(GraphExpression::Binary {
+                                        kind: GraphBinaryKind::Dot,
+                                        lhs: Box::new(local_list.clone()),
+                                        rhs: Box::new(GraphExpression::OperatorName("count".into())),
+                                    }),
+                                }),
+                            }],
+                        )),
+                        rhs: Box::new(GraphExpression::Binary {
+                            kind: GraphBinaryKind::Equal,
+                            lhs: Box::new(local_wackscope_list.clone()),
+                            rhs: Box::new(local_list.clone()),
+                        }),
+                    },
+                ])),
+            };
+
+            // prefix_sum_nw_helper(index) = {
+            //     index = 1: wackscope_list[1],
+            //     prefix_sum_nw_helper(index - 1) + wackscope_list[index]
+            // }
+            let helper_expression = GraphExpression::Binary {
+                kind: GraphBinaryKind::Equal,
+                lhs: Box::new(GraphExpression::call(
+                    helper_symbol.clone(),
+                    [local_index.clone()],
+                )),
+                rhs: Box::new(GraphExpression::wrap_sequence(GraphUnaryKind::Piecewise, [
+                    GraphExpression::Binary {
+                        kind: GraphBinaryKind::Colon,
+                        lhs: Box::new(GraphExpression::Binary {
+                            kind: GraphBinaryKind::Equal,
+                            lhs: Box::new(local_index.clone()),
+                            rhs: Box::new(GraphExpression::Integer(1)),
+                        }),
+                        rhs: Box::new(GraphExpression::Binary {
+                            kind: GraphBinaryKind::Index,
+                            lhs: Box::new(local_wackscope_list.clone()),
+                            rhs: Box::new(GraphExpression::Integer(1)),
+                        }),
+                    },
+                    GraphExpression::Binary {
+                        kind: GraphBinaryKind::Add,
+                        lhs: Box::new(GraphExpression::call(
+                            helper_symbol.clone(),
+                            [GraphExpression::Binary {
+                                kind: GraphBinaryKind::Subtract,
+                                lhs: Box::new(local_index.clone()),
+                                rhs: Box::new(GraphExpression::Integer(1)),
+                            }],
+                        )),
+                        rhs: Box::new(GraphExpression::Binary {
+                            kind: GraphBinaryKind::Index,
+                            lhs: Box::new(local_wackscope_list.clone()),
+                            rhs: Box::new(local_index.clone()),
+                        }),
+                    },
+                ])),
+            };
+
+            self.prefix_sum = [
+                self.create_expression_entry(info, helper_expression),
+                self.create_expression_entry(info, expression),
+            ].into();
         }
 
         symbol
