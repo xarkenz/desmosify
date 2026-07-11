@@ -6,6 +6,7 @@ pub mod latex;
 pub mod target;
 pub mod symbol;
 pub mod builder;
+pub mod macros;
 
 pub trait ToJson {
     fn to_json(&self) -> JsonValue;
