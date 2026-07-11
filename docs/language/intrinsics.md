@@ -383,7 +383,7 @@ comparable with `==`, such as points and colors.
 
 {: .note }
 This intrinsic is implemented using the
-[Nevin Brackett-Rozinsky O(n) Prefix Sum (Wackscope Algorithm)](https://www.desmos.com/calculator/p091kr6k84).
+[Nevin Brackett-Rozinsky O(n) Prefix Sum (Wackscope Algorithm)](https://www.desmos.com/calculator/p091kr6k84?nographpaper).
 
 ## Statistics
 
