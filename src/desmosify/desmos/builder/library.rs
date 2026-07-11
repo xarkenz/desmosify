@@ -2,15 +2,15 @@ use crate::desmos::{GraphBinaryKind, GraphEntry, GraphExpression, GraphExpressio
 use crate::desmos::target::DesmosTargetInfo;
 use crate::desmos_expression;
 
-macro_rules! intrinsic_builder_definition {
+macro_rules! library_builder_definition {
     ($($intrinsic:ident),* $(,)?) => {
-        pub struct IntrinsicBuilder {
+        pub struct LibraryBuilder {
             folder_id: Option<String>,
             prefix: GraphExpression,
             $($intrinsic: Box<[Box<dyn GraphEntry>]>,)*
         }
 
-        impl IntrinsicBuilder {
+        impl LibraryBuilder {
             pub fn new(folder_id: Option<String>, prefix: GraphExpression) -> Self {
                 Self {
                     folder_id,
@@ -27,7 +27,7 @@ macro_rules! intrinsic_builder_definition {
     };
 }
 
-intrinsic_builder_definition! {
+library_builder_definition! {
     range_inclusive,
     range_exclusive,
     index_range_inclusive,
@@ -37,8 +37,8 @@ intrinsic_builder_definition! {
     prefix_sum,
 }
 
-impl IntrinsicBuilder {
-    pub fn get_symbol(&self, subscript: impl Into<String>) -> GraphExpression {
+impl LibraryBuilder {
+    fn get_symbol(&self, subscript: impl Into<String>) -> GraphExpression {
         GraphExpression::Binary {
             kind: GraphBinaryKind::Subscript,
             lhs: Box::new(self.prefix.clone()),
@@ -142,12 +142,12 @@ impl IntrinsicBuilder {
             let expression = desmos_expression!(
                 ({&symbol} Call [{&local_list}, {&local_start}, {&local_end}, {&local_step}])
                 Equal
-                (List (({&local_list} Index {&local_index})
+                (({&local_list} Index {&local_index})
                     For ({&local_index} Equal ({self.range_inclusive(info)} Call [
                         {&local_start},
                         {&local_end},
                         {&local_step},
-                    ]))))
+                    ])))
             );
 
             self.index_range_inclusive = [
@@ -174,12 +174,12 @@ impl IntrinsicBuilder {
             let expression = desmos_expression!(
                 ({&symbol} Call [{&local_list}, {&local_start}, {&local_end}, {&local_step}])
                 Equal
-                (List (({&local_list} Index {&local_index})
+                (({&local_list} Index {&local_index})
                     For ({&local_index} Equal ({self.range_exclusive(info)} Call [
                         {&local_start},
                         {&local_end},
                         {&local_step},
-                    ]))))
+                    ])))
             );
 
             self.index_range_exclusive = [

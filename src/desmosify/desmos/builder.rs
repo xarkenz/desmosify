@@ -1,31 +1,32 @@
 use crate::ast::RangeKind;
 use crate::desmos::{GraphBinaryKind, GraphEntry, GraphExpression, GraphExpressionEntry, GraphExpressionList, GraphFolderEntry, GraphImageEntry, GraphInequalityKind, GraphSlider, GraphSliderLoopMode, GraphTextEntry, GraphTicker, GraphUnaryKind};
-use crate::desmos::builder::intrinsic::IntrinsicBuilder;
+use crate::desmos::builder::library::LibraryBuilder;
 use crate::desmos::target::DesmosTargetInfo;
 use crate::sema::{Program, ProgramAction, ProgramImmutable, ProgramPublicEntry, ProgramPublicLine, ProgramTicker, ProgramVariable, ProgramVariableKind};
 use crate::sema::display::{ImageValue, ProgramDisplayAttributeKind, ProgramDisplayElement};
 use crate::sema::values::{ActionValue, ActionValueKind, BinaryKind, ColorKind, DoubleReducerKind, IndexKind, InequalityKind, MathematicalConstant, ParameterizedReducerKind, ReducerKind, UnaryKind, Value, ValueKind};
 
-mod intrinsic;
+mod library;
 
-pub const INTRINSICS_FOLDER_ID: &str = "desmosify_intrinsics";
 pub const IMMUTABLES_FOLDER_ID: &str = "desmosify_immutables";
 pub const VARIABLES_FOLDER_ID: &str = "desmosify_variables";
 pub const ACTIONS_FOLDER_ID: &str = "desmosify_actions";
 pub const DISPLAY_FOLDER_ID: &str = "desmosify_display";
+pub const LIBRARY_FOLDER_ID: &str = "desmosify_library";
+pub const MISC_FOLDER_ID: &str = "desmosify_misc";
 
 pub struct GraphExpressionListBuilder<'target> {
     target_info: &'target mut DesmosTargetInfo,
     ticker: Option<GraphTicker>,
     public_entries: Vec<Box<dyn GraphEntry>>,
-    intrinsic_entries: Vec<Box<dyn GraphEntry>>,
     immutable_entries: Vec<Box<dyn GraphEntry>>,
     variable_entries: Vec<Box<dyn GraphEntry>>,
     action_entries: Vec<Box<dyn GraphEntry>>,
     display_entries: Vec<Box<dyn GraphEntry>>,
+    library: LibraryBuilder,
+    misc_entries: Vec<Box<dyn GraphEntry>>,
     next_dummy_noop_id: u64,
     dummy_unreachable_created: bool,
-    intrinsics: IntrinsicBuilder,
 }
 
 impl<'target> GraphExpressionListBuilder<'target> {
@@ -40,34 +41,39 @@ impl<'target> GraphExpressionListBuilder<'target> {
             target_info,
             ticker: None,
             public_entries: Vec::new(),
-            intrinsic_entries: Vec::new(),
             immutable_entries: Vec::new(),
             variable_entries: Vec::new(),
             action_entries: Vec::new(),
             display_entries: Vec::new(),
+            library: LibraryBuilder::new(
+                Some(LIBRARY_FOLDER_ID.into()),
+                GraphExpression::Letter('L'),
+            ),
+            misc_entries: Vec::new(),
             next_dummy_noop_id: 0,
             dummy_unreachable_created: false,
-            intrinsics: IntrinsicBuilder::new(
-                Some(INTRINSICS_FOLDER_ID.into()),
-                GraphExpression::Letter('I'),
-            ),
         }
     }
 
     pub fn finish(mut self) -> GraphExpressionList {
-        fn finish_folder(id: &str, title: &str, mut entries: Vec<Box<dyn GraphEntry>>) -> Vec<Box<dyn GraphEntry>> {
-            if !entries.is_empty() {
-                entries.insert(0, Box::new(GraphFolderEntry {
+        fn finish_folder(
+            id: &str,
+            title: &str,
+            entries: impl IntoIterator<Item = Box<dyn GraphEntry>>,
+        ) -> impl Iterator<Item = Box<dyn GraphEntry>> {
+            let mut entries = entries.into_iter().peekable();
+            entries
+                .peek()
+                .is_some()
+                .then(|| Box::new(GraphFolderEntry {
                     id: id.into(),
                     title: title.into(),
                     collapsed: true,
                     secret: false,
-                }));
-            }
-            entries
+                }) as Box<dyn GraphEntry>)
+                .into_iter()
+                .chain(entries)
         }
-
-        self.intrinsic_entries.extend(self.intrinsics.finish());
 
         if !self.public_entries.is_empty() {
             self.public_entries.push(Box::new(GraphExpressionEntry {
@@ -80,11 +86,36 @@ impl<'target> GraphExpressionListBuilder<'target> {
             ticker: self.ticker,
             entries: self.public_entries
                 .into_iter()
-                .chain(finish_folder(INTRINSICS_FOLDER_ID, "desmosify: intrinsics", self.intrinsic_entries))
-                .chain(finish_folder(IMMUTABLES_FOLDER_ID, "desmosify: immutables", self.immutable_entries))
-                .chain(finish_folder(VARIABLES_FOLDER_ID, "desmosify: variables", self.variable_entries))
-                .chain(finish_folder(ACTIONS_FOLDER_ID, "desmosify: actions", self.action_entries))
-                .chain(finish_folder(DISPLAY_FOLDER_ID, "desmosify: display", self.display_entries))
+                .chain(finish_folder(
+                    IMMUTABLES_FOLDER_ID,
+                    "desmosify: immutables",
+                    self.immutable_entries,
+                ))
+                .chain(finish_folder(
+                    VARIABLES_FOLDER_ID,
+                    "desmosify: variables",
+                    self.variable_entries,
+                ))
+                .chain(finish_folder(
+                    ACTIONS_FOLDER_ID,
+                    "desmosify: actions",
+                    self.action_entries,
+                ))
+                .chain(finish_folder(
+                    DISPLAY_FOLDER_ID,
+                    "desmosify: display",
+                    self.display_entries,
+                ))
+                .chain(finish_folder(
+                    LIBRARY_FOLDER_ID,
+                    "desmosify: library",
+                    self.library.finish(),
+                ))
+                .chain(finish_folder(
+                    MISC_FOLDER_ID,
+                    "desmosify: misc",
+                    self.misc_entries,
+                ))
                 .collect(),
         }
     }
@@ -98,9 +129,9 @@ impl<'target> GraphExpressionListBuilder<'target> {
             rhs: Box::new(GraphExpression::Alphanumeric(format!("Noop{dummy_noop_id}"))),
         };
 
-        self.intrinsic_entries.push(Box::new(GraphExpressionEntry {
+        self.misc_entries.push(Box::new(GraphExpressionEntry {
             id: self.target_info.create_entry_id(),
-            folder_id: Some(INTRINSICS_FOLDER_ID.into()),
+            folder_id: Some(MISC_FOLDER_ID.into()),
             expression: GraphExpression::Binary {
                 kind: GraphBinaryKind::Equal,
                 lhs: Box::new(symbol.clone()),
@@ -120,9 +151,9 @@ impl<'target> GraphExpressionListBuilder<'target> {
         };
 
         if !self.dummy_unreachable_created {
-            self.intrinsic_entries.push(Box::new(GraphExpressionEntry {
+            self.misc_entries.push(Box::new(GraphExpressionEntry {
                 id: self.target_info.create_entry_id(),
-                folder_id: Some(INTRINSICS_FOLDER_ID.into()),
+                folder_id: Some(MISC_FOLDER_ID.into()),
                 expression: GraphExpression::Binary {
                     kind: GraphBinaryKind::Equal,
                     lhs: Box::new(symbol.clone()),
@@ -367,8 +398,8 @@ impl<'target> GraphExpressionListBuilder<'target> {
                 Ok(GraphExpression::Binary {
                     kind: GraphBinaryKind::Call,
                     lhs: Box::new(match kind {
-                        RangeKind::Inclusive => self.intrinsics.range_inclusive(self.target_info),
-                        RangeKind::Exclusive => self.intrinsics.range_exclusive(self.target_info),
+                        RangeKind::Inclusive => self.library.range_inclusive(self.target_info),
+                        RangeKind::Exclusive => self.library.range_exclusive(self.target_info),
                     }),
                     rhs: Box::new(GraphExpression::Sequence {
                         elements: Vec::from([
@@ -430,8 +461,8 @@ impl<'target> GraphExpressionListBuilder<'target> {
                     Ok(GraphExpression::Binary {
                         kind: GraphBinaryKind::Call,
                         lhs: Box::new(match kind {
-                            RangeKind::Inclusive => self.intrinsics.index_range_inclusive(self.target_info),
-                            RangeKind::Exclusive => self.intrinsics.index_range_exclusive(self.target_info),
+                            RangeKind::Inclusive => self.library.index_range_inclusive(self.target_info),
+                            RangeKind::Exclusive => self.library.index_range_exclusive(self.target_info),
                         }),
                         rhs: Box::new(GraphExpression::Sequence {
                             elements: Vec::from([
@@ -446,7 +477,7 @@ impl<'target> GraphExpressionListBuilder<'target> {
                 IndexKind::RangeFrom { from_index, step } => {
                     Ok(GraphExpression::Binary {
                         kind: GraphBinaryKind::Call,
-                        lhs: Box::new(self.intrinsics.index_range_from(self.target_info)),
+                        lhs: Box::new(self.library.index_range_from(self.target_info)),
                         rhs: Box::new(GraphExpression::Sequence {
                             elements: Vec::from([
                                 self.translate_value(list)?,
@@ -460,8 +491,8 @@ impl<'target> GraphExpressionListBuilder<'target> {
                     Ok(GraphExpression::Binary {
                         kind: GraphBinaryKind::Call,
                         lhs: Box::new(match kind {
-                            RangeKind::Inclusive => self.intrinsics.index_range_inclusive(self.target_info),
-                            RangeKind::Exclusive => self.intrinsics.index_range_exclusive(self.target_info),
+                            RangeKind::Inclusive => self.library.index_range_inclusive(self.target_info),
+                            RangeKind::Exclusive => self.library.index_range_exclusive(self.target_info),
                         }),
                         rhs: Box::new(GraphExpression::Sequence {
                             elements: Vec::from([
@@ -808,7 +839,7 @@ impl<'target> GraphExpressionListBuilder<'target> {
             UnaryKind::PrefixSum => {
                 Ok(GraphExpression::Binary {
                     kind: GraphBinaryKind::Call,
-                    lhs: Box::new(self.intrinsics.prefix_sum(self.target_info)),
+                    lhs: Box::new(self.library.prefix_sum(self.target_info)),
                     rhs: Box::new(self.translate_value(operand)?),
                 })
             }
@@ -1044,7 +1075,7 @@ impl<'target> GraphExpressionListBuilder<'target> {
             }
             BinaryKind::Rectangle => {
                 Ok(GraphExpression::call(
-                    self.intrinsics.rectangle(self.target_info),
+                    self.library.rectangle(self.target_info),
                     [
                         self.translate_value(lhs)?,
                         self.translate_value(rhs)?,
