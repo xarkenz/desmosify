@@ -34,7 +34,7 @@ enum ControlScheme {
 
 var slider(4 ..= 40) board_width: int = 18;
 var slider(4 ..= 40) board_height: int = 14;
-var slider(1 ..= current_width * current_height - 9) mine_count: int = 40;
+var slider(1 ..= tile_count - 9) mine_count: int = 40;
 // TODO: make the slider range the default here lol this is annoying
 var slider(ControlScheme.Halves ..= ControlScheme.DoubleClick) control_scheme: ControlScheme = ControlScheme.Halves;
 var view_mode: bool = false;

@@ -367,6 +367,24 @@ Shuffle the items in `list` using global randomness (and `seed` if it is provide
 Retain only the first of each unique item in `list`. Note that this also works for items that are not normally
 comparable with `==`, such as points and colors.
 
+{: #prefix_sum }
+### `@prefix_sum` — Calculate the prefix sum of a list
+
+```
+// T: real | int
+//  | (real | int, real | int)
+//  | (real | int, real | int, real | int)
+@prefix_sum(list: [T]): [T]
+
+// @prefix_sum([]) => []
+// @prefix_sum([1, 2, 3]) => [1, 1 + 2, 1 + 2 + 3] => [1, 3, 6]
+// @prefix_sum([3, 2, 1]) => [3, 3 + 2, 3 + 2 + 1] => [3, 5, 6]
+```
+
+{: .note }
+This intrinsic is implemented using the
+[Nevin Brackett-Rozinsky O(n) Prefix Sum (Wackscope Algorithm)](https://www.desmos.com/calculator/p091kr6k84).
+
 ## Statistics
 
 {: #mean }
@@ -429,6 +447,8 @@ Compute the number of values in `values`.
 
 ```
 // T: real | int
+//  | (real | int, real | int)
+//  | (real | int, real | int, real | int)
 @total(..values: T+): T+
 @total(values: [T]): T
 
