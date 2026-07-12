@@ -266,13 +266,20 @@ action unflag(index: int) {
 }
 
 action single_click(index: int) {
-    if single_click_index >= 1 then {
-        // We don't need to check for a win condition since this action can only be run if the player clicked on
-        // another hidden tile, and a solved board can't have any hidden tiles.
-        tile_states := set_item(tile_states, single_click_index, TileState.Flagged),
+    // On mobile, it's sometimes possible to click the same tile twice. If that happens, just defer to the logic for
+    // double-clicking.
+    if index == single_click_index then {
+        action double_click(),
+    }
+    else {
+        if single_click_index >= 1 then {
+            // We don't need to check for a win condition since this action can only be run if the player clicked on
+            // another hidden tile, and a solved board can't have any hidden tiles.
+            tile_states := set_item(tile_states, single_click_index, TileState.Flagged),
+        },
+        single_click_index := index,
+        double_click_time_left := double_click_max_delay,
     },
-    single_click_index := index,
-    double_click_time_left := double_click_max_delay,
 }
 
 action double_click() {

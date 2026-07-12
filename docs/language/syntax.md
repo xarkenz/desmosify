@@ -125,15 +125,17 @@ disable
 
 ## Expressions
 
-### Integer literal
+### Literals
 
-### Real number literal
-
-### Boolean literal
-
-### String literal
+A representation of a known value of some type. There are integer literals (e.g. `57`) for type `int`, real number
+literals (e.g. `5.7`, `1e10`) for type `real`, `true` and `false` for type `bool`, and string literals (e.g. `"hello"`)
+for type `str`. `infinity` is a literal representing infinity for either `real` or `int`, and `undefined` is a literal
+representing an undefined value of any type.
 
 ### Identifier
+
+A word starting with either a letter or underscore and consisting of letters, digits, or underscores (e.g. `my_name3`).
+Note that keywords cannot be used as identifiers.
 
 ### Action identifier
 
@@ -162,3 +164,5 @@ disable
 ### Conditional/Piecewise
 
 ### Scoped definition
+
+### Inline action

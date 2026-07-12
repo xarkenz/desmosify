@@ -21,7 +21,7 @@ pub struct DesmosifyArgs {
 }
 
 pub fn invoke(args: &DesmosifyArgs) -> crate::Result<()> {
-    let mut target = crate::target::new_target_by_name(&args.target_name)?;
+    let mut target = crate::target::create_target_by_name(&args.target_name)?;
 
     let mut declarations = Vec::new();
 

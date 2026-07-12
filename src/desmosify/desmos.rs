@@ -17,6 +17,8 @@ pub trait GraphEntry : ToJson + std::fmt::Debug {
     fn id(&self) -> &str;
 }
 
+pub type BoxedGraphEntry = Box<dyn GraphEntry>;
+
 // TODO: Rc<str> should be used in a lot of places instead of String
 
 #[derive(Debug)]
@@ -588,7 +590,7 @@ impl ToJson for GraphTicker {
 
 #[derive(Debug)]
 pub struct GraphExpressionList {
-    pub entries: Vec<Box<dyn GraphEntry>>,
+    pub entries: Vec<BoxedGraphEntry>,
     pub ticker: Option<GraphTicker>,
 }
 
@@ -608,9 +610,9 @@ impl ToJson for GraphExpressionList {
     }
 }
 
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub struct GraphSettings {
-    pub product_name: String,
+    pub product_name: Box<str>,
     pub show_grid: bool,
     pub show_x_axis: bool,
     pub show_y_axis: bool,
@@ -621,10 +623,26 @@ pub struct GraphSettings {
     pub degree_mode: bool,
 }
 
+impl Default for GraphSettings {
+    fn default() -> Self {
+        Self {
+            product_name: "default".into(),
+            show_grid: false,
+            show_x_axis: false,
+            show_y_axis: false,
+            viewport_x_min: -10.0,
+            viewport_y_min: -10.0,
+            viewport_x_max: 10.0,
+            viewport_y_max: 10.0,
+            degree_mode: false,
+        }
+    }
+}
+
 impl ToJson for GraphSettings {
     fn to_json(&self) -> JsonValue {
         json::object!{
-            "product": self.product_name.as_str(),
+            "product": self.product_name.as_ref(),
             "showGrid": self.show_grid,
             "showXAxis": self.show_x_axis,
             "showYAxis": self.show_y_axis,
@@ -641,9 +659,10 @@ impl ToJson for GraphSettings {
 
 #[derive(Debug)]
 pub struct GraphState {
-    pub version: i32,
+    pub version: u32,
     pub graph: GraphSettings,
     pub expressions: GraphExpressionList,
+    pub include_function_parameters_in_random_seed: bool,
 }
 
 impl ToJson for GraphState {
@@ -652,6 +671,7 @@ impl ToJson for GraphState {
             "version": self.version,
             "graph": self.graph.to_json(),
             "expressions": self.expressions.to_json(),
+            "includeFunctionParametersInRandomSeed": self.include_function_parameters_in_random_seed,
         }
     }
 }

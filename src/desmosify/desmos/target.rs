@@ -1,30 +1,40 @@
-use crate::desmos::{GraphBinaryKind, GraphExpression};
+use std::path::Path;
+use crate::desmos::{GraphExpression, GraphSettings, GraphState, ToJson};
+use crate::desmos::builder::GraphExpressionListBuilder;
 use crate::desmos::symbol::SymbolTable;
+use crate::desmos_expression;
+use crate::sema::Program;
 
-pub mod geometry;
-pub mod graphing;
-pub mod graphing3d;
+macro_rules! import_target_modules {
+    ($($mod_name:ident),* $(,)?) => {
+        $(pub mod $mod_name;)*
 
-pub use geometry::DesmosGeometryTarget;
-pub use graphing::DesmosGraphingTarget;
-pub use graphing3d::DesmosGraphing3DTarget;
+        pub fn create_target_by_name(name: &str) -> $crate::Result<Box<dyn $crate::target::Target>> {
+            match name {
+                $($mod_name::TARGET_NAME => Ok(Box::new($mod_name::create_target())),)*
+                _ => Err(Box::new($crate::Error {
+                    kind: $crate::ErrorKind::UnsupportedTarget {
+                        name: name.into(),
+                    },
+                    span: None,
+                }))
+            }
+        }
+    };
+}
 
-pub fn new_target_by_name(name: &str) -> crate::Result<Box<dyn crate::target::Target>> {
-    match name {
-        geometry::TARGET_NAME => Ok(Box::new(DesmosGeometryTarget::default())),
-        graphing::TARGET_NAME => Ok(Box::new(DesmosGraphingTarget::default())),
-        graphing3d::TARGET_NAME => Ok(Box::new(DesmosGraphing3DTarget::default())),
-        _ => Err(Box::new(crate::Error {
-            kind: crate::ErrorKind::UnsupportedTarget {
-                name: name.into(),
-            },
-            span: None,
-        }))
-    }
+import_target_modules! {
+    geometry,
+    graphing,
+    graphing3d,
 }
 
 #[derive(Debug)]
 pub struct DesmosTargetInfo {
+    pub name: &'static str,
+    pub version: u32,
+    pub graph_settings: GraphSettings,
+    pub use_dcg_geo_folder: bool,
     next_entry_id: u64,
     next_local_id: u64,
     next_inline_action_id: u64,
@@ -32,9 +42,13 @@ pub struct DesmosTargetInfo {
     action_symbols: SymbolTable,
 }
 
-impl DesmosTargetInfo {
-    pub fn new() -> Self {
+impl Default for DesmosTargetInfo {
+    fn default() -> Self {
         Self {
+            name: "default",
+            version: 0,
+            graph_settings: Default::default(),
+            use_dcg_geo_folder: false,
             next_entry_id: 0,
             next_local_id: 0,
             next_inline_action_id: 0,
@@ -42,7 +56,9 @@ impl DesmosTargetInfo {
             action_symbols: SymbolTable::new(GraphExpression::Letter('A')),
         }
     }
+}
 
+impl DesmosTargetInfo {
     pub fn create_entry_id(&mut self) -> String {
         let id = self.next_entry_id;
         self.next_entry_id += 1;
@@ -64,11 +80,7 @@ impl DesmosTargetInfo {
     }
 
     pub fn get_local_symbol(&mut self, id: u64) -> GraphExpression {
-        GraphExpression::Binary {
-            kind: GraphBinaryKind::Subscript,
-            lhs: Box::new(GraphExpression::Letter('l')),
-            rhs: Box::new(GraphExpression::Alphanumeric(id.to_string())),
-        }
+        desmos_expression!((@letter 'l') Subscript (@alnum id.to_string()))
     }
 
     pub fn create_local_symbol(&mut self) -> GraphExpression {
@@ -79,10 +91,35 @@ impl DesmosTargetInfo {
     pub fn create_inline_action_symbol(&mut self) -> GraphExpression {
         let id = self.next_inline_action_id;
         self.next_inline_action_id += 1;
-        GraphExpression::Binary {
-            kind: GraphBinaryKind::Subscript,
-            lhs: Box::new(self.action_symbols.symbol_prefix().clone()),
-            rhs: Box::new(GraphExpression::Alphanumeric(id.to_string())),
-        }
+        desmos_expression!((@letter 'a') Subscript (@alnum id.to_string()))
+    }
+}
+
+impl crate::target::Target for DesmosTargetInfo {
+    fn name(&self) -> &str {
+        self.name
+    }
+
+    fn create_local_id(&mut self) -> u64 {
+        self.create_local_id()
+    }
+
+    fn get_global_symbol_name(&mut self, identifier: &str) -> String {
+        self.get_global_symbol(identifier).to_latex().to_string()
+    }
+
+    fn get_action_symbol_name(&mut self, identifier: &str) -> String {
+        self.get_action_symbol(identifier).to_latex().to_string()
+    }
+
+    fn compile_to(&mut self, program: &Program, output_path: &Path) -> crate::Result<()> {
+        let state = GraphState {
+            version: self.version,
+            graph: self.graph_settings.clone(),
+            expressions: GraphExpressionListBuilder::build_program(program, self)?,
+            include_function_parameters_in_random_seed: true,
+        };
+
+        crate::target::write_output_file(output_path, state.to_json())
     }
 }

@@ -1,4 +1,4 @@
-use crate::desmos::{GraphBinaryKind, GraphEntry, GraphExpression, GraphExpressionEntry};
+use crate::desmos::{BoxedGraphEntry, GraphBinaryKind, GraphExpression, GraphExpressionEntry};
 use crate::desmos::target::DesmosTargetInfo;
 use crate::desmos_expression;
 
@@ -7,7 +7,7 @@ macro_rules! library_builder_definition {
         pub struct LibraryBuilder {
             folder_id: Option<String>,
             prefix: GraphExpression,
-            $($intrinsic: Box<[Box<dyn GraphEntry>]>,)*
+            $($intrinsic: Box<[BoxedGraphEntry]>,)*
         }
 
         impl LibraryBuilder {
@@ -19,7 +19,7 @@ macro_rules! library_builder_definition {
                 }
             }
 
-            pub fn finish(self) -> impl Iterator<Item = Box<dyn GraphEntry>> {
+            pub fn finish(self) -> impl Iterator<Item = BoxedGraphEntry> {
                 [].into_iter()
                     $(.chain(self.$intrinsic))*
             }
@@ -46,7 +46,7 @@ impl LibraryBuilder {
         }
     }
 
-    pub fn create_expression_entry(&mut self, info: &mut DesmosTargetInfo, expression: GraphExpression) -> Box<dyn GraphEntry> {
+    pub fn create_expression_entry(&mut self, info: &mut DesmosTargetInfo, expression: GraphExpression) -> BoxedGraphEntry {
         Box::new(GraphExpressionEntry {
             id: info.create_entry_id(),
             folder_id: self.folder_id.clone(),

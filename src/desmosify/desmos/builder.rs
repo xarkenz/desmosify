@@ -1,5 +1,5 @@
 use crate::ast::RangeKind;
-use crate::desmos::{GraphBinaryKind, GraphEntry, GraphExpression, GraphExpressionEntry, GraphExpressionList, GraphFolderEntry, GraphImageEntry, GraphInequalityKind, GraphSlider, GraphSliderLoopMode, GraphTextEntry, GraphTicker, GraphUnaryKind};
+use crate::desmos::{BoxedGraphEntry, GraphBinaryKind, GraphExpression, GraphExpressionEntry, GraphExpressionList, GraphFolderEntry, GraphImageEntry, GraphInequalityKind, GraphSlider, GraphSliderLoopMode, GraphTextEntry, GraphTicker, GraphUnaryKind};
 use crate::desmos::builder::library::LibraryBuilder;
 use crate::desmos::target::DesmosTargetInfo;
 use crate::sema::{Program, ProgramAction, ProgramImmutable, ProgramPublicEntry, ProgramPublicLine, ProgramTicker, ProgramVariable, ProgramVariableKind};
@@ -8,6 +8,7 @@ use crate::sema::values::{ActionValue, ActionValueKind, BinaryKind, ColorKind, D
 
 mod library;
 
+pub const CONSTRUCTIONS_FOLDER_ID: &str = "**dcg_geo_folder**";
 pub const IMMUTABLES_FOLDER_ID: &str = "desmosify_immutables";
 pub const VARIABLES_FOLDER_ID: &str = "desmosify_variables";
 pub const ACTIONS_FOLDER_ID: &str = "desmosify_actions";
@@ -18,13 +19,14 @@ pub const MISC_FOLDER_ID: &str = "desmosify_misc";
 pub struct GraphExpressionListBuilder<'target> {
     target_info: &'target mut DesmosTargetInfo,
     ticker: Option<GraphTicker>,
-    public_entries: Vec<Box<dyn GraphEntry>>,
-    immutable_entries: Vec<Box<dyn GraphEntry>>,
-    variable_entries: Vec<Box<dyn GraphEntry>>,
-    action_entries: Vec<Box<dyn GraphEntry>>,
-    display_entries: Vec<Box<dyn GraphEntry>>,
+    construction_entries: Vec<BoxedGraphEntry>,
+    public_entries: Vec<BoxedGraphEntry>,
+    immutable_entries: Vec<BoxedGraphEntry>,
+    variable_entries: Vec<BoxedGraphEntry>,
+    action_entries: Vec<BoxedGraphEntry>,
+    display_entries: Vec<BoxedGraphEntry>,
     library: LibraryBuilder,
-    misc_entries: Vec<Box<dyn GraphEntry>>,
+    misc_entries: Vec<BoxedGraphEntry>,
     next_dummy_noop_id: u64,
     dummy_unreachable_created: bool,
 }
@@ -37,9 +39,20 @@ impl<'target> GraphExpressionListBuilder<'target> {
     }
 
     pub fn new(target_info: &'target mut DesmosTargetInfo) -> Self {
+        let mut construction_entries = Vec::<BoxedGraphEntry>::new();
+        if target_info.use_dcg_geo_folder {
+            construction_entries.push(Box::new(GraphFolderEntry {
+                id: CONSTRUCTIONS_FOLDER_ID.into(),
+                title: "geometry".into(),
+                collapsed: true,
+                secret: true,
+            }));
+        }
+
         Self {
             target_info,
             ticker: None,
+            construction_entries,
             public_entries: Vec::new(),
             immutable_entries: Vec::new(),
             variable_entries: Vec::new(),
@@ -59,8 +72,8 @@ impl<'target> GraphExpressionListBuilder<'target> {
         fn finish_folder(
             id: &str,
             title: &str,
-            entries: impl IntoIterator<Item = Box<dyn GraphEntry>>,
-        ) -> impl Iterator<Item = Box<dyn GraphEntry>> {
+            entries: impl IntoIterator<Item = BoxedGraphEntry>,
+        ) -> impl Iterator<Item = BoxedGraphEntry> {
             let mut entries = entries.into_iter().peekable();
             entries
                 .peek()
@@ -70,7 +83,7 @@ impl<'target> GraphExpressionListBuilder<'target> {
                     title: title.into(),
                     collapsed: true,
                     secret: false,
-                }) as Box<dyn GraphEntry>)
+                }) as BoxedGraphEntry)
                 .into_iter()
                 .chain(entries)
         }
@@ -84,8 +97,9 @@ impl<'target> GraphExpressionListBuilder<'target> {
 
         GraphExpressionList {
             ticker: self.ticker,
-            entries: self.public_entries
+            entries: self.construction_entries
                 .into_iter()
+                .chain(self.public_entries)
                 .chain(finish_folder(
                     IMMUTABLES_FOLDER_ID,
                     "desmosify: immutables",
@@ -1405,7 +1419,7 @@ impl<'target> GraphExpressionListBuilder<'target> {
         }
     }
 
-    pub fn translate_program_immutable(&mut self, immutable: &ProgramImmutable, folder_id: Option<String>) -> crate::Result<Box<dyn GraphEntry>> {
+    pub fn translate_program_immutable(&mut self, immutable: &ProgramImmutable, folder_id: Option<String>) -> crate::Result<BoxedGraphEntry> {
         let value = self.translate_value(&immutable.value)?;
 
         Ok(Box::new(GraphExpressionEntry {
@@ -1438,7 +1452,7 @@ impl<'target> GraphExpressionListBuilder<'target> {
         Ok(())
     }
 
-    pub fn translate_program_variable(&mut self, variable: &ProgramVariable, folder_id: Option<String>) -> crate::Result<Box<dyn GraphEntry>> {
+    pub fn translate_program_variable(&mut self, variable: &ProgramVariable, folder_id: Option<String>) -> crate::Result<BoxedGraphEntry> {
         let value = self.translate_value(&variable.value)?;
 
         let mut slider = match &variable.kind {
@@ -1494,7 +1508,7 @@ impl<'target> GraphExpressionListBuilder<'target> {
         Ok(())
     }
 
-    pub fn translate_program_action(&mut self, program_action: &ProgramAction, folder_id: Option<String>) -> crate::Result<Box<dyn GraphEntry>> {
+    pub fn translate_program_action(&mut self, program_action: &ProgramAction, folder_id: Option<String>) -> crate::Result<BoxedGraphEntry> {
         let action = self.translate_action_value(&program_action.action)?;
 
         Ok(Box::new(GraphExpressionEntry {
@@ -1550,7 +1564,7 @@ impl<'target> GraphExpressionListBuilder<'target> {
 
     pub fn add_public_line(&mut self, public_line: &ProgramPublicLine, folder_id: Option<String>) -> crate::Result<()> {
         let id = self.target_info.create_entry_id();
-        let entry: Box<dyn GraphEntry> = match public_line {
+        let entry: BoxedGraphEntry = match public_line {
             ProgramPublicLine::Expression(value) => match &value.kind {
                 ValueKind::Str(text) => {
                     let text = text.trim();

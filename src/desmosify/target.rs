@@ -2,7 +2,7 @@ use std::path::Path;
 use crate::sema::Program;
 
 pub trait Target : std::fmt::Debug {
-    fn name(&self) -> &'static str;
+    fn name(&self) -> &str;
 
     fn create_local_id(&mut self) -> u64;
 
@@ -13,9 +13,9 @@ pub trait Target : std::fmt::Debug {
     fn compile_to(&mut self, program: &Program, output_path: &Path) -> crate::Result<()>;
 }
 
-pub fn new_target_by_name(name: &str) -> crate::Result<Box<dyn Target>> {
+pub fn create_target_by_name(name: &str) -> crate::Result<Box<dyn Target>> {
     if name.starts_with("desmos") {
-        crate::desmos::target::new_target_by_name(name)
+        crate::desmos::target::create_target_by_name(name)
     }
     else {
         Err(Box::new(crate::Error {

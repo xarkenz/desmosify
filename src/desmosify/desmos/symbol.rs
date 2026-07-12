@@ -1,9 +1,10 @@
 use std::collections::HashMap;
-use crate::desmos::{GraphBinaryKind, GraphExpression};
+use crate::desmos::GraphExpression;
+use crate::desmos_expression;
 
-pub struct AsciiWords<'a>(&'a str);
+pub struct AsciiAlphanumericWords<'a>(&'a str);
 
-impl<'a> Iterator for AsciiWords<'a> {
+impl<'a> Iterator for AsciiAlphanumericWords<'a> {
     type Item = &'a str;
 
     fn next(&mut self) -> Option<Self::Item> {
@@ -36,7 +37,7 @@ impl<'a> Iterator for AsciiWords<'a> {
 pub fn to_subscript(identifier: &str) -> String {
     let mut subscript = String::new();
 
-    for word in AsciiWords(identifier) {
+    for word in AsciiAlphanumericWords(identifier) {
         let mut char_indices = word.char_indices();
         let (_, first_char) = char_indices.next().unwrap();
 
@@ -95,10 +96,8 @@ impl SymbolTable {
     }
 
     pub fn get_symbol(&mut self, identifier: &str) -> GraphExpression {
-        GraphExpression::Binary {
-            kind: GraphBinaryKind::Subscript,
-            lhs: Box::new(self.symbol_prefix().clone()),
-            rhs: Box::new(GraphExpression::Alphanumeric(self.get_symbol_subscript(identifier))),
-        }
+        desmos_expression!(
+            {&self.symbol_prefix} Subscript (@alnum self.get_symbol_subscript(identifier))
+        )
     }
 }
