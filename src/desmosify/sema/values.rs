@@ -104,9 +104,9 @@ pub enum BinaryKind {
     NotEqual,
     LogicalAnd,
     LogicalOr,
+    Arctan2,
     Log,
-    Lcm,
-    Gcd,
+    RoundDigits,
     NthRoot,
     MidpointOfPoints,
     Segment,
@@ -130,6 +130,8 @@ pub enum InequalityKind {
 
 #[derive(Copy, Clone, PartialEq, Debug)]
 pub enum ReducerKind {
+    Lcm,
+    Gcd,
     Mean,
     Median,
     Min,
@@ -142,8 +144,6 @@ pub enum ReducerKind {
     Count,
     Total,
     Polygon,
-    Lcm,
-    Gcd,
 }
 
 #[derive(Copy, Clone, PartialEq, Debug)]

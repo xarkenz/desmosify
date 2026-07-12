@@ -38,7 +38,7 @@ intrinsics can be used. There are a few notations which may be unfamiliar:
 ## Trigonometry
 
 {: #pi }
-### `@pi` — Mathematical constant *π*
+### `@pi` — Mathematical constant π
 
 ```
 @pi: real
@@ -47,7 +47,7 @@ intrinsics can be used. There are a few notations which may be unfamiliar:
 ```
 
 {: #tau }
-### `@tau` — Mathematical constant *τ*
+### `@tau` — Mathematical constant τ
 
 ```
 @tau: real
@@ -123,6 +123,20 @@ intrinsics can be used. There are a few notations which may be unfamiliar:
 ```
 @arctan(x: real+): real+
 ```
+
+{: #arctan2 }
+### `@arctan2` — Inverse tangent with two arguments
+
+```
+@arctan2(y: real+, x: real+): real+
+
+// @arctan2(0, 1) => 0.0
+// @arctan2(0, -1) => @pi
+// @arctan2(-5, 0) => -@pi/2
+// @arctan2(0, 0) => 0.0
+```
+
+Compute the angle from the origin to `(x, y)` in the range (-π, π].
 
 {: #arccsc }
 ### `@arccsc` — Inverse cosecant
@@ -225,20 +239,26 @@ intrinsics can be used. There are a few notations which may be unfamiliar:
 ### `@lcm` — Least common multiple
 
 ```
-@lcm(a: int+, b: int+): int+
+@lcm(..values: int+): int+
+@lcm(values: [int]): int
 
 // @lcm(4, 7) => 28
 // @lcm(4, 6) => 12
+// @lcm([1 ..= 5]) => 60
+// @lcm([]) => undefined
 ```
 
 {: #gcd }
 ### `@gcd` — Greatest common denominator
 
 ```
-@gcd(a: int+, b: int+): int+
+@gcd(..values: int+): int+
+@gcd(values: [int]): int
 
 // @gcd(4, 7) => 1
 // @gcd(4, 6) => 2
+// @gcd([6, 9, 24]) => 3
+// @gcd([]) => undefined
 ```
 
 {: #ceil }
@@ -246,6 +266,10 @@ intrinsics can be used. There are a few notations which may be unfamiliar:
 
 ```
 @ceil(x: real+): int+
+
+// @ceil(1.0) => 1
+// @ceil([1.1, 1.5, 1.7]) => [2, 2, 2]
+// @ceil(-1.5) => -1
 ```
 
 {: #floor }
@@ -253,13 +277,32 @@ intrinsics can be used. There are a few notations which may be unfamiliar:
 
 ```
 @floor(x: real+): int+
+
+// @floor(1.0) => 1
+// @floor([1.1, 1.5, 1.7]) => [1, 1, 1]
+// @floor(-1.5) => -2
 ```
 
 {: #round }
-### `@round` — Round to nearest
+### `@round` — Round to nearest integer
 
 ```
 @round(x: real+): int+
+
+// @round(1.0) => 1
+// @round([1.1, 1.5, 1.7]) => [1, 2, 2]
+// @round(-1.5) => -1
+```
+
+{: #round_digits }
+### `@round_digits` — Round to nearest decimal place
+
+```
+@round_digits(x: real+, decimal_digits: int+): real+
+
+// @round_digits(@pi, 2) => 3.14
+// @round_digits(@pi, 0) => 3.0
+// @round_digits(5678.9, -2) => 5700.0
 ```
 
 {: #abs }
@@ -280,6 +323,10 @@ intrinsics can be used. There are a few notations which may be unfamiliar:
 
 ```
 @sign(x: real+): int+
+
+// @sign(12.3) => 1
+// @sign(-12.3) => -1
+// @sign(0.0) => 0
 ```
 
 {: #sqrt }
@@ -397,6 +444,7 @@ This intrinsic is implemented using the
 
 // @mean(3, 1, 5, 2) => 2.75
 // @mean([3, 1, 5, 2]) => 2.75
+// @mean([]) => undefined
 ```
 
 Compute the arithmetic mean/average value in `values`.
@@ -411,6 +459,7 @@ Compute the arithmetic mean/average value in `values`.
 
 // @min(3, 1, 4, 2) => 1
 // @min([3, 1, 4, 2]) => 1
+// @min([]) => undefined
 ```
 
 Compute the minimum value in `values`. `bool` values are interpreted as 0 or 1.
@@ -425,6 +474,7 @@ Compute the minimum value in `values`. `bool` values are interpreted as 0 or 1.
 
 // @max(3, 1, 4, 2) => 4
 // @max([3, 1, 4, 2]) => 4
+// @max([]) => undefined
 ```
 
 Compute the maximum value in `values`. `bool` values are interpreted as 0 or 1.
@@ -438,6 +488,7 @@ Compute the maximum value in `values`. `bool` values are interpreted as 0 or 1.
 
 // @count(1, 2, 3) => 3
 // @count([1 ..= 10]) => 10
+// @count([]) => 0
 ```
 
 Compute the number of values in `values`.
@@ -454,6 +505,7 @@ Compute the number of values in `values`.
 
 // @total(1, 2, 3) => 6
 // @total([1 ..= 5]) => 15
+// @total([]) => 0
 ```
 
 Compute the sum of all values in `values`. `bool` values are interpreted as 0 or 1.
@@ -504,8 +556,8 @@ Return `false` if at least one input value is `false` or `true` otherwise. This 
 @random(sample_count: int): [real]
 @random(sample_count: int, seed: real): [real]
 
-// @random() => e.g. 0.7238...
-// @random(2) => e.g. [0.6329..., 0.0174...]
+// @random() => e.g. 0.7238…
+// @random(2) => e.g. [0.6329…, 0.0174…]
 ```
 
 {: #choose_random }
@@ -648,7 +700,7 @@ Construct a 3D sphere centered at `center` with radius `radius`.
 {: .compatibility-note }
 This intrinsic is *not* available on `--target desmos-graphing3d`.
 
-Construct a closed 2D polygon using `points`.
+Construct a closed 2D polygon using `points`. If zero or one points are provided, the polygon is not displayed.
 
 {: #rect }
 ### `@rect` — Construct a 2D rectangle

@@ -120,6 +120,7 @@ pub const CORE_INTRINSIC_FUNCTIONS: &[&IntrinsicFunction] = &[
     &ARCSIN,
     &ARCCOS,
     &ARCTAN,
+    &ARCTAN2,
     &ARCCSC,
     &ARCSEC,
     &ARCCOT,
@@ -143,6 +144,7 @@ pub const CORE_INTRINSIC_FUNCTIONS: &[&IntrinsicFunction] = &[
     &CEIL,
     &FLOOR,
     &ROUND,
+    &ROUND_DIGITS,
     &ABS,
     &SIGN,
     &SQRT,
@@ -506,6 +508,10 @@ pub static ARCTAN: IntrinsicFunction = unary_intrinsic!(
     "arctan", (Type::Real) => Arctan, Type::Real
 );
 
+pub static ARCTAN2: IntrinsicFunction = binary_intrinsic!(
+    "arctan2", (Type::Real, Type::Real) => Arctan2, Type::Real
+);
+
 pub static ARCCSC: IntrinsicFunction = unary_intrinsic!(
     "arccsc", (Type::Real) => Arccsc, Type::Real
 );
@@ -566,13 +572,64 @@ pub static LOG: IntrinsicFunction = binary_intrinsic!(
 
 // ------ Number Theory ------
 
-pub static LCM: IntrinsicFunction = binary_intrinsic!(
-    "lcm", (Type::Int, Type::Int) => Lcm, Type::Int
-);
+fn interpret_lcm_gcd_call(
+    kind: ReducerKind,
+    arguments: Box<[Value]>,
+) -> crate::Result<ValueKind> {
+    if let [argument] = arguments.as_ref() {
+        if argument.get_type().list_state().is_some() {
+            // This should also work for any MaybeList
+            Ok(ValueKind::Reducer {
+                kind,
+                list: Box::new(arguments.into_iter().next().unwrap()
+                    .coerce_to(&Type::Int, true)?),
+                result_type: Type::Int,
+            })
+        }
+        else {
+            Ok(ValueKind::ArgumentsReducer {
+                kind,
+                arguments,
+                result_type: Type::Int,
+            })
+        }
+    }
+    else {
+        let list_state = arguments
+            .iter()
+            .fold(None, |current_state, argument| ListState::merge(
+                current_state,
+                argument.get_type().list_state(),
+            ));
 
-pub static GCD: IntrinsicFunction = binary_intrinsic!(
-    "gcd", (Type::Int, Type::Int) => Gcd, Type::Int
-);
+        Ok(ValueKind::ArgumentsReducer {
+            kind,
+            arguments: arguments
+                .into_iter()
+                .map(|argument| argument.coerce_to(&Type::Int, true))
+                .collect::<crate::Result<_>>()?,
+            result_type: Type::Int.unflatten_list(list_state),
+        })
+    }
+}
+
+pub static LCM: IntrinsicFunction = IntrinsicFunction {
+    identifier: "lcm",
+    min_arity: 1,
+    max_arity: None,
+    interpret_call: |_, _, _, arguments| {
+        interpret_lcm_gcd_call(ReducerKind::Lcm, arguments)
+    },
+};
+
+pub static GCD: IntrinsicFunction = IntrinsicFunction {
+    identifier: "lcm",
+    min_arity: 1,
+    max_arity: None,
+    interpret_call: |_, _, _, arguments| {
+        interpret_lcm_gcd_call(ReducerKind::Gcd, arguments)
+    },
+};
 
 pub static CEIL: IntrinsicFunction = unary_intrinsic!(
     "ceil", (Type::Real) => Ceil, Type::Int
@@ -582,9 +639,12 @@ pub static FLOOR: IntrinsicFunction = unary_intrinsic!(
     "floor", (Type::Real) => Floor, Type::Int
 );
 
-// FIXME: there is a version of this function with 2 arguments which is not handled
 pub static ROUND: IntrinsicFunction = unary_intrinsic!(
     "round", (Type::Real) => Round, Type::Int
+);
+
+pub static ROUND_DIGITS: IntrinsicFunction = binary_intrinsic!(
+    "round_digits", (Type::Real, Type::Int) => RoundDigits, Type::Real
 );
 
 pub static ABS: IntrinsicFunction = IntrinsicFunction {

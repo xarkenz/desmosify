@@ -1007,6 +1007,13 @@ impl<'target> GraphExpressionListBuilder<'target> {
                     }),
                 })
             }
+            BinaryKind::Arctan2 => {
+                Ok(binary_function(
+                    "arctan",
+                    self.translate_value(lhs)?,
+                    self.translate_value(rhs)?,
+                ))
+            }
             BinaryKind::Log => {
                 Ok(GraphExpression::Binary {
                     kind: GraphBinaryKind::Call,
@@ -1018,16 +1025,9 @@ impl<'target> GraphExpressionListBuilder<'target> {
                     rhs: Box::new(self.translate_value(rhs)?),
                 })
             }
-            BinaryKind::Lcm => {
+            BinaryKind::RoundDigits => {
                 Ok(binary_function(
-                    "lcm",
-                    self.translate_value(lhs)?,
-                    self.translate_value(rhs)?,
-                ))
-            }
-            BinaryKind::Gcd => {
-                Ok(binary_function(
-                    "gcd",
+                    "round",
                     self.translate_value(lhs)?,
                     self.translate_value(rhs)?,
                 ))
@@ -1109,6 +1109,8 @@ impl<'target> GraphExpressionListBuilder<'target> {
 
         fn get_name(kind: ReducerKind) -> &'static str {
             match kind {
+                ReducerKind::Lcm => "lcm",
+                ReducerKind::Gcd => "gcd",
                 ReducerKind::Mean => "mean",
                 ReducerKind::Median => "median",
                 ReducerKind::Min => "min",
@@ -1121,8 +1123,6 @@ impl<'target> GraphExpressionListBuilder<'target> {
                 ReducerKind::Count => "count",
                 ReducerKind::Total => "total",
                 ReducerKind::Polygon => "polygon",
-                ReducerKind::Lcm => "lcm",
-                ReducerKind::Gcd => "gcd",
             }
         }
 
