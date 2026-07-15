@@ -100,22 +100,71 @@ pub enum Type {
         state: ListState,
         item_type: Box<Self>,
     },
+    Union {
+        variants: Box<[Self]>,
+    },
 }
 
 impl Type {
-    pub fn real_point2() -> Self {
+    pub fn point2(x_type: Self, y_type: Self) -> Self {
         Self::Point2 {
-            x_type: Box::new(Self::Real),
-            y_type: Box::new(Self::Real),
+            x_type: Box::new(x_type),
+            y_type: Box::new(y_type),
+        }
+    }
+
+    pub fn real_point2() -> Self {
+        Self::point2(Self::Real, Self::Real)
+    }
+
+    pub fn point3(x_type: Self, y_type: Self, z_type: Self) -> Self {
+        Self::Point3 {
+            x_type: Box::new(x_type),
+            y_type: Box::new(y_type),
+            z_type: Box::new(z_type),
         }
     }
 
     pub fn real_point3() -> Self {
-        Self::Point3 {
-            x_type: Box::new(Self::Real),
-            y_type: Box::new(Self::Real),
-            z_type: Box::new(Self::Real),
+        Self::point3(Self::Real, Self::Real, Self::Real)
+    }
+
+    pub fn union(variants: impl IntoIterator<Item = Self>) -> Self {
+        Self::Union {
+            variants: variants.into_iter().collect(),
         }
+    }
+
+    pub fn real_or_real_point() -> Self {
+        Self::union([
+            Self::Real,
+            Self::real_point2(),
+            Self::real_point3(),
+        ])
+    }
+
+    pub fn transformable() -> Self {
+        Self::union([
+            Self::Polygon,
+            Self::Segment,
+            Self::Circle,
+            Self::Arc,
+            Self::Line,
+            Self::Ray,
+            Self::Vector,
+            Self::Angle,
+            Self::DirectedAngle,
+            Self::real_point2(),
+        ])
+    }
+
+    pub fn line_like() -> Self {
+        Self::union([
+            Self::Segment,
+            Self::Line,
+            Self::Ray,
+            Self::Vector,
+        ])
     }
 
     pub fn find_primitive(identifier: &str) -> Option<Self> {
@@ -195,24 +244,43 @@ impl Type {
         }
     }
 
-    pub fn can_coerce_to(&self, target: &Self) -> bool {
-        use self::Type::*;
-        self == target || match (self, target) {
-            (_, Any) => self.is_first_class(),
-            (Any, _) => target.is_first_class(),
-            (Int, Real) => true,
-            (Bool, Int | Real) => true,
-            (
-                Point2 { x_type: self_x, y_type: self_y },
-                Point2 { x_type: target_x, y_type: target_y },
-            ) => self_x.can_coerce_to(target_x) && self_y.can_coerce_to(target_y),
-            (
-                Point3 { x_type: self_x, y_type: self_y, z_type: self_z },
-                Point3 { x_type: target_x, y_type: target_y, z_type: target_z },
-            ) => self_x.can_coerce_to(target_x) && self_y.can_coerce_to(target_y) && self_z.can_coerce_to(target_z),
-            (Enum { .. }, Int | Real) => true,
-            _ => false
+    pub fn coerce_to(self, target: &Self) -> Option<Self> {
+        if &self == target {
+            return Some(self)
         }
+        else if let Self::Union { variants } = target {
+            return variants
+                .iter()
+                .find_map(|variant| self.clone().coerce_to(variant))
+        }
+
+        match (self, target) {
+            (self_, Self::Any) => self_.is_first_class().then_some(self_),
+            (Self::Any, _) => target.is_first_class().then_some(target.clone()),
+            (Self::Int, Self::Real) => Some(Self::Real),
+            (Self::Bool, Self::Int | Self::Real) => Some(target.clone()),
+            (
+                Self::Point2 { x_type: self_x, y_type: self_y },
+                Self::Point2 { x_type: target_x, y_type: target_y },
+            ) => Some(Self::Point2 {
+                x_type: Box::new(self_x.coerce_to(target_x)?),
+                y_type: Box::new(self_y.coerce_to(target_y)?),
+            }),
+            (
+                Self::Point3 { x_type: self_x, y_type: self_y, z_type: self_z },
+                Self::Point3 { x_type: target_x, y_type: target_y, z_type: target_z },
+            ) => Some(Self::Point3 {
+                x_type: Box::new(self_x.coerce_to(target_x)?),
+                y_type: Box::new(self_y.coerce_to(target_y)?),
+                z_type: Box::new(self_z.coerce_to(target_z)?),
+            }),
+            (Self::Enum { .. }, Self::Int | Self::Real) => Some(target.clone()),
+            _ => None
+        }
+    }
+
+    pub fn can_coerce_to(&self, target: &Self) -> bool {
+        self.clone().coerce_to(target).is_some()
     }
 
     pub fn is_first_class(&self) -> bool {
@@ -248,6 +316,7 @@ impl Type {
             Self::IntrinsicFunction(..) => false,
             Self::Action { .. } => false,
             Self::List { .. } => true,
+            Self::Union { variants } => variants.iter().all(Self::is_first_class),
         }
     }
 
@@ -330,67 +399,13 @@ impl Type {
         }
     }
 
-    pub fn is_transformable(&self) -> bool {
-        match self {
-            Self::Any => true,
-            Self::Polygon => true,
-            Self::Segment => true,
-            Self::Circle => true,
-            Self::Arc => true,
-            Self::Line => true,
-            Self::Ray => true,
-            Self::Vector => true,
-            Self::Angle => true,
-            Self::DirectedAngle => true,
-            Self::Point2 { .. } => true,
-            _ => false
-        }
-    }
-
-    pub fn require_transformable(&self) -> crate::Result<()> {
-        if self.is_transformable() {
-            Ok(())
-        }
-        else {
-            Err(Box::new(crate::Error {
-                kind: crate::ErrorKind::ExpectedTransformableType {
-                    got_type: self.to_string(),
-                },
-                span: None,
-            }))
-        }
-    }
-
-    pub fn is_line_like(&self) -> bool {
-        match self {
-            Self::Any => true,
-            Self::Segment => true,
-            Self::Line => true,
-            Self::Ray => true,
-            Self::Vector => true,
-            _ => false
-        }
-    }
-
-    pub fn require_line_like(&self) -> crate::Result<()> {
-        if self.is_line_like() {
-            Ok(())
-        }
-        else {
-            Err(Box::new(crate::Error {
-                kind: crate::ErrorKind::ExpectedLineLikeType {
-                    got_type: self.to_string(),
-                },
-                span: None,
-            }))
-        }
-    }
-
     pub fn require_action(&self, min_arity: usize, argument_types: &[Self]) -> crate::Result<&[Self]> {
         if let Self::Action { parameter_types } = self {
             if (min_arity ..= argument_types.len()).contains(&parameter_types.len())
                 && std::iter::zip(argument_types, parameter_types)
-                .all(|(argument_type, parameter_type)| argument_type.can_coerce_to(parameter_type))
+                .all(|(argument_type, parameter_type)| {
+                    argument_type.can_coerce_to(parameter_type)
+                })
             {
                 return Ok(parameter_types)
             }
@@ -558,6 +573,16 @@ impl std::fmt::Display for Type {
             Self::List { state, item_type } => match state {
                 ListState::IsList => write!(f, "[{item_type}]"),
                 ListState::MaybeList => write!(f, "{item_type}+"),
+            }
+            Self::Union { variants } => match variants.as_ref() {
+                [] => write!(f, "empty_union"),
+                [first, rest @ ..] => {
+                    write!(f, "({first}")?;
+                    for variant in rest {
+                        write!(f, " | {variant}")?;
+                    }
+                    write!(f, ")")
+                }
             }
         }
     }

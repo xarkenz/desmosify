@@ -268,23 +268,37 @@ pub const CORE_INTRINSIC_FUNCTIONS: &[&IntrinsicFunction] = &[
 
 pub fn interpret_unary_call(
     kind: UnaryKind,
-    argument_type: &Type,
-    result_type: Type,
+    argument_type: Type,
+    result_type: Option<Type>,
     arguments: Box<[Value]>,
 ) -> crate::Result<ValueKind> {
     let argument = arguments.into_iter().next().unwrap()
-        .coerce_to(argument_type, true)?;
-
-    let list_state = argument.get_type().list_state();
+        .coerce_to(&argument_type, true)?;
 
     Ok(ValueKind::Unary {
         kind,
+        result_type: match result_type {
+            Some(result_type) => result_type.unflatten_list(argument.get_type().list_state()),
+            None => argument.get_type(),
+        },
         operand: Box::new(argument),
-        result_type: result_type.unflatten_list(list_state),
     })
 }
 
 macro_rules! unary_intrinsic {
+    ($identifier:literal, ($argument_type:expr) => $kind:ident) => {
+        IntrinsicFunction {
+            identifier: $identifier,
+            min_arity: 1,
+            max_arity: Some(1),
+            interpret_call: |_, _, _, arguments| interpret_unary_call(
+                UnaryKind::$kind,
+                $argument_type,
+                None,
+                arguments,
+            ),
+        }
+    };
     ($identifier:literal, ($argument_type:expr) => $kind:ident, $result_type:expr) => {
         IntrinsicFunction {
             identifier: $identifier,
@@ -292,8 +306,8 @@ macro_rules! unary_intrinsic {
             max_arity: Some(1),
             interpret_call: |_, _, _, arguments| interpret_unary_call(
                 UnaryKind::$kind,
-                &($argument_type),
-                $result_type,
+                $argument_type,
+                Some($result_type),
                 arguments,
             ),
         }
@@ -302,17 +316,17 @@ macro_rules! unary_intrinsic {
 
 pub fn interpret_binary_call(
     kind: BinaryKind,
-    lhs_type: &Type,
-    rhs_type: &Type,
+    lhs_type: Type,
+    rhs_type: Type,
     result_type: Type,
     arguments: Box<[Value]>,
 ) -> crate::Result<ValueKind> {
     let mut arguments = arguments.into_iter();
 
     let lhs = arguments.next().unwrap()
-        .coerce_to(lhs_type, true)?;
+        .coerce_to(&lhs_type, true)?;
     let rhs = arguments.next().unwrap()
-        .coerce_to(rhs_type, true)?;
+        .coerce_to(&rhs_type, true)?;
 
     let list_state = ListState::merge(
         lhs.get_type().list_state(),
@@ -335,8 +349,8 @@ macro_rules! binary_intrinsic {
             max_arity: Some(2),
             interpret_call: |_, _, _, arguments| interpret_binary_call(
                 BinaryKind::$kind,
-                &($lhs_type),
-                &($rhs_type),
+                $lhs_type,
+                $rhs_type,
                 $result_type,
                 arguments,
             ),
@@ -346,60 +360,115 @@ macro_rules! binary_intrinsic {
 
 pub fn interpret_reducer_call(
     kind: ReducerKind,
-    argument_check: Option<fn(&Type) -> crate::Result<()>>,
-    result_override: Option<Type>,
+    element_type: Option<Type>,
+    result_type: Option<Type>,
     arguments: Box<[Value]>,
 ) -> crate::Result<ValueKind> {
-    if let Some(argument_check) = argument_check {
-        for argument in &arguments {
-            argument_check(argument.get_type().flatten_list().1)
-                .map_err(|error| error.with_span(argument.span))?;
-        }
-    }
-
     if let [argument] = arguments.as_ref() {
         let (list_state, argument_type) = argument.get_type().into_flatten_list();
-        let result_type = result_override.unwrap_or(argument_type);
-
         if list_state.is_some() {
-            // This should also work for any MaybeList
-            Ok(ValueKind::Reducer {
-                kind,
-                list: Box::new(arguments.into_iter().next().unwrap()),
-                result_type,
-            })
-        }
-        else {
-            Ok(ValueKind::ArgumentsReducer {
-                kind,
-                arguments,
-                result_type,
-            })
-        }
-    }
-    else {
-        let result_type = Type::broadcast(result_override, arguments
-            .iter()
-            .map(|value| (value.get_type(), value.span)))?;
+            // This should also work for any MaybeList.
+            let list = arguments.into_iter().next().unwrap();
+            let list = match &element_type {
+                Some(element_type) => list.coerce_to(element_type, true)?,
+                None => list,
+            };
 
-        Ok(ValueKind::ArgumentsReducer {
-            kind,
-            arguments,
-            result_type,
-        })
+            return Ok(ValueKind::Reducer {
+                kind,
+                list: Box::new(list),
+                result_type: result_type.unwrap_or(argument_type),
+            })
+        }
     }
+
+    // Determine the most restrictive type that fits all arguments.
+    let merged_type = arguments[1..].iter().try_fold(
+        arguments[0].get_type(),
+        |current_type, argument| {
+            current_type.merge(&argument.get_type())
+                .map_err(|error| error.with_span(argument.span))
+        },
+    )?;
+
+    let element_type = match element_type {
+        Some(element_type) => merged_type.flatten_list().1.clone().coerce_to(&element_type)
+            .ok_or_else(|| Box::new(crate::Error {
+                kind: crate::ErrorKind::MismatchedTypes {
+                    expected: element_type.to_string(),
+                    got: merged_type.to_string(),
+                },
+                span: match (arguments[0].span, arguments.last().unwrap().span) {
+                    (Some(start), Some(end)) => Some(start.expand_to(end)),
+                    (span, _) => span
+                },
+            }))?,
+        None => merged_type,
+    };
+
+    let mut list_state = None;
+    Ok(ValueKind::ArgumentsReducer {
+        kind,
+        arguments: arguments
+            .into_iter()
+            .map(|argument| {
+                list_state = ListState::merge(list_state, argument.get_type().list_state());
+                argument.coerce_to(&element_type, true)
+            })
+            .collect::<crate::Result<_>>()?,
+        result_type: result_type.unwrap_or(element_type).unflatten_list(list_state),
+    })
 }
 
 macro_rules! reducer_intrinsic {
-    ($identifier:literal, $argument_check:expr => $kind:ident, $result_override:expr) => {
+    ($identifier:literal => $kind:ident) => {
         IntrinsicFunction {
             identifier: $identifier,
             min_arity: 1,
             max_arity: None,
             interpret_call: |_, _, _, arguments| interpret_reducer_call(
                 ReducerKind::$kind,
-                $argument_check,
-                $result_override,
+                None,
+                None,
+                arguments,
+            ),
+        }
+    };
+    ($identifier:literal => $kind:ident, $result_type:expr) => {
+        IntrinsicFunction {
+            identifier: $identifier,
+            min_arity: 1,
+            max_arity: None,
+            interpret_call: |_, _, _, arguments| interpret_reducer_call(
+                ReducerKind::$kind,
+                None,
+                Some($result_type),
+                arguments,
+            ),
+        }
+    };
+    ($identifier:literal, [$element_type:expr] => $kind:ident) => {
+        IntrinsicFunction {
+            identifier: $identifier,
+            min_arity: 1,
+            max_arity: None,
+            interpret_call: |_, _, _, arguments| interpret_reducer_call(
+                ReducerKind::$kind,
+                Some($element_type),
+                None,
+                arguments,
+            ),
+        }
+    };
+    ($identifier:literal, [$element_type:expr] => $kind:ident, $result_type:expr) => {
+        IntrinsicFunction {
+            identifier: $identifier,
+            min_arity: 1,
+            max_arity: None,
+            interpret_call: |_, _, _, arguments| interpret_reducer_call(
+                ReducerKind::$kind,
+                Some($element_type),
+                Some($result_type),
                 arguments,
             ),
         }
@@ -473,39 +542,39 @@ pub fn read_file_bytes(local_context: &LocalContext, path_value: &Value) -> crat
 // ------ Trigonometric ------
 
 pub static SIN: IntrinsicFunction = unary_intrinsic!(
-    "sin", (Type::Real) => Sin, Type::Real
+    "sin", (Type::Real) => Sin
 );
 
 pub static COS: IntrinsicFunction = unary_intrinsic!(
-    "cos", (Type::Real) => Cos, Type::Real
+    "cos", (Type::Real) => Cos
 );
 
 pub static TAN: IntrinsicFunction = unary_intrinsic!(
-    "tan", (Type::Real) => Tan, Type::Real
+    "tan", (Type::Real) => Tan
 );
 
 pub static CSC: IntrinsicFunction = unary_intrinsic!(
-    "csc", (Type::Real) => Csc, Type::Real
+    "csc", (Type::Real) => Csc
 );
 
 pub static SEC: IntrinsicFunction = unary_intrinsic!(
-    "sec", (Type::Real) => Sec, Type::Real
+    "sec", (Type::Real) => Sec
 );
 
 pub static COT: IntrinsicFunction = unary_intrinsic!(
-    "cot", (Type::Real) => Cot, Type::Real
+    "cot", (Type::Real) => Cot
 );
 
 pub static ARCSIN: IntrinsicFunction = unary_intrinsic!(
-    "arcsin", (Type::Real) => Arcsin, Type::Real
+    "arcsin", (Type::Real) => Arcsin
 );
 
 pub static ARCCOS: IntrinsicFunction = unary_intrinsic!(
-    "arccos", (Type::Real) => Arccos, Type::Real
+    "arccos", (Type::Real) => Arccos
 );
 
 pub static ARCTAN: IntrinsicFunction = unary_intrinsic!(
-    "arctan", (Type::Real) => Arctan, Type::Real
+    "arctan", (Type::Real) => Arctan
 );
 
 pub static ARCTAN2: IntrinsicFunction = binary_intrinsic!(
@@ -513,49 +582,49 @@ pub static ARCTAN2: IntrinsicFunction = binary_intrinsic!(
 );
 
 pub static ARCCSC: IntrinsicFunction = unary_intrinsic!(
-    "arccsc", (Type::Real) => Arccsc, Type::Real
+    "arccsc", (Type::Real) => Arccsc
 );
 
 pub static ARCSEC: IntrinsicFunction = unary_intrinsic!(
-    "arcsec", (Type::Real) => Arcsec, Type::Real
+    "arcsec", (Type::Real) => Arcsec
 );
 
 pub static ARCCOT: IntrinsicFunction = unary_intrinsic!(
-    "arccot", (Type::Real) => Arccot, Type::Real
+    "arccot", (Type::Real) => Arccot
 );
 
 pub static SINH: IntrinsicFunction = unary_intrinsic!(
-    "sinh", (Type::Real) => Sinh, Type::Real
+    "sinh", (Type::Real) => Sinh
 );
 
 pub static COSH: IntrinsicFunction = unary_intrinsic!(
-    "cosh", (Type::Real) => Cosh, Type::Real
+    "cosh", (Type::Real) => Cosh
 );
 
 pub static TANH: IntrinsicFunction = unary_intrinsic!(
-    "tanh", (Type::Real) => Tanh, Type::Real
+    "tanh", (Type::Real) => Tanh
 );
 
 pub static CSCH: IntrinsicFunction = unary_intrinsic!(
-    "csch", (Type::Real) => Csch, Type::Real
+    "csch", (Type::Real) => Csch
 );
 
 pub static SECH: IntrinsicFunction = unary_intrinsic!(
-    "sech", (Type::Real) => Sech, Type::Real
+    "sech", (Type::Real) => Sech
 );
 
 pub static COTH: IntrinsicFunction = unary_intrinsic!(
-    "coth", (Type::Real) => Coth, Type::Real
+    "coth", (Type::Real) => Coth
 );
 
 // ------ Calculus ------
 
 pub static EXP: IntrinsicFunction = unary_intrinsic!(
-    "exp", (Type::Real) => Exp, Type::Real
+    "exp", (Type::Real) => Exp
 );
 
 pub static LN: IntrinsicFunction = unary_intrinsic!(
-    "ln", (Type::Real) => Ln, Type::Real
+    "ln", (Type::Real) => Ln
 );
 
 pub static LOG: IntrinsicFunction = binary_intrinsic!(
@@ -572,64 +641,13 @@ pub static LOG: IntrinsicFunction = binary_intrinsic!(
 
 // ------ Number Theory ------
 
-fn interpret_lcm_gcd_call(
-    kind: ReducerKind,
-    arguments: Box<[Value]>,
-) -> crate::Result<ValueKind> {
-    if let [argument] = arguments.as_ref() {
-        if argument.get_type().list_state().is_some() {
-            // This should also work for any MaybeList
-            Ok(ValueKind::Reducer {
-                kind,
-                list: Box::new(arguments.into_iter().next().unwrap()
-                    .coerce_to(&Type::Int, true)?),
-                result_type: Type::Int,
-            })
-        }
-        else {
-            Ok(ValueKind::ArgumentsReducer {
-                kind,
-                arguments,
-                result_type: Type::Int,
-            })
-        }
-    }
-    else {
-        let list_state = arguments
-            .iter()
-            .fold(None, |current_state, argument| ListState::merge(
-                current_state,
-                argument.get_type().list_state(),
-            ));
+pub static LCM: IntrinsicFunction = reducer_intrinsic!(
+    "lcm", [Type::Int] => Lcm
+);
 
-        Ok(ValueKind::ArgumentsReducer {
-            kind,
-            arguments: arguments
-                .into_iter()
-                .map(|argument| argument.coerce_to(&Type::Int, true))
-                .collect::<crate::Result<_>>()?,
-            result_type: Type::Int.unflatten_list(list_state),
-        })
-    }
-}
-
-pub static LCM: IntrinsicFunction = IntrinsicFunction {
-    identifier: "lcm",
-    min_arity: 1,
-    max_arity: None,
-    interpret_call: |_, _, _, arguments| {
-        interpret_lcm_gcd_call(ReducerKind::Lcm, arguments)
-    },
-};
-
-pub static GCD: IntrinsicFunction = IntrinsicFunction {
-    identifier: "lcm",
-    min_arity: 1,
-    max_arity: None,
-    interpret_call: |_, _, _, arguments| {
-        interpret_lcm_gcd_call(ReducerKind::Gcd, arguments)
-    },
-};
+pub static GCD: IntrinsicFunction = reducer_intrinsic!(
+    "gcd", [Type::Int] => Gcd
+);
 
 pub static CEIL: IntrinsicFunction = unary_intrinsic!(
     "ceil", (Type::Real) => Ceil, Type::Int
@@ -647,23 +665,9 @@ pub static ROUND_DIGITS: IntrinsicFunction = binary_intrinsic!(
     "round_digits", (Type::Real, Type::Int) => RoundDigits, Type::Real
 );
 
-pub static ABS: IntrinsicFunction = IntrinsicFunction {
-    identifier: "abs",
-    min_arity: 1,
-    max_arity: Some(1),
-    interpret_call: |_, _, _, arguments| {
-        let argument = arguments.into_iter().next().unwrap();
-        let (argument_list, argument_type) = argument.get_type().into_flatten_list();
-
-        argument_type.require_numeric()?;
-
-        Ok(ValueKind::Unary {
-            kind: UnaryKind::Abs,
-            operand: Box::new(argument),
-            result_type: argument_type.unflatten_list(argument_list),
-        })
-    },
-};
+pub static ABS: IntrinsicFunction = unary_intrinsic!(
+    "abs", (Type::union([Type::Int, Type::Real])) => Abs
+);
 
 pub static SIGN: IntrinsicFunction = unary_intrinsic!(
     "sign", (Type::Real) => Sign, Type::Int
@@ -816,17 +820,17 @@ pub static PREFIX_SUM: IntrinsicFunction = IntrinsicFunction {
 // ------ Statistics ------
 
 pub static MEAN: IntrinsicFunction = reducer_intrinsic!(
-    "mean", Some(Type::require_numeric_or_point) => Mean, None
+    "mean", [Type::union([Type::Real, Type::real_point2(), Type::real_point3()])] => Mean
 );
 
 // MEDIAN
 
 pub static MIN: IntrinsicFunction = reducer_intrinsic!(
-    "min", Some(Type::require_numeric) => Min, None
+    "min", [Type::union([Type::Bool, Type::Int, Type::Real])] => Min
 );
 
 pub static MAX: IntrinsicFunction = reducer_intrinsic!(
-    "max", Some(Type::require_numeric) => Max, None
+    "max", [Type::union([Type::Bool, Type::Int, Type::Real])] => Max
 );
 
 // QUARTILE
@@ -854,65 +858,36 @@ pub static MAX: IntrinsicFunction = reducer_intrinsic!(
 // STATS
 
 pub static COUNT: IntrinsicFunction = reducer_intrinsic!(
-    "count", None => Count, Some(Type::Int)
+    "count" => Count, Type::Int
 );
 
 pub static TOTAL: IntrinsicFunction = reducer_intrinsic!(
-    "total", Some(Type::require_numeric_or_point) => Total, None
+    "total", [Type::union([
+        Type::Int,
+        Type::Real,
+        Type::point2(
+            Type::union([Type::Int, Type::Real]),
+            Type::union([Type::Int, Type::Real]),
+        ),
+        Type::point3(
+            Type::union([Type::Int, Type::Real]),
+            Type::union([Type::Int, Type::Real]),
+            Type::union([Type::Int, Type::Real]),
+        ),
+    ])] => Total
 );
-
-fn get_any_all_total(arguments: Box<[Value]>, transformer: fn(Value) -> Value) -> crate::Result<ValueKind> {
-    if arguments.len() == 1 {
-        let argument = arguments.into_iter().next().unwrap()
-            .coerce_to(&Type::Bool, true)?;
-        let argument = transformer(argument);
-
-        if argument.get_type().list_state().is_some() {
-            // This should also work for any MaybeList
-            Ok(ValueKind::Reducer {
-                kind: ReducerKind::Total,
-                list: Box::new(argument),
-                result_type: Type::Int,
-            })
-        }
-        else {
-            Ok(ValueKind::ArgumentsReducer {
-                kind: ReducerKind::Total,
-                arguments: Box::new([argument]),
-                result_type: Type::Int,
-            })
-        }
-    }
-    else {
-        let arguments: Box<[_]> = arguments.into_iter()
-            .map(|argument| {
-                let argument = argument.coerce_to(&Type::Bool, true)?;
-                let argument = transformer(argument);
-                Ok(argument)
-            })
-            .collect::<crate::Result<_>>()?;
-        let list_state = arguments
-            .iter()
-            .fold(None, |current_state, argument| ListState::merge(
-                current_state,
-                argument.get_type().list_state(),
-            ));
-
-        Ok(ValueKind::ArgumentsReducer {
-            kind: ReducerKind::Total,
-            arguments,
-            result_type: Type::Int.unflatten_list(list_state),
-        })
-    }
-}
 
 // @total(arguments) > 0
 pub static ANY: IntrinsicFunction = IntrinsicFunction {
     identifier: "any",
     min_arity: 1,
     max_arity: None,
-    interpret_call: |_, _, _, arguments| {
-        let total = get_any_all_total(arguments, std::convert::identity)?;
+    interpret_call: |target, context, local_context, arguments| {
+        let arguments: Box<[_]> = arguments
+            .into_iter()
+            .map(|argument| argument.coerce_to(&Type::Bool, true))
+            .collect::<crate::Result<_>>()?;
+        let total = (TOTAL.interpret_call)(target, context, local_context, arguments)?;
         let list_state = total.get_type().list_state();
 
         Ok(ValueKind::InequalityChain {
@@ -931,16 +906,20 @@ pub static ALL: IntrinsicFunction = IntrinsicFunction {
     identifier: "all",
     min_arity: 1,
     max_arity: None,
-    interpret_call: |_, _, _, arguments| {
-        let total = get_any_all_total(arguments, |argument| {
-            let list_state = argument.get_type().list_state();
+    interpret_call: |target, context, local_context, arguments| {
+        let arguments: Box<[_]> = arguments
+            .into_iter()
+            .map(|argument| {
+                let list_state = argument.get_type().list_state();
 
-            ValueKind::Unary {
-                kind: UnaryKind::LogicalNot,
-                operand: Box::new(argument),
-                result_type: Type::Bool.unflatten_list(list_state),
-            }.into()
-        })?;
+                Ok(ValueKind::Unary {
+                    kind: UnaryKind::LogicalNot,
+                    operand: Box::new(argument.coerce_to(&Type::Bool, true)?),
+                    result_type: Type::Bool.unflatten_list(list_state),
+                }.into())
+            })
+            .collect::<crate::Result<_>>()?;
+        let total = (TOTAL.interpret_call)(target, context, local_context, arguments)?;
 
         let list_state = total.get_type().list_state();
 
@@ -1072,48 +1051,48 @@ pub static MIDPOINT: IntrinsicFunction = IntrinsicFunction {
         let point_1_or_segment = arguments.next().unwrap();
 
         if let Some(point_2) = arguments.next() {
-            let point_type = match point_1_or_segment.get_type().into_flatten_list().1 {
-                Type::Point2 { .. } => Type::real_point2(),
-                Type::Point3 { .. } => Type::real_point3(),
-                got_type => return Err(Box::new(crate::Error {
-                    kind: crate::ErrorKind::ExpectedNumericPointType {
-                        got_type: got_type.to_string(),
-                    },
-                    span: point_1_or_segment.span,
-                }))
+            let point_1 = point_1_or_segment.coerce_to(&Type::union([
+                Type::real_point2(),
+                Type::real_point3(),
+            ]), true)?;
+            let (point_1_list, point_type) = point_1.get_type().into_flatten_list();
+
+            let kind = match &point_type {
+                Type::Point2 { .. } => BinaryKind::MidpointOfPoints2D,
+                Type::Point3 { .. } => BinaryKind::MidpointOfPoints3D,
+                _ => unreachable!()
             };
 
-            let point_1 = point_1_or_segment.coerce_to(&point_type, true)?;
             let point_2 = point_2.coerce_to(&point_type, true)?;
 
             let list_state = ListState::merge(
-                point_1.get_type().list_state(),
+                point_1_list,
                 point_2.get_type().list_state(),
             );
 
             Ok(ValueKind::Binary {
-                kind: BinaryKind::MidpointOfPoints,
+                kind,
                 lhs: Box::new(point_1),
                 rhs: Box::new(point_2),
                 result_type: point_type.unflatten_list(list_state),
             })
         }
         else {
-            let (list_state, segment_type) = point_1_or_segment.get_type().into_flatten_list();
-            let point_type = match segment_type {
-                Type::Segment => Type::real_point2(),
-                Type::Segment3D => Type::real_point3(),
-                got_type => return Err(Box::new(crate::Error {
-                    kind: crate::ErrorKind::ExpectedSegmentType {
-                        got_type: got_type.to_string(),
-                    },
-                    span: point_1_or_segment.span,
-                }))
+            let segment = point_1_or_segment.coerce_to(&Type::union([
+                Type::Segment,
+                Type::Segment3D,
+            ]), true)?;
+            let (list_state, segment_type) = segment.get_type().into_flatten_list();
+
+            let (kind, point_type) = match segment_type {
+                Type::Segment => (UnaryKind::MidpointOfSegment2D, Type::real_point2()),
+                Type::Segment3D => (UnaryKind::MidpointOfSegment3D, Type::real_point3()),
+                _ => unreachable!()
             };
 
             Ok(ValueKind::Unary {
-                kind: UnaryKind::MidpointOfSegment,
-                operand: Box::new(point_1_or_segment),
+                kind,
+                operand: Box::new(segment),
                 result_type: point_type.unflatten_list(list_state),
             })
         }
@@ -1165,7 +1144,7 @@ pub static SPHERE3D: IntrinsicFunction = binary_intrinsic!(
 // DIRECTED_ANGLE
 
 pub static POLYGON: IntrinsicFunction = reducer_intrinsic!(
-    "polygon", Some(Type::require_numeric_point_2d) => Polygon, Some(Type::Polygon)
+    "polygon", [Type::real_point2()] => Polygon, Type::Polygon
 );
 
 pub static RECT: IntrinsicFunction = binary_intrinsic!(
@@ -1206,19 +1185,19 @@ pub static RECT: IntrinsicFunction = binary_intrinsic!(
 
 // SUPPLEMENT
 
-fn interpret_start_end_call(kind: UnaryKind, arguments: Box<[Value]>) -> crate::Result<ValueKind> {
-    let vector = arguments.into_iter().next().unwrap();
+fn interpret_start_end_call(
+    kind_2d: UnaryKind,
+    kind_3d: UnaryKind,
+    arguments: Box<[Value]>,
+) -> crate::Result<ValueKind> {
+    let vector = arguments.into_iter().next().unwrap()
+        .coerce_to(&Type::union([Type::Vector, Type::Vector3D]), true)?;
     let (list_state, vector_type) = vector.get_type().into_flatten_list();
 
-    let point_type = match vector_type {
-        Type::Vector => Type::real_point2(),
-        Type::Vector3D => Type::real_point3(),
-        got_type => return Err(Box::new(crate::Error {
-            kind: crate::ErrorKind::ExpectedVectorType {
-                got_type: got_type.to_string(),
-            },
-            span: vector.span,
-        }))
+    let (kind, point_type) = match vector_type {
+        Type::Vector => (kind_2d, Type::real_point2()),
+        Type::Vector3D => (kind_3d, Type::real_point3()),
+        _ => unreachable!()
     };
 
     Ok(ValueKind::Unary {
@@ -1233,7 +1212,7 @@ pub static START: IntrinsicFunction = IntrinsicFunction {
     min_arity: 1,
     max_arity: Some(1),
     interpret_call: |_, _, _, arguments| {
-        interpret_start_end_call(UnaryKind::VectorStart, arguments)
+        interpret_start_end_call(UnaryKind::Vector2DStart, UnaryKind::Vector3DStart, arguments)
     },
 };
 
@@ -1242,7 +1221,7 @@ pub static END: IntrinsicFunction = IntrinsicFunction {
     min_arity: 1,
     max_arity: Some(1),
     interpret_call: |_, _, _, arguments| {
-        interpret_start_end_call(UnaryKind::VectorEnd, arguments)
+        interpret_start_end_call(UnaryKind::Vector2DEnd, UnaryKind::Vector3DEnd, arguments)
     },
 };
 
@@ -1255,9 +1234,9 @@ pub static DILATE: IntrinsicFunction = IntrinsicFunction {
     interpret_call: |_, _, _, arguments| {
         let mut arguments = arguments.into_iter();
 
-        let object = arguments.next().unwrap();
+        let object = arguments.next().unwrap()
+            .coerce_to(&Type::transformable(), true)?;
         let (object_list, object_type) = object.get_type().into_flatten_list();
-        object_type.require_transformable()?;
 
         let point = arguments.next().unwrap()
             .coerce_to(&Type::real_point2(), true)?;
@@ -1289,9 +1268,9 @@ pub static ROTATE: IntrinsicFunction = IntrinsicFunction {
     interpret_call: |_, _, _, arguments| {
         let mut arguments = arguments.into_iter();
 
-        let object = arguments.next().unwrap();
+        let object = arguments.next().unwrap()
+            .coerce_to(&Type::transformable(), true)?;
         let (object_list, object_type) = object.get_type().into_flatten_list();
-        object_type.require_transformable()?;
 
         let point = arguments.next().unwrap()
             .coerce_to(&Type::real_point2(), true)?;
@@ -1323,12 +1302,12 @@ pub static REFLECT: IntrinsicFunction = IntrinsicFunction {
     interpret_call: |_, _, _, arguments| {
         let mut arguments = arguments.into_iter();
 
-        let object = arguments.next().unwrap();
+        let object = arguments.next().unwrap()
+            .coerce_to(&Type::transformable(), true)?;
         let (object_list, object_type) = object.get_type().into_flatten_list();
-        object_type.require_transformable()?;
 
-        let line = arguments.next().unwrap();
-        line.get_type().into_flatten_list().1.require_line_like()?;
+        let line = arguments.next().unwrap()
+            .coerce_to(&Type::line_like(), true)?;
 
         let list_state = ListState::merge(
             object_list,
@@ -1350,9 +1329,9 @@ pub static TRANSLATE: IntrinsicFunction = IntrinsicFunction {
     interpret_call: |_, _, _, arguments| {
         let mut arguments = arguments.into_iter();
 
-        let object = arguments.next().unwrap();
+        let object = arguments.next().unwrap()
+            .coerce_to(&Type::transformable(), true)?;
         let (object_list, object_type) = object.get_type().into_flatten_list();
-        object_type.require_transformable()?;
 
         let point_1_or_vector = arguments.next().unwrap();
 
@@ -1483,11 +1462,7 @@ pub static ENUM_VALUE: IntrinsicFunction = IntrinsicFunction {
             type_identifier: identifier,
         };
 
-        Ok(ValueKind::Unary {
-            kind: UnaryKind::AssumeType,
-            operand: Box::new(variant_ordinal),
-            result_type: result_type.unflatten_list(list_state),
-        })
+        Ok(variant_ordinal.assume_type(result_type.unflatten_list(list_state)).kind)
     },
 };
 

@@ -921,7 +921,7 @@ pub fn interpret_expression(
                 .map(|map_loop| {
                     let list = interpret_expression(target, context, local_context, &map_loop.list)?;
                     let item_type = list.get_type().require_flatten_list()
-                        .map_err(|error| error.with_span(Some(expression.span)))?;
+                        .map_err(|error| error.with_span(list.span))?;
 
                     Ok(ListMapLoop {
                         local: map_context.add_local_variable(map_loop.identifier.clone(), target.create_local_id(), item_type),
@@ -941,7 +941,7 @@ pub fn interpret_expression(
         ExpressionKind::ListFilter { list, condition } => {
             let list = interpret_expression(target, context, local_context, list)?;
             let item_type = list.get_type().require_flatten_list()
-                .map_err(|error| error.with_span(Some(expression.span)))?;
+                .map_err(|error| error.with_span(list.span))?;
 
             let condition = interpret_expression(target, context, local_context, condition)?
                 .coerce_to(&Type::Bool, true)?;
@@ -955,7 +955,7 @@ pub fn interpret_expression(
         ExpressionKind::Index { list, operation } => {
             let list = interpret_expression(target, context, local_context, list)?;
             let item_type = list.get_type().require_flatten_list()
-                .map_err(|error| error.with_span(Some(expression.span)))?;
+                .map_err(|error| error.with_span(list.span))?;
 
             let operation = interpret_index_operation(target, context, local_context, operation)?;
 

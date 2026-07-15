@@ -84,9 +84,12 @@ pub enum UnaryKind {
     Sqrt,
     Cbrt,
     Factorial,
-    MidpointOfSegment,
-    VectorStart,
-    VectorEnd,
+    MidpointOfSegment2D,
+    MidpointOfSegment3D,
+    Vector2DStart,
+    Vector3DStart,
+    Vector2DEnd,
+    Vector3DEnd,
     PrefixSum,
 }
 
@@ -108,7 +111,8 @@ pub enum BinaryKind {
     Log,
     RoundDigits,
     NthRoot,
-    MidpointOfPoints,
+    MidpointOfPoints2D,
+    MidpointOfPoints3D,
     Segment,
     Segment3D,
     Line,
@@ -613,16 +617,20 @@ impl ValueKind {
     }
 
     pub fn assume_type(self, value_type: Type, span: Option<crate::Span>) -> Self {
-        if value_type == self.get_type() {
+        if let Self::Unary { kind: UnaryKind::AssumeType, operand, .. } = self {
+            Self::Unary {
+                kind: UnaryKind::AssumeType,
+                operand,
+                result_type: value_type,
+            }
+        }
+        else if value_type == self.get_type() || value_type == Type::Any {
             self
         }
         else {
-            ValueKind::Unary {
+            Self::Unary {
                 kind: UnaryKind::AssumeType,
-                operand: Box::new(Value {
-                    kind: self,
-                    span,
-                }),
+                operand: Box::new(self.with_span(span)),
                 result_type: value_type,
             }
         }
@@ -641,50 +649,64 @@ impl ValueKind {
             span,
         });
 
+        if let Type::Union { variants } = target_type {
+            return variants
+                .iter()
+                .find_map(|variant_type| {
+                    self.clone().coerce_to(variant_type, allow_list, span).ok()
+                })
+                .ok_or_else(mismatched_types_error)
+        }
+
         if !ListState::can_coerce(self_list, target_list, allow_list) {
             Err(mismatched_types_error())
         }
-        else if self_type == target_type {
-            // The value shouldn't need to be transformed in any way
-            Ok(self)
-        }
-        else if !self_type.can_coerce_to(target_type) {
-            Err(mismatched_types_error())
-        }
-        else {
-            match (self, target_type) {
+        else if let Some(coerced_type) = self_type.clone().coerce_to(target_type) {
+            let result_type = coerced_type.clone().unflatten_list(self_list);
+            let coerced = match (self, &coerced_type) {
                 (Self::Undefined(..), _) => {
-                    Ok(Self::Undefined(target_type.clone()))
+                    Self::Undefined(result_type.clone())
                 }
                 (Self::Infinity(..), _) => {
-                    Ok(Self::Infinity(target_type.clone()))
+                    Self::Infinity(result_type.clone())
                 }
                 (Self::Int(value), Type::Real) => {
-                    Ok(Self::Real(value as f64))
-                }
-                (Self::Int(value), Type::Color) => {
-                    Ok(Self::Color {
-                        kind: ColorKind::Rgb,
-                        value_1: Box::new(Self::Int(value >> 16 & 0xFF).with_span(span)),
-                        value_2: Box::new(Self::Int(value >> 8 & 0xFF).with_span(span)),
-                        value_3: Box::new(Self::Int(value & 0xFF).with_span(span)),
-                        list_state: None,
-                    })
+                    Self::Real(value as f64)
                 }
                 (Self::Bool(value), Type::Int) => {
-                    Ok(Self::Int(value as i64))
+                    Self::Int(value as i64)
                 }
                 (Self::Bool(value), Type::Real) => {
-                    Ok(Self::Real(value as i32 as f64))
+                    Self::Real(value as i32 as f64)
                 }
                 (Self::EnumVariant { variant_ordinal, .. }, Type::Int) => {
-                    Ok(Self::Int(variant_ordinal))
+                    Self::Int(variant_ordinal)
                 }
                 (Self::EnumVariant { variant_ordinal, .. }, Type::Real) => {
-                    Ok(Self::Real(variant_ordinal as f64))
+                    Self::Real(variant_ordinal as f64)
                 }
-                (self_, _) => Ok(self_)
-            }
+                (Self::Point2 { x, y, .. }, Type::Point2 { x_type, y_type }) => {
+                    Self::Point2 {
+                        x: Box::new(x.coerce_to(x_type, allow_list)?),
+                        y: Box::new(y.coerce_to(y_type, allow_list)?),
+                        point_type: coerced_type.clone(),
+                    }
+                }
+                (Self::Point3 { x, y, z, .. }, Type::Point3 { x_type, y_type, z_type }) => {
+                    Self::Point3 {
+                        x: Box::new(x.coerce_to(x_type, allow_list)?),
+                        y: Box::new(y.coerce_to(y_type, allow_list)?),
+                        z: Box::new(z.coerce_to(z_type, allow_list)?),
+                        point_type: coerced_type.clone(),
+                    }
+                }
+                (other, _) => other
+            };
+
+            Ok(coerced.assume_type(result_type, span))
+        }
+        else {
+            Err(mismatched_types_error())
         }
     }
 
@@ -710,7 +732,7 @@ impl std::fmt::Debug for ValueKind {
         let self_type = self.get_type();
         match self {
             Self::Type { identifier } => {
-                write!(f, "Type({identifier})")
+                write!(f, "Type<{identifier}>")
             }
             Self::Undefined(..) => {
                 write!(f, "Undefined<{self_type}>")

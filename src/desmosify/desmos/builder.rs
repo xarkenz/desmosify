@@ -832,19 +832,19 @@ impl<'target> GraphExpressionListBuilder<'target> {
                     self.translate_value(operand)?,
                 ))
             }
-            UnaryKind::MidpointOfSegment => {
+            UnaryKind::MidpointOfSegment2D | UnaryKind::MidpointOfSegment3D => {
                 Ok(unary_function(
                     "midpoint",
                     self.translate_value(operand)?,
                 ))
             }
-            UnaryKind::VectorStart => {
+            UnaryKind::Vector2DStart | UnaryKind::Vector3DStart => {
                 Ok(unary_function(
                     "start",
                     self.translate_value(operand)?,
                 ))
             }
-            UnaryKind::VectorEnd => {
+            UnaryKind::Vector2DEnd | UnaryKind::Vector3DEnd => {
                 Ok(unary_function(
                     "end",
                     self.translate_value(operand)?,
@@ -1038,7 +1038,7 @@ impl<'target> GraphExpressionListBuilder<'target> {
                     radicand: Box::new(self.translate_value(lhs)?),
                 })
             }
-            BinaryKind::MidpointOfPoints => {
+            BinaryKind::MidpointOfPoints2D | BinaryKind::MidpointOfPoints3D => {
                 Ok(binary_function(
                     "midpoint",
                     self.translate_value(lhs)?,
