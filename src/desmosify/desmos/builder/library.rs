@@ -28,6 +28,8 @@ macro_rules! library_builder_definition {
 }
 
 library_builder_definition! {
+    bool_to_internal,
+    bool_from_internal,
     range_inclusive,
     range_exclusive,
     index_range_inclusive,
@@ -55,6 +57,51 @@ impl LibraryBuilder {
         })
     }
 
+    pub fn bool_to_internal(&mut self, info: &mut DesmosTargetInfo) -> GraphExpression {
+        let symbol = self.get_symbol("ToBool");
+
+        if self.bool_to_internal.is_empty() {
+            let local_restriction = info.create_local_symbol();
+
+            // ToBool(restriction) = restrictionToBoolean(restriction)
+            let expression = desmos_expression!(
+                ({&symbol} Call [{&local_restriction}])
+                Equal
+                ((@operatorname "restrictionToBoolean") Call [{&local_restriction}])
+            );
+
+            self.bool_to_internal = [
+                self.create_expression_entry(info, expression),
+            ].into();
+        }
+
+        symbol
+    }
+
+    pub fn bool_from_internal(&mut self, info: &mut DesmosTargetInfo) -> GraphExpression {
+        let symbol = self.get_symbol("FromBool");
+
+        if self.bool_from_internal.is_empty() {
+            let local_internal = info.create_local_symbol();
+
+            // FromBool(internal) = {restriction(internal) = 1, 0}
+            let expression = desmos_expression!(
+                ({&symbol} Call [{&local_internal}])
+                Equal
+                (Piecewise [
+                    (((@operatorname "restriction") Call [{&local_internal}]) Equal (@int 1)),
+                    (@int 0),
+                ])
+            );
+
+            self.bool_from_internal = [
+                self.create_expression_entry(info, expression),
+            ].into();
+        }
+
+        symbol
+    }
+
     pub fn range_inclusive(&mut self, info: &mut DesmosTargetInfo) -> GraphExpression {
         let symbol = self.get_symbol("RangeInc");
 
@@ -63,7 +110,7 @@ impl LibraryBuilder {
             let local_end = info.create_local_symbol();
             let local_step = info.create_local_symbol();
 
-            // range_inc(start, end, step) = {
+            // RangeInc(start, end, step) = {
             //     start sign(step) > end sign(step): [],
             //     start + step * [0 ... floor((end - start) / step)]
             // }
@@ -104,8 +151,8 @@ impl LibraryBuilder {
             let local_step = info.create_local_symbol();
             let local_inc = info.create_local_symbol();
 
-            // range_exc(start, end, step) = inc[{inc = end, 0} = 0]
-            //     with inc = range_inc(start, end, step)
+            // RangeExc(start, end, step) = inc[{inc = end, 0} = 0]
+            //     with inc = RangeInc(start, end, step)
             let expression = desmos_expression!(
                 ({&symbol} Call [{&local_start}, {&local_end}, {&local_step}])
                 Equal
@@ -136,8 +183,8 @@ impl LibraryBuilder {
             let local_step = info.create_local_symbol();
             let local_index = info.create_local_symbol();
 
-            // idx_range_inc(list, start, end, step) = [
-            //     list[index] for index = range_inc(start, end, step)
+            // IdxRangeInc(list, start, end, step) = [
+            //     list[index] for index = RangeInc(start, end, step)
             // ]
             let expression = desmos_expression!(
                 ({&symbol} Call [{&local_list}, {&local_start}, {&local_end}, {&local_step}])
@@ -168,8 +215,8 @@ impl LibraryBuilder {
             let local_step = info.create_local_symbol();
             let local_index = info.create_local_symbol();
 
-            // idx_range_exc(list, start, end, step) = [
-            //     list[index] for index = range_exc(start, end, step)
+            // IdxRangeExc(list, start, end, step) = [
+            //     list[index] for index = RangeExc(start, end, step)
             // ]
             let expression = desmos_expression!(
                 ({&symbol} Call [{&local_list}, {&local_start}, {&local_end}, {&local_step}])
@@ -198,7 +245,7 @@ impl LibraryBuilder {
             let local_start = info.create_local_symbol();
             let local_step = info.create_local_symbol();
 
-            // idx_range_from(list, start, step) = idx_range_inc(list, start, list.count, step)
+            // IdxRangeFrom(list, start, step) = IdxRangeInc(list, start, list.count, step)
             let expression = desmos_expression!(
                 ({&symbol} Call [{&local_list}, {&local_start}, {&local_step}])
                 Equal
@@ -225,7 +272,7 @@ impl LibraryBuilder {
             let local_p1 = info.create_local_symbol();
             let local_p2 = info.create_local_symbol();
 
-            // rect(p1, p2) = polygon(p1, (p2.x, p1.y), p2, (p1.x, p2.y))
+            // Rect(p1, p2) = polygon(p1, (p2.x, p1.y), p2, (p1.x, p2.y))
             let expression = desmos_expression!(
                 ({&symbol} Call [{&local_p1}, {&local_p2}])
                 Equal
@@ -263,9 +310,9 @@ impl LibraryBuilder {
             let local_index = info.create_local_symbol();
             let local_wackscope_list = info.create_local_symbol();
 
-            // prefix_sum_nw(list) = {
+            // PrefixSumNW(list) = {
             //     list.count <= 1: list,
-            //     prefix_sum_nw_helper([1 ... list.count]) with wackscope_list = list
+            //     PrefixSumNWHelper([1 ... list.count]) with wackscope_list = list
             // }
             let local_list_count = desmos_expression!(
                 {&local_list} Dot (@operatorname "count")
@@ -281,9 +328,9 @@ impl LibraryBuilder {
                 ])
             );
 
-            // prefix_sum_nw_helper(index) = {
+            // PrefixSumNWHelper(index) = {
             //     index = 1: wackscope_list[1],
-            //     prefix_sum_nw_helper(index - 1) + wackscope_list[index]
+            //     PrefixSumNWHelper(index - 1) + wackscope_list[index]
             // }
             let helper_expression = desmos_expression!(
                 ({&helper_symbol} Call [{&local_index}])

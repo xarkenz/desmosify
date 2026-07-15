@@ -41,6 +41,8 @@ This type is not yet implemented properly.
 {: #bool }
 ### `bool` — Boolean value
 
+A `true` or `false` value represented as `1` or `0`, respectively.
+
 {: #color }
 ### `color` — Color value
 
@@ -146,6 +148,17 @@ This type is *not* available on `--target desmos-graphing`.
 
 {: .compatibility-note }
 This type is *not* available on `--target desmos-graphing`.
+
+{: #internal_bool }
+### `internal_bool` — Desmos-internal boolean value
+
+{: .note }
+This type is basically useless. It can be stored and passed around, but it cannot be used in a variable update or much
+of anything else and its value cannot be displayed by the Desmos interface.
+
+Representation of a pure boolean value in Desmos, which is only obtainable through very hacky means. It is described by
+Desmos's interface as a "true/false value." This is in contrast to the [`bool`](#bool) type, which is represented as a
+number.
 
 {: #enum }
 ## Enumeration Types

@@ -2,6 +2,7 @@ use crate::ast::RangeKind;
 use crate::desmos::{BoxedGraphEntry, GraphBinaryKind, GraphExpression, GraphExpressionEntry, GraphExpressionList, GraphFolderEntry, GraphImageEntry, GraphInequalityKind, GraphSlider, GraphSliderLoopMode, GraphTextEntry, GraphTicker, GraphUnaryKind};
 use crate::desmos::builder::library::LibraryBuilder;
 use crate::desmos::target::DesmosTargetInfo;
+use crate::desmos_expression;
 use crate::sema::{Program, ProgramAction, ProgramImmutable, ProgramPublicEntry, ProgramPublicLine, ProgramTicker, ProgramVariable, ProgramVariableKind};
 use crate::sema::display::{ImageValue, ProgramDisplayAttributeKind, ProgramDisplayElement};
 use crate::sema::values::{ActionValue, ActionValueKind, BinaryKind, ColorKind, DoubleReducerKind, IndexKind, InequalityKind, MathematicalConstant, ParameterizedReducerKind, ReducerKind, UnaryKind, Value, ValueKind};
@@ -856,6 +857,18 @@ impl<'target> GraphExpressionListBuilder<'target> {
                     lhs: Box::new(self.library.prefix_sum(self.target_info)),
                     rhs: Box::new(self.translate_value(operand)?),
                 })
+            }
+            UnaryKind::BoolToInternal => {
+                Ok(desmos_expression!(
+                    {self.library.bool_to_internal(self.target_info)}
+                    Call (Piecewise {self.translate_condition(operand)?})
+                ))
+            }
+            UnaryKind::BoolFromInternal => {
+                Ok(desmos_expression!(
+                    {self.library.bool_from_internal(self.target_info)}
+                    Call {self.translate_value(operand)?}
+                ))
             }
         }
     }

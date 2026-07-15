@@ -75,6 +75,7 @@ pub enum Type {
     Triangle3D,
     Sphere3D,
     Vector3D,
+    InternalBool,
     Str,
     Image,
     Point2 {
@@ -190,6 +191,7 @@ impl Type {
             "triangle3d" => Some(Self::Triangle3D),
             "sphere3d" => Some(Self::Sphere3D),
             "vector3d" => Some(Self::Vector3D),
+            "internal_bool" => Some(Self::InternalBool),
             "str" => Some(Self::Str),
             "image" => Some(Self::Image),
             _ => None,
@@ -307,6 +309,7 @@ impl Type {
             Self::Triangle3D => true,
             Self::Sphere3D => true,
             Self::Vector3D => true,
+            Self::InternalBool => true,
             Self::Str => false,
             Self::Image => false,
             Self::Point2 { .. } => true,
@@ -547,6 +550,7 @@ impl std::fmt::Display for Type {
             Self::Triangle3D => write!(f, "triangle3d"),
             Self::Sphere3D => write!(f, "sphere3d"),
             Self::Vector3D => write!(f, "vector3d"),
+            Self::InternalBool => write!(f, "internal_bool"),
             Self::Str => write!(f, "str"),
             Self::Image => write!(f, "image"),
             Self::Point2 { x_type, y_type } => {

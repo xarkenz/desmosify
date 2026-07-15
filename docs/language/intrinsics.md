@@ -885,7 +885,7 @@ The vertical height of the current viewport, in logical pixels.
 ```
 
 {: .note }
-This intrinsic is only defined within `ticker` declarations.
+This intrinsic no longer exists. This description applies to the optional parameter to a `ticker` action.
 
 The approximate time elapsed, in milliseconds, since the previous ticker tick. This time is not guaranteed to—and often
 will not—match the ticker's interval, if set.
@@ -902,12 +902,32 @@ include the pause time in `@dt`. This can cause strange behavior depending on wh
 ```
 
 {: .note }
-This intrinsic is only defined within `click` actions in `display` blocks.
+This intrinsic no longer exists. This description applies to the optional parameter to a `click` attribute.
 
 The index of the object which was clicked by the user. If the object is in a list of objects being displayed, this is
 the index of that object in the list. Otherwise, `@index` is 1.
 
 ## Desmosify
+
+{: #bool_to_internal }
+### `@bool_to_internal` — Create an internal boolean value
+
+```
+@bool_to_internal(value: bool): internal_bool
+```
+
+{: .note }
+This is basically useless.
+
+{: #bool_from_internal }
+### `@bool_from_internal` — Read an internal boolean value
+
+```
+@bool_from_internal(value: internal_bool): bool
+```
+
+{: .note }
+This is basically useless.
 
 {: #enum_values }
 ### `@enum_values` — List all valid values of an `enum` type

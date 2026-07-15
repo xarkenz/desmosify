@@ -257,6 +257,8 @@ pub const CORE_INTRINSIC_FUNCTIONS: &[&IntrinsicFunction] = &[
     // Sound
     // &TONE,
     // Desmosify
+    &BOOL_TO_INTERNAL,
+    &BOOL_FROM_INTERNAL,
     &ENUM_VALUES,
     &ENUM_VALUE,
     &INCLUDE_TEXT,
@@ -1389,6 +1391,14 @@ pub static OKLCH: IntrinsicFunction = color_intrinsic!("oklch" => Oklch);
 // TONE
 
 // ------ Desmosify ------
+
+pub static BOOL_TO_INTERNAL: IntrinsicFunction = unary_intrinsic!(
+    "bool_to_internal", (Type::Bool) => BoolToInternal, Type::InternalBool
+);
+
+pub static BOOL_FROM_INTERNAL: IntrinsicFunction = unary_intrinsic!(
+    "bool_from_internal", (Type::InternalBool) => BoolFromInternal, Type::Bool
+);
 
 // FIXME: this is broken for any enum that is not the default shape. to fix, generate a global list
 //        and reference it here

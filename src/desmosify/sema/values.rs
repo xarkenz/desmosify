@@ -91,6 +91,8 @@ pub enum UnaryKind {
     Vector2DEnd,
     Vector3DEnd,
     PrefixSum,
+    BoolToInternal,
+    BoolFromInternal,
 }
 
 #[derive(Copy, Clone, PartialEq, Debug)]

@@ -39,3 +39,9 @@ enum TestEnum {
 }
 
 let test_enum_variants: [TestEnum] = @enum_values(TestEnum);
+
+let internal_true: internal_bool = @bool_to_internal(true);
+let internal_false: internal_bool = @bool_to_internal(false);
+var my_bool: bool = true;
+let my_internal_bool: internal_bool = @bool_to_internal(my_bool);
+let my_output_bool: bool = @bool_from_internal(my_internal_bool) || @bool_from_internal(internal_true);
