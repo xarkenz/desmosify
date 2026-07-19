@@ -11,7 +11,7 @@ pub fn create_target() -> DesmosTargetInfo {
             product_name: "graphing".into(),
             ..Default::default()
         },
-        use_dcg_geo_folder: true,
+        use_geometry_folder: false,
         ..Default::default()
     }
 }

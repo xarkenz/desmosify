@@ -5,7 +5,7 @@ use crate::desmos::target::DesmosTargetInfo;
 use crate::desmos_expression;
 use crate::sema::{Program, ProgramAction, ProgramImmutable, ProgramPublicEntry, ProgramPublicLine, ProgramTicker, ProgramVariable, ProgramVariableKind};
 use crate::sema::display::{ImageValue, ProgramDisplayAttributeKind, ProgramDisplayElement};
-use crate::sema::values::{ActionValue, ActionValueKind, BinaryKind, ColorKind, DoubleReducerKind, IndexKind, InequalityKind, MathematicalConstant, ParameterizedReducerKind, ReducerKind, UnaryKind, Value, ValueKind};
+use crate::sema::values::{ActionValue, ActionValueKind, BinaryKind, DoubleReducerKind, IndexKind, InequalityKind, MathematicalConstant, ParameterizedReducerKind, ReducerKind, TernaryKind, UnaryKind, Value, ValueKind};
 
 mod library;
 
@@ -41,7 +41,7 @@ impl<'target> GraphExpressionListBuilder<'target> {
 
     pub fn new(target_info: &'target mut DesmosTargetInfo) -> Self {
         let mut construction_entries = Vec::<BoxedGraphEntry>::new();
-        if target_info.use_dcg_geo_folder {
+        if target_info.use_geometry_folder {
             construction_entries.push(Box::new(GraphFolderEntry {
                 id: CONSTRUCTIONS_FOLDER_ID.into(),
                 title: "geometry".into(),
@@ -138,20 +138,16 @@ impl<'target> GraphExpressionListBuilder<'target> {
     pub fn create_dummy_noop(&mut self) -> GraphExpression {
         let dummy_noop_id = self.next_dummy_noop_id;
         self.next_dummy_noop_id += 1;
-        let symbol = GraphExpression::Binary {
-            kind: GraphBinaryKind::Subscript,
-            lhs: Box::new(GraphExpression::Letter('D')),
-            rhs: Box::new(GraphExpression::Alphanumeric(format!("Noop{dummy_noop_id}"))),
-        };
+        let symbol = desmos_expression!(
+            (@letter 'D') Subscript (@alnum format!("Noop{dummy_noop_id}"))
+        );
 
         self.misc_entries.push(Box::new(GraphExpressionEntry {
             id: self.target_info.create_entry_id(),
             folder_id: Some(MISC_FOLDER_ID.into()),
-            expression: GraphExpression::Binary {
-                kind: GraphBinaryKind::Equal,
-                lhs: Box::new(symbol.clone()),
-                rhs: Box::new(GraphExpression::Integer(0)),
-            },
+            expression: desmos_expression!(
+                    {&symbol} Equal (@int 0)
+                ),
             ..Default::default()
         }));
 
@@ -159,21 +155,17 @@ impl<'target> GraphExpressionListBuilder<'target> {
     }
 
     pub fn get_dummy_unreachable(&mut self) -> GraphExpression {
-        let symbol = GraphExpression::Binary {
-            kind: GraphBinaryKind::Subscript,
-            lhs: Box::new(GraphExpression::Letter('D')),
-            rhs: Box::new(GraphExpression::Alphanumeric("Unreachable".into())),
-        };
+        let symbol = desmos_expression!(
+            (@letter 'D') Subscript (@alnum "Unreachable")
+        );
 
         if !self.dummy_unreachable_created {
             self.misc_entries.push(Box::new(GraphExpressionEntry {
                 id: self.target_info.create_entry_id(),
                 folder_id: Some(MISC_FOLDER_ID.into()),
-                expression: GraphExpression::Binary {
-                    kind: GraphBinaryKind::Equal,
-                    lhs: Box::new(symbol.clone()),
-                    rhs: Box::new(GraphExpression::Integer(0)),
-                },
+                expression: desmos_expression!(
+                    {&symbol} Equal (@int 0)
+                ),
                 ..Default::default()
             }));
 
@@ -193,14 +185,9 @@ impl<'target> GraphExpressionListBuilder<'target> {
             ValueKind::Undefined(..) => {
                 // Create undefined using the alternative branch of a piecewise. This is the best
                 // way to generate it reliably for any type that I can think of.
-                Ok(GraphExpression::Unary {
-                    kind: GraphUnaryKind::Piecewise,
-                    inner: Box::new(GraphExpression::Binary {
-                        kind: GraphBinaryKind::Equal,
-                        lhs: Box::new(GraphExpression::Integer(0)),
-                        rhs: Box::new(GraphExpression::Integer(1)),
-                    }),
-                })
+                Ok(desmos_expression!(
+                    Piecewise ((@int 0) Equal (@int 1))
+                ))
             }
             ValueKind::Infinity(..) => {
                 Ok(GraphExpression::Escape("infty".into()))
@@ -251,30 +238,26 @@ impl<'target> GraphExpressionListBuilder<'target> {
             ValueKind::Binary { kind, lhs, rhs, .. } => {
                 self.translate_binary(*kind, lhs, rhs, unsupported_error)
             }
+            ValueKind::Ternary { kind, first, second, third, .. } => {
+                self.translate_ternary(*kind, first, second, third, unsupported_error)
+            }
             ValueKind::InequalityChain { lhs, chain, .. } => {
-                Ok(GraphExpression::Unary {
-                    kind: GraphUnaryKind::Piecewise,
-                    inner: Box::new(GraphExpression::Sequence {
-                        elements: Vec::from([
-                            GraphExpression::InequalityChain {
-                                lhs: Box::new(self.translate_value(lhs)?),
-                                chain: chain
-                                    .iter()
-                                    .map(|(kind, rhs)| Ok((
-                                        match kind {
-                                            InequalityKind::LessThan => GraphInequalityKind::LessThan,
-                                            InequalityKind::LessEqual => GraphInequalityKind::LessEqual,
-                                            InequalityKind::GreaterThan => GraphInequalityKind::GreaterThan,
-                                            InequalityKind::GreaterEqual => GraphInequalityKind::GreaterEqual,
-                                        },
-                                        self.translate_value(rhs)?,
-                                    )))
-                                    .collect::<crate::Result<_>>()?,
-                            },
-                            GraphExpression::Integer(0),
-                        ]),
-                    }),
-                })
+                Ok(desmos_expression!(
+                    Piecewise [
+                        (@ineq {self.translate_value(lhs)?} [@? chain
+                            .iter()
+                            .map(|(kind, rhs)| Ok((
+                                match kind {
+                                    InequalityKind::LessThan => GraphInequalityKind::LessThan,
+                                    InequalityKind::LessEqual => GraphInequalityKind::LessEqual,
+                                    InequalityKind::GreaterThan => GraphInequalityKind::GreaterThan,
+                                    InequalityKind::GreaterEqual => GraphInequalityKind::GreaterEqual,
+                                },
+                                self.translate_value(rhs)?,
+                            )))]),
+                        (@int 0),
+                    ]
+                ))
             }
             ValueKind::Reducer { kind, list, .. } => {
                 self.translate_reducer(*kind, [list.as_ref()], unsupported_error)
@@ -288,236 +271,112 @@ impl<'target> GraphExpressionListBuilder<'target> {
             ValueKind::ParameterizedReducer { kind, list, parameter, .. } => {
                 self.translate_parameterized_reducer(*kind, list, parameter, unsupported_error)
             }
-            ValueKind::Color { kind, value_1, value_2, value_3, .. } => {
-                self.translate_color(*kind, value_1, value_2, value_3, unsupported_error)
-            }
             ValueKind::Join { values, .. } => {
-                Ok(GraphExpression::Binary {
-                    kind: GraphBinaryKind::Call,
-                    lhs: Box::new(GraphExpression::OperatorName("join".into())),
-                    rhs: Box::new(GraphExpression::Sequence {
-                        elements: values
-                            .iter()
-                            .map(|argument| self.translate_value(argument))
-                            .collect::<crate::Result<_>>()?,
-                    }),
-                })
-            }
-            ValueKind::Sort { list, key_list } => {
-                Ok(GraphExpression::Binary {
-                    kind: GraphBinaryKind::Call,
-                    lhs: Box::new(GraphExpression::OperatorName("sort".into())),
-                    rhs: Box::new(GraphExpression::Sequence {
-                        elements: [list.as_ref()]
-                            .into_iter()
-                            .chain(key_list.as_deref())
-                            .map(|argument| self.translate_value(argument))
-                            .collect::<crate::Result<_>>()?,
-                    }),
-                })
+                Ok(desmos_expression!(
+                    (@operatorname "join") Call [@? values
+                        .iter()
+                        .map(|argument| self.translate_value(argument))]
+                ))
             }
             ValueKind::Random { source, sample_count, .. } => {
-                Ok(GraphExpression::Binary {
-                    kind: GraphBinaryKind::Call,
-                    lhs: Box::new(GraphExpression::OperatorName("random".into())),
-                    rhs: Box::new(GraphExpression::Sequence {
-                        elements: source.as_deref()
-                            .into_iter()
-                            .chain(sample_count.as_deref())
-                            .map(|argument| self.translate_value(argument))
-                            .collect::<crate::Result<_>>()?,
-                    }),
-                })
+                Ok(desmos_expression!(
+                    (@operatorname "random") Call [@? source.as_deref()
+                        .into_iter()
+                        .chain(sample_count.as_deref())
+                        .map(|argument| self.translate_value(argument))]
+                ))
             }
-            ValueKind::SeededRandom { source, sample_count, seed, .. } => {
-                Ok(GraphExpression::Binary {
-                    kind: GraphBinaryKind::Call,
-                    lhs: Box::new(GraphExpression::OperatorName("random".into())),
-                    rhs: Box::new(GraphExpression::Sequence {
-                        elements: source.as_deref()
-                            .into_iter()
-                            .chain([sample_count.as_ref(), seed.as_ref()])
-                            .map(|argument| self.translate_value(argument))
-                            .collect::<crate::Result<_>>()?,
-                    }),
-                })
-            }
-            ValueKind::Shuffle { list, seed } => {
-                Ok(GraphExpression::Binary {
-                    kind: GraphBinaryKind::Call,
-                    lhs: Box::new(GraphExpression::OperatorName("shuffle".into())),
-                    rhs: Box::new(GraphExpression::Sequence {
-                        elements: [list.as_ref()]
-                            .into_iter()
-                            .chain(seed.as_deref())
-                            .map(|argument| self.translate_value(argument))
-                            .collect::<crate::Result<_>>()?,
-                    }),
-                })
-            }
-            ValueKind::Unique { list } => {
-                Ok(GraphExpression::Binary {
-                    kind: GraphBinaryKind::Call,
-                    lhs: Box::new(GraphExpression::OperatorName("unique".into())),
-                    rhs: Box::new(self.translate_value(list)?),
-                })
-            }
-            ValueKind::Rotation { object, point, angle, .. } => {
-                Ok(GraphExpression::Binary {
-                    kind: GraphBinaryKind::Call,
-                    lhs: Box::new(GraphExpression::OperatorName("rotate".into())),
-                    rhs: Box::new(GraphExpression::Sequence {
-                        elements: Vec::from([
-                            self.translate_value(object)?,
-                            self.translate_value(point)?,
-                            self.translate_value(angle)?,
-                        ]),
-                    }),
-                })
-            }
-            ValueKind::Point2 { x, y, .. } => {
-                Ok(GraphExpression::Unary {
-                    kind: GraphUnaryKind::Parentheses,
-                    inner: Box::new(GraphExpression::Sequence {
-                        elements: Vec::from([
-                            self.translate_value(x)?,
-                            self.translate_value(y)?,
-                        ]),
-                    }),
-                })
-            }
-            ValueKind::Point3 { x, y, z, .. } => {
-                Ok(GraphExpression::Unary {
-                    kind: GraphUnaryKind::Parentheses,
-                    inner: Box::new(GraphExpression::Sequence {
-                        elements: Vec::from([
-                            self.translate_value(x)?,
-                            self.translate_value(y)?,
-                            self.translate_value(z)?,
-                        ]),
-                    }),
-                })
+            ValueKind::RandomSeeded { source, sample_count, seed, .. } => {
+                Ok(desmos_expression!(
+                    (@operatorname "random") Call [@? source.as_deref()
+                        .into_iter()
+                        .chain([sample_count.as_ref(), seed.as_ref()])
+                        .map(|argument| self.translate_value(argument))]
+                ))
             }
             ValueKind::List { items, .. } => {
-                Ok(GraphExpression::Unary {
-                    kind: GraphUnaryKind::List,
-                    inner: Box::new(GraphExpression::Sequence {
-                        elements: items
-                            .iter()
-                            .map(|item| self.translate_value(item))
-                            .collect::<crate::Result<_>>()?,
-                    }),
-                })
+                Ok(desmos_expression!(
+                    List [@? items
+                        .iter()
+                        .map(|item| self.translate_value(item))]
+                ))
             }
             ValueKind::ListRange { kind, start, end, step, .. } => {
-                Ok(GraphExpression::Binary {
-                    kind: GraphBinaryKind::Call,
-                    lhs: Box::new(match kind {
+                Ok(desmos_expression!(
+                    {match kind {
                         RangeKind::Inclusive => self.library.range_inclusive(self.target_info),
                         RangeKind::Exclusive => self.library.range_exclusive(self.target_info),
-                    }),
-                    rhs: Box::new(GraphExpression::Sequence {
-                        elements: Vec::from([
-                            self.translate_value(start)?,
-                            self.translate_value(end)?,
-                            self.translate_value(step)?,
-                        ]),
-                    }),
-                })
+                    }} Call [
+                        {self.translate_value(start)?},
+                        {self.translate_value(end)?},
+                        {self.translate_value(step)?},
+                    ]
+                ))
             }
             ValueKind::ListFill { value, count } => {
-                Ok(GraphExpression::Binary {
-                    kind: GraphBinaryKind::Call,
-                    lhs: Box::new(GraphExpression::OperatorName("repeat".into())),
-                    rhs: Box::new(GraphExpression::Sequence {
-                        elements: Vec::from([
-                            self.translate_value(value)?,
-                            self.translate_value(count)?,
-                        ]),
-                    }),
-                })
+                Ok(desmos_expression!(
+                    (@operatorname "repeat") Call [
+                        {self.translate_value(value)?},
+                        {self.translate_value(count)?},
+                    ]
+                ))
             }
             ValueKind::ListMap { loops, value } => {
-                Ok(GraphExpression::Unary {
-                    kind: GraphUnaryKind::List,
-                    inner: Box::new(GraphExpression::Binary {
-                        kind: GraphBinaryKind::For,
-                        lhs: Box::new(self.translate_value(value)?),
-                        rhs: Box::new(GraphExpression::Sequence {
-                            elements: loops
-                                .iter()
-                                .rev()
-                                .map(|map_loop| Ok(GraphExpression::Binary {
-                                    kind: GraphBinaryKind::Equal,
-                                    lhs: Box::new(self.target_info.get_local_symbol(map_loop.local.id)),
-                                    rhs: Box::new(self.translate_value(&map_loop.list)?),
-                                }))
-                                .collect::<crate::Result<_>>()?,
-                        }),
-                    }),
-                })
+                Ok(desmos_expression!(
+                    List ({self.translate_value(value)?} For [@? loops
+                        .iter()
+                        .rev()
+                        .map(|map_loop| Ok(desmos_expression!(
+                            {self.target_info.get_local_symbol(map_loop.local.id)}
+                            Equal {self.translate_value(&map_loop.list)?}
+                        )))])
+                ))
             }
             ValueKind::ListFilter { list, condition, .. } => {
-                Ok(GraphExpression::Binary {
-                    kind: GraphBinaryKind::Index,
-                    lhs: Box::new(self.translate_value(list)?),
-                    rhs: Box::new(self.translate_condition(condition)?),
-                })
+                Ok(desmos_expression!(
+                    {self.translate_value(list)?} Index {self.translate_condition(condition)?}
+                ))
             }
             ValueKind::Index { list, kind: operation, .. } => match operation {
                 IndexKind::Single { index } => {
-                    Ok(GraphExpression::Binary {
-                        kind: GraphBinaryKind::Index,
-                        lhs: Box::new(self.translate_value(list)?),
-                        rhs: Box::new(self.translate_value(index)?),
-                    })
+                    Ok(desmos_expression!(
+                        {self.translate_value(list)?} Index {self.translate_value(index)?}
+                    ))
                 }
                 IndexKind::Range { kind, from_index, to_index, step} => {
-                    Ok(GraphExpression::Binary {
-                        kind: GraphBinaryKind::Call,
-                        lhs: Box::new(match kind {
+                    Ok(desmos_expression!(
+                        {match kind {
                             RangeKind::Inclusive => self.library.index_range_inclusive(self.target_info),
                             RangeKind::Exclusive => self.library.index_range_exclusive(self.target_info),
-                        }),
-                        rhs: Box::new(GraphExpression::Sequence {
-                            elements: Vec::from([
-                                self.translate_value(list)?,
-                                self.translate_value(from_index)?,
-                                self.translate_value(to_index)?,
-                                self.translate_value(step)?,
-                            ]),
-                        }),
-                    })
+                        }} Call [
+                            {self.translate_value(list)?},
+                            {self.translate_value(from_index)?},
+                            {self.translate_value(to_index)?},
+                            {self.translate_value(step)?},
+                        ]
+                    ))
                 }
                 IndexKind::RangeFrom { from_index, step } => {
-                    Ok(GraphExpression::Binary {
-                        kind: GraphBinaryKind::Call,
-                        lhs: Box::new(self.library.index_range_from(self.target_info)),
-                        rhs: Box::new(GraphExpression::Sequence {
-                            elements: Vec::from([
-                                self.translate_value(list)?,
-                                self.translate_value(from_index)?,
-                                self.translate_value(step)?,
-                            ]),
-                        }),
-                    })
+                    Ok(desmos_expression!(
+                        {self.library.index_range_from(self.target_info)} Call [
+                            {self.translate_value(list)?},
+                            {self.translate_value(from_index)?},
+                            {self.translate_value(step)?},
+                        ]
+                    ))
                 }
                 IndexKind::RangeTo { kind, to_index } => {
-                    Ok(GraphExpression::Binary {
-                        kind: GraphBinaryKind::Call,
-                        lhs: Box::new(match kind {
+                    Ok(desmos_expression!(
+                        {match kind {
                             RangeKind::Inclusive => self.library.index_range_inclusive(self.target_info),
                             RangeKind::Exclusive => self.library.index_range_exclusive(self.target_info),
-                        }),
-                        rhs: Box::new(GraphExpression::Sequence {
-                            elements: Vec::from([
-                                self.translate_value(list)?,
-                                GraphExpression::Integer(1),
-                                self.translate_value(to_index)?,
-                                GraphExpression::Integer(1),
-                            ]),
-                        }),
-                    })
+                        }} Call [
+                            {self.translate_value(list)?},
+                            (@int 1),
+                            {self.translate_value(to_index)?},
+                            (@int 1),
+                        ]
+                    ))
                 }
             }
             ValueKind::Conditional { condition_consequents, alternative, .. } => {
@@ -527,11 +386,17 @@ impl<'target> GraphExpressionListBuilder<'target> {
                         elements: {
                             let mut elements: Vec<_> = condition_consequents
                                 .iter()
-                                .map(|(condition, consequent)| Ok(GraphExpression::Binary {
-                                    kind: GraphBinaryKind::Colon,
-                                    lhs: Box::new(self.translate_condition(condition)?),
-                                    rhs: Box::new(self.translate_value(consequent)?),
-                                }))
+                                .map(|(condition, consequent)| {
+                                    let condition = self.translate_condition(condition)?;
+                                    if consequent.is_one() {
+                                        Ok(condition)
+                                    }
+                                    else {
+                                        Ok(desmos_expression!(
+                                            {condition} Colon {self.translate_value(consequent)?}
+                                        ))
+                                    }
+                                })
                                 .collect::<crate::Result<_>>()?;
                             if !alternative.is_undefined() {
                                 elements.push(self.translate_value(alternative)?);
@@ -542,16 +407,11 @@ impl<'target> GraphExpressionListBuilder<'target> {
                 })
             }
             ValueKind::UserFunctionCall { function, arguments, .. } => {
-                Ok(GraphExpression::Binary {
-                    kind: GraphBinaryKind::Call,
-                    lhs: Box::new(self.translate_value(function)?),
-                    rhs: Box::new(GraphExpression::Sequence {
-                        elements: arguments
-                            .iter()
-                            .map(|argument| self.translate_value(argument))
-                            .collect::<crate::Result<_>>()?,
-                    }),
-                })
+                Ok(desmos_expression!(
+                    {self.translate_value(function)?} Call [@? arguments
+                        .iter()
+                        .map(|argument| self.translate_value(argument))]
+                ))
             }
             ValueKind::InlineAction { parameters, action } => {
                 let action = self.translate_action_value(action)?;
@@ -560,23 +420,17 @@ impl<'target> GraphExpressionListBuilder<'target> {
                 let entry = Box::new(GraphExpressionEntry {
                     id: self.target_info.create_entry_id(),
                     folder_id: Some(ACTIONS_FOLDER_ID.into()),
-                    expression: GraphExpression::Binary {
-                        kind: GraphBinaryKind::Equal,
-                        lhs: Box::new(if parameters.is_empty() {
-                            action_symbol.clone()
-                        } else {
-                            GraphExpression::Binary {
-                                kind: GraphBinaryKind::Call,
-                                lhs: Box::new(action_symbol.clone()),
-                                rhs: Box::new(GraphExpression::Sequence {
-                                    elements: parameters
-                                        .iter()
-                                        .map(|parameter| self.target_info.get_local_symbol(parameter.id))
-                                        .collect(),
-                                }),
-                            }
-                        }),
-                        rhs: Box::new(action),
+                    expression: if parameters.is_empty() {
+                        desmos_expression!(
+                            {&action_symbol} Equal {action}
+                        )
+                    } else {
+                        desmos_expression!(
+                            ({&action_symbol} Call [@ parameters.iter().map(|parameter| {
+                                self.target_info.get_local_symbol(parameter.id)
+                            })])
+                            Equal {action}
+                        )
                     },
                     ..Default::default()
                 });
@@ -596,223 +450,166 @@ impl<'target> GraphExpressionListBuilder<'target> {
     ) -> crate::Result<GraphExpression> {
         let _ = unsupported_error; // We'll use you soon enough
 
-        fn unary_operator(kind: GraphUnaryKind, inner: GraphExpression) -> GraphExpression {
-            GraphExpression::Unary {
-                kind: GraphUnaryKind::Parentheses,
-                inner: Box::new(GraphExpression::Unary {
-                    kind,
-                    inner: Box::new(inner),
-                }),
-            }
-        }
-        fn unary_function(name: &str, argument: GraphExpression) -> GraphExpression {
-            GraphExpression::Binary {
-                kind: GraphBinaryKind::Call,
-                lhs: Box::new(GraphExpression::OperatorName(name.into())),
-                rhs: Box::new(argument),
-            }
-        }
-
         match kind {
             UnaryKind::AssumeType => {
                 self.translate_value(operand)
             }
             UnaryKind::Positive => {
-                Ok(unary_operator(
-                    GraphUnaryKind::Positive,
-                    self.translate_value(operand)?,
+                Ok(desmos_expression!(
+                    Parentheses (Positive {self.translate_value(operand)?})
                 ))
             }
             UnaryKind::Negative => {
-                Ok(unary_operator(
-                    GraphUnaryKind::Negative,
-                    self.translate_value(operand)?,
+                Ok(desmos_expression!(
+                    Parentheses (Negative {self.translate_value(operand)?})
                 ))
             }
             UnaryKind::LogicalNot => {
-                Ok(GraphExpression::Unary {
-                    kind: GraphUnaryKind::Piecewise,
-                    inner: Box::new(GraphExpression::Sequence {
-                        elements: vec![
-                            GraphExpression::Binary {
-                                kind: GraphBinaryKind::Equal,
-                                lhs: Box::new(self.translate_value(operand)?),
-                                rhs: Box::new(GraphExpression::Integer(0)),
-                            },
-                            GraphExpression::Integer(0),
-                        ],
-                    }),
-                })
+                Ok(desmos_expression!(
+                    Piecewise [
+                        ({self.translate_value(operand)?} Equal (@int 0)),
+                        (@int 0),
+                    ]
+                ))
             }
-            UnaryKind::GetX => {
-                Ok(GraphExpression::Binary {
-                    kind: GraphBinaryKind::Dot,
-                    lhs: Box::new(self.translate_value(operand)?),
-                    rhs: Box::new(GraphExpression::Letter('x')),
-                })
+            UnaryKind::XOfPoint2D | UnaryKind::XOfPoint3D => {
+                Ok(desmos_expression!(
+                    {self.translate_value(operand)?} Dot (@letter 'x')
+                ))
             }
-            UnaryKind::GetY => {
-                Ok(GraphExpression::Binary {
-                    kind: GraphBinaryKind::Dot,
-                    lhs: Box::new(self.translate_value(operand)?),
-                    rhs: Box::new(GraphExpression::Letter('y')),
-                })
+            UnaryKind::YOfPoint2D | UnaryKind::YOfPoint3D => {
+                Ok(desmos_expression!(
+                    {self.translate_value(operand)?} Dot (@letter 'y')
+                ))
             }
-            UnaryKind::GetZ => {
-                Ok(GraphExpression::Binary {
-                    kind: GraphBinaryKind::Dot,
-                    lhs: Box::new(self.translate_value(operand)?),
-                    rhs: Box::new(GraphExpression::Letter('z')),
-                })
+            UnaryKind::ZOfPoint3D => {
+                Ok(desmos_expression!(
+                    {self.translate_value(operand)?} Dot (@letter 'z')
+                ))
             }
             UnaryKind::Sin => {
-                Ok(unary_function(
-                    "sin",
-                    self.translate_value(operand)?,
+                Ok(desmos_expression!(
+                    (@operatorname "sin") Call {self.translate_value(operand)?}
                 ))
             }
             UnaryKind::Cos => {
-                Ok(unary_function(
-                    "cos",
-                    self.translate_value(operand)?,
+                Ok(desmos_expression!(
+                    (@operatorname "cos") Call {self.translate_value(operand)?}
                 ))
             }
             UnaryKind::Tan => {
-                Ok(unary_function(
-                    "tan",
-                    self.translate_value(operand)?,
+                Ok(desmos_expression!(
+                    (@operatorname "tan") Call {self.translate_value(operand)?}
                 ))
             }
             UnaryKind::Csc => {
-                Ok(unary_function(
-                    "csc",
-                    self.translate_value(operand)?,
+                Ok(desmos_expression!(
+                    (@operatorname "csc") Call {self.translate_value(operand)?}
                 ))
             }
             UnaryKind::Sec => {
-                Ok(unary_function(
-                    "sec",
-                    self.translate_value(operand)?,
+                Ok(desmos_expression!(
+                    (@operatorname "sec") Call {self.translate_value(operand)?}
                 ))
             }
             UnaryKind::Cot => {
-                Ok(unary_function(
-                    "cot",
-                    self.translate_value(operand)?,
+                Ok(desmos_expression!(
+                    (@operatorname "cot") Call {self.translate_value(operand)?}
                 ))
             }
             UnaryKind::Arcsin => {
-                Ok(unary_function(
-                    "arcsin",
-                    self.translate_value(operand)?,
+                Ok(desmos_expression!(
+                    (@operatorname "arcsin") Call {self.translate_value(operand)?}
                 ))
             }
             UnaryKind::Arccos => {
-                Ok(unary_function(
-                    "arccos",
-                    self.translate_value(operand)?,
+                Ok(desmos_expression!(
+                    (@operatorname "arccos") Call {self.translate_value(operand)?}
                 ))
             }
             UnaryKind::Arctan => {
-                Ok(unary_function(
-                    "arctan",
-                    self.translate_value(operand)?,
+                Ok(desmos_expression!(
+                    (@operatorname "arctan") Call {self.translate_value(operand)?}
                 ))
             }
             UnaryKind::Arccsc => {
-                Ok(unary_function(
-                    "arccsc",
-                    self.translate_value(operand)?,
+                Ok(desmos_expression!(
+                    (@operatorname "arccsc") Call {self.translate_value(operand)?}
                 ))
             }
             UnaryKind::Arcsec => {
-                Ok(unary_function(
-                    "arcsec",
-                    self.translate_value(operand)?,
+                Ok(desmos_expression!(
+                    (@operatorname "arcsec") Call {self.translate_value(operand)?}
                 ))
             }
             UnaryKind::Arccot => {
-                Ok(unary_function(
-                    "arccot",
-                    self.translate_value(operand)?,
+                Ok(desmos_expression!(
+                    (@operatorname "arccot") Call {self.translate_value(operand)?}
                 ))
             }
             UnaryKind::Sinh => {
-                Ok(unary_function(
-                    "sinh",
-                    self.translate_value(operand)?,
+                Ok(desmos_expression!(
+                    (@operatorname "sinh") Call {self.translate_value(operand)?}
                 ))
             }
             UnaryKind::Cosh => {
-                Ok(unary_function(
-                    "cosh",
-                    self.translate_value(operand)?,
+                Ok(desmos_expression!(
+                    (@operatorname "cosh") Call {self.translate_value(operand)?}
                 ))
             }
             UnaryKind::Tanh => {
-                Ok(unary_function(
-                    "tanh",
-                    self.translate_value(operand)?,
+                Ok(desmos_expression!(
+                    (@operatorname "tanh") Call {self.translate_value(operand)?}
                 ))
             }
             UnaryKind::Csch => {
-                Ok(unary_function(
-                    "csch",
-                    self.translate_value(operand)?,
+                Ok(desmos_expression!(
+                    (@operatorname "csch") Call {self.translate_value(operand)?}
                 ))
             }
             UnaryKind::Sech => {
-                Ok(unary_function(
-                    "sech",
-                    self.translate_value(operand)?,
+                Ok(desmos_expression!(
+                    (@operatorname "sech") Call {self.translate_value(operand)?}
                 ))
             }
             UnaryKind::Coth => {
-                Ok(unary_function(
-                    "coth",
-                    self.translate_value(operand)?,
+                Ok(desmos_expression!(
+                    (@operatorname "coth") Call {self.translate_value(operand)?}
                 ))
             }
             UnaryKind::Exp => {
-                Ok(unary_function(
-                    "exp",
-                    self.translate_value(operand)?,
+                Ok(desmos_expression!(
+                    (@operatorname "exp") Call {self.translate_value(operand)?}
                 ))
             }
             UnaryKind::Ln => {
-                Ok(unary_function(
-                    "exp",
-                    self.translate_value(operand)?,
+                Ok(desmos_expression!(
+                    (@operatorname "ln") Call {self.translate_value(operand)?}
                 ))
             }
             UnaryKind::Ceil => {
-                Ok(unary_function(
-                    "ceil",
-                    self.translate_value(operand)?,
+                Ok(desmos_expression!(
+                    (@operatorname "ceil") Call {self.translate_value(operand)?}
                 ))
             }
             UnaryKind::Floor => {
-                Ok(unary_function(
-                    "floor",
-                    self.translate_value(operand)?,
+                Ok(desmos_expression!(
+                    (@operatorname "floor") Call {self.translate_value(operand)?}
                 ))
             }
             UnaryKind::Round => {
-                Ok(unary_function(
-                    "round",
-                    self.translate_value(operand)?,
+                Ok(desmos_expression!(
+                    (@operatorname "round") Call {self.translate_value(operand)?}
                 ))
             }
             UnaryKind::Abs => {
-                Ok(GraphExpression::Unary {
-                    kind: GraphUnaryKind::Pipes,
-                    inner: Box::new(self.translate_value(operand)?),
-                })
+                Ok(desmos_expression!(
+                    Pipes {self.translate_value(operand)?}
+                ))
             }
             UnaryKind::Sign => {
-                Ok(unary_function(
-                    "sign",
-                    self.translate_value(operand)?,
+                Ok(desmos_expression!(
+                    (@operatorname "sign") Call {self.translate_value(operand)?}
                 ))
             }
             UnaryKind::Sqrt => {
@@ -828,35 +625,85 @@ impl<'target> GraphExpressionListBuilder<'target> {
                 })
             }
             UnaryKind::Factorial => {
-                Ok(unary_operator(
-                    GraphUnaryKind::Factorial,
-                    self.translate_value(operand)?,
+                Ok(desmos_expression!(
+                    Parentheses (Factorial {self.translate_value(operand)?})
                 ))
             }
-            UnaryKind::MidpointOfSegment2D | UnaryKind::MidpointOfSegment3D => {
-                Ok(unary_function(
-                    "midpoint",
-                    self.translate_value(operand)?,
+            UnaryKind::Sort => {
+                Ok(desmos_expression!(
+                    (@operatorname "sort") Call {self.translate_value(operand)?}
                 ))
             }
-            UnaryKind::Vector2DStart | UnaryKind::Vector3DStart => {
-                Ok(unary_function(
-                    "start",
-                    self.translate_value(operand)?,
+            UnaryKind::Shuffle => {
+                Ok(desmos_expression!(
+                    (@operatorname "shuffle") Call {self.translate_value(operand)?}
                 ))
             }
-            UnaryKind::Vector2DEnd | UnaryKind::Vector3DEnd => {
-                Ok(unary_function(
-                    "end",
-                    self.translate_value(operand)?,
+            UnaryKind::Unique => {
+                Ok(desmos_expression!(
+                    (@operatorname "unique") Call {self.translate_value(operand)?}
                 ))
             }
             UnaryKind::PrefixSum => {
-                Ok(GraphExpression::Binary {
-                    kind: GraphBinaryKind::Call,
-                    lhs: Box::new(self.library.prefix_sum(self.target_info)),
-                    rhs: Box::new(self.translate_value(operand)?),
-                })
+                Ok(desmos_expression!(
+                    {self.library.prefix_sum(self.target_info)}
+                    Call {self.translate_value(operand)?}
+                ))
+            }
+            UnaryKind::AreaOfPolygon => {
+                Ok(desmos_expression!(
+                    (@operatorname "area") Call {self.translate_value(operand)?}
+                ))
+            }
+            UnaryKind::PerimeterOfPolygon => {
+                Ok(desmos_expression!(
+                    (@operatorname "perimeter") Call {self.translate_value(operand)?}
+                ))
+            }
+            UnaryKind::VerticesOfPolygon => {
+                Ok(desmos_expression!(
+                    (@operatorname "vertices") Call {self.translate_value(operand)?}
+                ))
+            }
+            UnaryKind::SegmentsOfPolygon => {
+                Ok(desmos_expression!(
+                    (@operatorname "segments") Call {self.translate_value(operand)?}
+                ))
+            }
+            UnaryKind::UndirectedAnglesOfPolygon => {
+                Ok(desmos_expression!(
+                    (@operatorname "angles") Call {self.translate_value(operand)?}
+                ))
+            }
+            UnaryKind::DirectedAnglesOfPolygon => {
+                Ok(desmos_expression!(
+                    (@operatorname "directedangles") Call {self.translate_value(operand)?}
+                ))
+            }
+            UnaryKind::RadiusOfCircle => {
+                Ok(desmos_expression!(
+                    (@operatorname "radius") Call {self.translate_value(operand)?}
+                ))
+            }
+            UnaryKind::CenterOfCircle => {
+                Ok(desmos_expression!(
+                    (@operatorname "center") Call {self.translate_value(operand)?}
+                ))
+            }
+            UnaryKind::MidpointOfSegment2D | UnaryKind::MidpointOfSegment3D => {
+                Ok(desmos_expression!(
+                    (@operatorname "midpoint") Call {self.translate_value(operand)?}
+                ))
+            }
+            UnaryKind::StartOfVector2D | UnaryKind::StartOfVector3D => {
+                Ok(desmos_expression!(
+                    (@operatorname "start") Call {self.translate_value(operand)?}
+                ))
+            }
+            UnaryKind::EndOfVector2D | UnaryKind::EndOfVector3D => {
+                Ok(desmos_expression!(
+                    (@operatorname "end") Call {self.translate_value(operand)?}
+                ))
             }
             UnaryKind::BoolToInternal => {
                 Ok(desmos_expression!(
@@ -882,167 +729,118 @@ impl<'target> GraphExpressionListBuilder<'target> {
     ) -> crate::Result<GraphExpression> {
         let _ = unsupported_error; // We'll use you soon enough
 
-        fn binary_operator(kind: GraphBinaryKind, lhs: GraphExpression, rhs: GraphExpression) -> GraphExpression {
-            GraphExpression::Unary {
-                kind: GraphUnaryKind::Parentheses,
-                inner: Box::new(GraphExpression::Binary {
-                    kind,
-                    lhs: Box::new(lhs),
-                    rhs: Box::new(rhs),
-                }),
-            }
-        }
-        fn binary_function(name: &str, lhs: GraphExpression, rhs: GraphExpression) -> GraphExpression {
-            GraphExpression::Binary {
-                kind: GraphBinaryKind::Call,
-                lhs: Box::new(GraphExpression::OperatorName(name.into())),
-                rhs: Box::new(GraphExpression::Sequence {
-                    elements: [lhs, rhs].into(),
-                }),
-            }
-        }
-
         match kind {
             BinaryKind::Exponent => {
-                Ok(binary_operator(
-                    GraphBinaryKind::Superscript,
-                    self.translate_value(lhs)?,
-                    self.translate_value(rhs)?,
+                Ok(desmos_expression!(
+                    Parentheses (
+                        {self.translate_value(lhs)?} Superscript {self.translate_value(rhs)?}
+                    )
                 ))
             }
             BinaryKind::Multiply => {
-                Ok(binary_operator(
-                    GraphBinaryKind::Multiply,
-                    self.translate_value(lhs)?,
-                    self.translate_value(rhs)?,
+                Ok(desmos_expression!(
+                    Parentheses (
+                        {self.translate_value(lhs)?} Multiply {self.translate_value(rhs)?}
+                    )
                 ))
             }
             BinaryKind::DotProduct => {
-                Ok(binary_operator(
-                    GraphBinaryKind::DotMultiply,
-                    self.translate_value(lhs)?,
-                    self.translate_value(rhs)?,
+                Ok(desmos_expression!(
+                    Parentheses (
+                        {self.translate_value(lhs)?} DotMultiply {self.translate_value(rhs)?}
+                    )
                 ))
             }
             BinaryKind::CrossProduct => {
-                Ok(binary_operator(
-                    GraphBinaryKind::CrossMultiply,
-                    self.translate_value(lhs)?,
-                    self.translate_value(rhs)?,
+                Ok(desmos_expression!(
+                    Parentheses (
+                        {self.translate_value(lhs)?} CrossMultiply {self.translate_value(rhs)?}
+                    )
                 ))
             }
             BinaryKind::Divide => {
-                Ok(binary_operator(
-                    GraphBinaryKind::Divide,
-                    self.translate_value(lhs)?,
-                    self.translate_value(rhs)?,
+                Ok(desmos_expression!(
+                    Parentheses (
+                        {self.translate_value(lhs)?} Divide {self.translate_value(rhs)?}
+                    )
                 ))
             }
             BinaryKind::Remainder => {
-                Ok(binary_function(
-                    "mod",
-                    self.translate_value(lhs)?,
-                    self.translate_value(rhs)?,
+                Ok(desmos_expression!(
+                    (@operatorname "mod") Call [
+                        {self.translate_value(lhs)?},
+                        {self.translate_value(rhs)?},
+                    ]
                 ))
             }
             BinaryKind::Add => {
-                Ok(binary_operator(
-                    GraphBinaryKind::Add,
-                    self.translate_value(lhs)?,
-                    self.translate_value(rhs)?,
+                Ok(desmos_expression!(
+                    Parentheses (
+                        {self.translate_value(lhs)?} Add {self.translate_value(rhs)?}
+                    )
                 ))
             }
             BinaryKind::Subtract => {
-                Ok(binary_operator(
-                    GraphBinaryKind::Subtract,
-                    self.translate_value(lhs)?,
-                    self.translate_value(rhs)?,
+                Ok(desmos_expression!(
+                    Parentheses (
+                        {self.translate_value(lhs)?} Subtract {self.translate_value(rhs)?}
+                    )
                 ))
             }
             BinaryKind::Equal => {
-                Ok(GraphExpression::Unary {
-                    kind: GraphUnaryKind::Piecewise,
-                    inner: Box::new(GraphExpression::Sequence {
-                        elements: Vec::from([
-                            GraphExpression::Binary {
-                                kind: GraphBinaryKind::Equal,
-                                lhs: Box::new(self.translate_value(lhs)?),
-                                rhs: Box::new(self.translate_value(rhs)?),
-                            },
-                            GraphExpression::Integer(0),
-                        ]),
-                    }),
-                })
+                Ok(desmos_expression!(
+                    Piecewise [
+                        ({self.translate_value(lhs)?} Equal {self.translate_value(rhs)?}),
+                        (@int 0),
+                    ]
+                ))
             }
             BinaryKind::NotEqual => {
-                Ok(GraphExpression::Unary {
-                    kind: GraphUnaryKind::Piecewise,
-                    inner: Box::new(GraphExpression::Sequence {
-                        elements: Vec::from([
-                            GraphExpression::Binary {
-                                kind: GraphBinaryKind::Colon,
-                                lhs: Box::new(GraphExpression::Binary {
-                                    kind: GraphBinaryKind::Equal,
-                                    lhs: Box::new(self.translate_value(lhs)?),
-                                    rhs: Box::new(self.translate_value(rhs)?),
-                                }),
-                                rhs: Box::new(GraphExpression::Integer(0)),
-                            },
-                            GraphExpression::Integer(1),
-                        ]),
-                    }),
-                })
+                Ok(desmos_expression!(
+                    Piecewise [
+                        (({self.translate_value(lhs)?} Equal {self.translate_value(rhs)?})
+                            Colon (@int 0)),
+                        (@int 1),
+                    ]
+                ))
             }
             BinaryKind::LogicalAnd => {
-                Ok(GraphExpression::Unary {
-                    kind: GraphUnaryKind::Piecewise,
-                    inner: Box::new(GraphExpression::Sequence {
-                        elements: Vec::from([
-                            GraphExpression::Binary {
-                                kind: GraphBinaryKind::Colon,
-                                lhs: Box::new(self.translate_condition(lhs)?),
-                                rhs: Box::new(self.translate_value(rhs)?),
-                            },
-                            GraphExpression::Integer(0),
-                        ]),
-                    }),
-                })
+                Ok(desmos_expression!(
+                    Piecewise [
+                        ({self.translate_condition(lhs)?} Colon {self.translate_value(rhs)?}),
+                        (@int 0),
+                    ]
+                ))
             }
             BinaryKind::LogicalOr => {
-                Ok(GraphExpression::Unary {
-                    kind: GraphUnaryKind::Piecewise,
-                    inner: Box::new(GraphExpression::Sequence {
-                        elements: Vec::from([
-                            self.translate_condition(lhs)?,
-                            self.translate_condition(rhs)?,
-                            GraphExpression::Integer(0),
-                        ]),
-                    }),
-                })
+                Ok(desmos_expression!(
+                    Piecewise [
+                        {self.translate_condition(lhs)?},
+                        {self.translate_condition(rhs)?},
+                        (@int 0),
+                    ]
+                ))
             }
             BinaryKind::Arctan2 => {
-                Ok(binary_function(
-                    "arctan",
-                    self.translate_value(lhs)?,
-                    self.translate_value(rhs)?,
+                Ok(desmos_expression!(
+                    (@operatorname "arctan") Call [
+                        {self.translate_value(lhs)?},
+                        {self.translate_value(rhs)?},
+                    ]
                 ))
             }
             BinaryKind::Log => {
-                Ok(GraphExpression::Binary {
-                    kind: GraphBinaryKind::Call,
-                    lhs: Box::new(GraphExpression::Binary {
-                        kind: GraphBinaryKind::Subscript,
-                        lhs: Box::new(GraphExpression::OperatorName("log".into())),
-                        rhs: Box::new(self.translate_value(lhs)?),
-                    }),
-                    rhs: Box::new(self.translate_value(rhs)?),
-                })
+                Ok(desmos_expression!(
+                    ((@operatorname "log") Subscript {self.translate_value(lhs)?})
+                    Call {self.translate_value(rhs)?}
+                ))
             }
             BinaryKind::RoundDigits => {
-                Ok(binary_function(
-                    "round",
-                    self.translate_value(lhs)?,
-                    self.translate_value(rhs)?,
+                Ok(desmos_expression!(
+                    (@operatorname "round") Call [
+                        {self.translate_value(lhs)?},
+                        {self.translate_value(rhs)?},
+                    ]
                 ))
             }
             BinaryKind::NthRoot => {
@@ -1051,62 +849,201 @@ impl<'target> GraphExpressionListBuilder<'target> {
                     radicand: Box::new(self.translate_value(lhs)?),
                 })
             }
+            BinaryKind::SortKeyed => {
+                Ok(desmos_expression!(
+                    (@operatorname "sort") Call [
+                        {self.translate_value(lhs)?},
+                        {self.translate_value(rhs)?},
+                    ]
+                ))
+            }
+            BinaryKind::ShuffleSeeded => {
+                Ok(desmos_expression!(
+                    (@operatorname "shuffle") Call [
+                        {self.translate_value(lhs)?},
+                        {self.translate_value(rhs)?},
+                    ]
+                ))
+            }
+            BinaryKind::Point2D => {
+                Ok(desmos_expression!(
+                    Parentheses [
+                        {self.translate_value(lhs)?},
+                        {self.translate_value(rhs)?},
+                    ]
+                ))
+            }
+            BinaryKind::Segment2D | BinaryKind::Segment3D => {
+                Ok(desmos_expression!(
+                    (@operatorname "segment") Call [
+                        {self.translate_value(lhs)?},
+                        {self.translate_value(rhs)?},
+                    ]
+                ))
+            }
+            BinaryKind::Line2D => {
+                Ok(desmos_expression!(
+                    (@operatorname "line") Call [
+                        {self.translate_value(lhs)?},
+                        {self.translate_value(rhs)?},
+                    ]
+                ))
+            }
+            BinaryKind::Ray2D => {
+                Ok(desmos_expression!(
+                    (@operatorname "ray") Call [
+                        {self.translate_value(lhs)?},
+                        {self.translate_value(rhs)?},
+                    ]
+                ))
+            }
+            BinaryKind::Vector2D | BinaryKind::Vector3D => {
+                Ok(desmos_expression!(
+                    (@operatorname "vector") Call [
+                        {self.translate_value(lhs)?},
+                        {self.translate_value(rhs)?},
+                    ]
+                ))
+            }
+            BinaryKind::Circle2DFromRadius | BinaryKind::Circle2DFromEdge => {
+                Ok(desmos_expression!(
+                    (@operatorname "circle") Call [
+                        {self.translate_value(lhs)?},
+                        {self.translate_value(rhs)?},
+                    ]
+                ))
+            }
+            BinaryKind::Sphere3DFromRadius => {
+                Ok(desmos_expression!(
+                    (@operatorname "sphere") Call [
+                        {self.translate_value(lhs)?},
+                        {self.translate_value(rhs)?},
+                    ]
+                ))
+            }
+            BinaryKind::Rectangle2D => {
+                Ok(desmos_expression!(
+                    {self.library.rectangle(self.target_info)} Call [
+                        {self.translate_value(lhs)?},
+                        {self.translate_value(rhs)?},
+                    ]
+                ))
+            }
+            BinaryKind::Glider => {
+                Ok(desmos_expression!(
+                    (@operatorname "glider") Call [
+                        {self.translate_value(lhs)?},
+                        {self.translate_value(rhs)?},
+                    ]
+                ))
+            }
+            BinaryKind::Reflect => {
+                Ok(desmos_expression!(
+                    (@operatorname "reflect") Call [
+                        {self.translate_value(lhs)?},
+                        {self.translate_value(rhs)?},
+                    ]
+                ))
+            }
+            BinaryKind::TranslateByVector => {
+                Ok(desmos_expression!(
+                    (@operatorname "translate") Call [
+                        {self.translate_value(lhs)?},
+                        {self.translate_value(rhs)?},
+                    ]
+                ))
+            }
             BinaryKind::MidpointOfPoints2D | BinaryKind::MidpointOfPoints3D => {
-                Ok(binary_function(
-                    "midpoint",
-                    self.translate_value(lhs)?,
-                    self.translate_value(rhs)?,
+                Ok(desmos_expression!(
+                    (@operatorname "midpoint") Call [
+                        {self.translate_value(lhs)?},
+                        {self.translate_value(rhs)?},
+                    ]
                 ))
             }
-            BinaryKind::Segment | BinaryKind::Segment3D => {
-                Ok(binary_function(
-                    "segment",
-                    self.translate_value(lhs)?,
-                    self.translate_value(rhs)?,
+        }
+    }
+
+    fn translate_ternary(
+        &mut self,
+        kind: TernaryKind,
+        first: &Value,
+        second: &Value,
+        third: &Value,
+        unsupported_error: impl Fn() -> Box<crate::Error>,
+    ) -> crate::Result<GraphExpression> {
+        let _ = unsupported_error; // We'll use you soon enough
+
+        let arguments = desmos_expression!([
+            {self.translate_value(first)?},
+            {self.translate_value(second)?},
+            {self.translate_value(third)?},
+        ]);
+
+        match kind {
+            TernaryKind::Point3D => {
+                Ok(desmos_expression!(
+                    Parentheses {arguments}
                 ))
             }
-            BinaryKind::Line => {
-                Ok(binary_function(
-                    "line",
-                    self.translate_value(lhs)?,
-                    self.translate_value(rhs)?,
+            TernaryKind::Arc2D => {
+                Ok(desmos_expression!(
+                    (@operatorname "arc") Call {arguments}
                 ))
             }
-            BinaryKind::Ray => {
-                Ok(binary_function(
-                    "ray",
-                    self.translate_value(lhs)?,
-                    self.translate_value(rhs)?,
+            TernaryKind::UndirectedAngle => {
+                Ok(desmos_expression!(
+                    (@operatorname "angle") Call {arguments}
                 ))
             }
-            BinaryKind::Vector | BinaryKind::Vector3D => {
-                Ok(binary_function(
-                    "vector",
-                    self.translate_value(lhs)?,
-                    self.translate_value(rhs)?,
+            TernaryKind::DirectedAngle => {
+                Ok(desmos_expression!(
+                    (@operatorname "directedangle") Call {arguments}
                 ))
             }
-            BinaryKind::Circle => {
-                Ok(binary_function(
-                    "circle",
-                    self.translate_value(lhs)?,
-                    self.translate_value(rhs)?,
+            TernaryKind::Triangle3D => {
+                Ok(desmos_expression!(
+                    (@operatorname "triangle") Call {arguments}
                 ))
             }
-            BinaryKind::Sphere3D => {
-                Ok(binary_function(
-                    "sphere",
-                    self.translate_value(lhs)?,
-                    self.translate_value(rhs)?,
+            TernaryKind::Dilate => {
+                Ok(desmos_expression!(
+                    (@operatorname "dilate") Call {arguments}
                 ))
             }
-            BinaryKind::Rectangle => {
-                Ok(GraphExpression::call(
-                    self.library.rectangle(self.target_info),
-                    [
-                        self.translate_value(lhs)?,
-                        self.translate_value(rhs)?,
-                    ],
+            TernaryKind::RotateByAmount | TernaryKind::RotateByAngle | TernaryKind::RotateByDirectedAngle => {
+                Ok(desmos_expression!(
+                    (@operatorname "rotate") Call {arguments}
+                ))
+            }
+            TernaryKind::TranslateByPoints => {
+                Ok(desmos_expression!(
+                    (@operatorname "translate") Call {arguments}
+                ))
+            }
+            TernaryKind::Rgb => {
+                Ok(desmos_expression!(
+                    (@operatorname "rgb") Call {arguments}
+                ))
+            }
+            TernaryKind::Hsv => {
+                Ok(desmos_expression!(
+                    (@operatorname "hsv") Call {arguments}
+                ))
+            }
+            TernaryKind::Okhsv => {
+                Ok(desmos_expression!(
+                    (@operatorname "okhsv") Call {arguments}
+                ))
+            }
+            TernaryKind::Oklab => {
+                Ok(desmos_expression!(
+                    (@operatorname "oklab") Call {arguments}
+                ))
+            }
+            TernaryKind::Oklch => {
+                Ok(desmos_expression!(
+                    (@operatorname "oklch") Call {arguments}
                 ))
             }
         }
@@ -1120,8 +1057,8 @@ impl<'target> GraphExpressionListBuilder<'target> {
     ) -> crate::Result<GraphExpression> {
         let _ = unsupported_error; // We'll use you soon enough
 
-        fn get_name(kind: ReducerKind) -> &'static str {
-            match kind {
+        Ok(desmos_expression!(
+            (@operatorname match kind {
                 ReducerKind::Lcm => "lcm",
                 ReducerKind::Gcd => "gcd",
                 ReducerKind::Mean => "mean",
@@ -1136,52 +1073,37 @@ impl<'target> GraphExpressionListBuilder<'target> {
                 ReducerKind::Count => "count",
                 ReducerKind::Total => "total",
                 ReducerKind::Polygon => "polygon",
-            }
-        }
-
-        Ok(GraphExpression::Binary {
-            kind: GraphBinaryKind::Call,
-            lhs: Box::new(GraphExpression::OperatorName(get_name(kind).into())),
-            rhs: Box::new(GraphExpression::Sequence {
-                elements: arguments
-                    .into_iter()
-                    .map(|argument| self.translate_value(argument))
-                    .collect::<crate::Result<_>>()?,
-            }),
-        })
+            })
+            Call [@? arguments
+                .into_iter()
+                .map(|argument| self.translate_value(argument))]
+        ))
     }
 
-    fn translate_double_reducer<'a>(
+    fn translate_double_reducer(
         &mut self,
         kind: DoubleReducerKind,
-        list_1: &Value,
-        list_2: &Value,
+        lhs_list: &Value,
+        rhs_list: &Value,
         unsupported_error: impl Fn() -> Box<crate::Error>,
     ) -> crate::Result<GraphExpression> {
         let _ = unsupported_error; // We'll use you soon enough
 
-        fn get_name(kind: DoubleReducerKind) -> &'static str {
-            match kind {
+        Ok(desmos_expression!(
+            (@operatorname match kind {
                 DoubleReducerKind::Cov => "cov",
                 DoubleReducerKind::Covp => "covp",
                 DoubleReducerKind::Corr => "corr",
                 DoubleReducerKind::Spearman => "spearman",
-            }
-        }
-
-        Ok(GraphExpression::Binary {
-            kind: GraphBinaryKind::Call,
-            lhs: Box::new(GraphExpression::OperatorName(get_name(kind).into())),
-            rhs: Box::new(GraphExpression::Sequence {
-                elements: Vec::from([
-                    self.translate_value(list_1)?,
-                    self.translate_value(list_2)?,
-                ]),
-            }),
-        })
+            })
+            Call [
+                {self.translate_value(lhs_list)?},
+                {self.translate_value(rhs_list)?},
+            ]
+        ))
     }
 
-    fn translate_parameterized_reducer<'a>(
+    fn translate_parameterized_reducer(
         &mut self,
         kind: ParameterizedReducerKind,
         list: &Value,
@@ -1190,113 +1112,53 @@ impl<'target> GraphExpressionListBuilder<'target> {
     ) -> crate::Result<GraphExpression> {
         let _ = unsupported_error; // We'll use you soon enough
 
-        fn get_name(kind: ParameterizedReducerKind) -> &'static str {
-            match kind {
+        Ok(desmos_expression!(
+            (@operatorname match kind {
                 ParameterizedReducerKind::Quartile => "quartile",
                 ParameterizedReducerKind::Quantile => "quantile",
                 ParameterizedReducerKind::Tscore => "tscore",
-            }
-        }
-
-        Ok(GraphExpression::Binary {
-            kind: GraphBinaryKind::Call,
-            lhs: Box::new(GraphExpression::OperatorName(get_name(kind).into())),
-            rhs: Box::new(GraphExpression::Sequence {
-                elements: Vec::from([
-                    self.translate_value(list)?,
-                    self.translate_value(parameter)?,
-                ]),
-            }),
-        })
-    }
-
-    fn translate_color<'a>(
-        &mut self,
-        kind: ColorKind,
-        value_1: &Value,
-        value_2: &Value,
-        value_3: &Value,
-        unsupported_error: impl Fn() -> Box<crate::Error>,
-    ) -> crate::Result<GraphExpression> {
-        let _ = unsupported_error; // We'll use you soon enough
-
-        fn get_name(kind: ColorKind) -> &'static str {
-            match kind {
-                ColorKind::Rgb => "rgb",
-                ColorKind::Hsv => "hsv",
-                ColorKind::Okhsv => "okhsv",
-                ColorKind::Oklab => "oklab",
-                ColorKind::Oklch => "oklch",
-            }
-        }
-
-        Ok(GraphExpression::Binary {
-            kind: GraphBinaryKind::Call,
-            lhs: Box::new(GraphExpression::OperatorName(get_name(kind).into())),
-            rhs: Box::new(GraphExpression::Sequence {
-                elements: Vec::from([
-                    self.translate_value(value_1)?,
-                    self.translate_value(value_2)?,
-                    self.translate_value(value_3)?,
-                ]),
-            }),
-        })
+            })
+            Call [
+                {self.translate_value(list)?},
+                {self.translate_value(parameter)?},
+            ]
+        ))
     }
 
     pub fn translate_condition(&mut self, value: &Value) -> crate::Result<GraphExpression> {
         match &value.kind {
             ValueKind::Bool(true) => {
-                Ok(GraphExpression::Binary {
-                    kind: GraphBinaryKind::Equal,
-                    lhs: Box::new(GraphExpression::Integer(0)),
-                    rhs: Box::new(GraphExpression::Integer(0)),
-                })
+                Ok(desmos_expression!(
+                    (@int 0) Equal (@int 0)
+                ))
             }
             ValueKind::Bool(false) => {
-                Ok(GraphExpression::Binary {
-                    kind: GraphBinaryKind::Equal,
-                    lhs: Box::new(GraphExpression::Integer(0)),
-                    rhs: Box::new(GraphExpression::Integer(1)),
-                })
+                Ok(desmos_expression!(
+                    (@int 0) Equal (@int 1)
+                ))
             }
             ValueKind::Unary { kind: UnaryKind::LogicalNot, operand, .. } => {
-                Ok(GraphExpression::Binary {
-                    kind: GraphBinaryKind::Equal,
-                    lhs: Box::new(self.translate_value(operand)?),
-                    rhs: Box::new(GraphExpression::Integer(0)),
-                })
+                Ok(desmos_expression!(
+                    {self.translate_value(operand)?} Equal (@int 0)
+                ))
             }
             ValueKind::Binary { kind: BinaryKind::Equal, lhs, rhs, .. } => {
-                Ok(GraphExpression::Binary {
-                    kind: GraphBinaryKind::Equal,
-                    lhs: Box::new(self.translate_value(lhs)?),
-                    rhs: Box::new(self.translate_value(rhs)?),
-                })
+                Ok(desmos_expression!(
+                    {self.translate_value(lhs)?} Equal {self.translate_value(rhs)?}
+                ))
             }
             ValueKind::Binary { kind: BinaryKind::NotEqual, lhs, rhs, .. } => {
                 // If only Desmos had an operator for this... substitute with {lhs = rhs, 0} = 0
-                Ok(GraphExpression::Binary {
-                    kind: GraphBinaryKind::Equal,
-                    lhs: Box::new(GraphExpression::Unary {
-                        kind: GraphUnaryKind::Piecewise,
-                        inner: Box::new(GraphExpression::Sequence {
-                            elements: vec![
-                                GraphExpression::Binary {
-                                    kind: GraphBinaryKind::Equal,
-                                    lhs: Box::new(self.translate_value(lhs)?),
-                                    rhs: Box::new(self.translate_value(rhs)?),
-                                },
-                                GraphExpression::Integer(0),
-                            ],
-                        }),
-                    }),
-                    rhs: Box::new(GraphExpression::Integer(0)),
-                })
+                Ok(desmos_expression!(
+                    (Piecewise [
+                        ({self.translate_value(lhs)?} Equal {self.translate_value(rhs)?}),
+                        (@int 0),
+                    ]) Equal (@int 0)
+                ))
             }
             ValueKind::InequalityChain { lhs, chain, .. } => {
-                Ok(GraphExpression::InequalityChain {
-                    lhs: Box::new(self.translate_value(lhs)?),
-                    chain: chain
+                Ok(desmos_expression!(
+                    (@ineq {self.translate_value(lhs)?} [@? chain
                         .iter()
                         .map(|(kind, rhs)| Ok((
                             match kind {
@@ -1306,29 +1168,17 @@ impl<'target> GraphExpressionListBuilder<'target> {
                                 InequalityKind::GreaterEqual => GraphInequalityKind::GreaterEqual,
                             },
                             self.translate_value(rhs)?,
-                        )))
-                        .collect::<crate::Result<_>>()?,
-                })
+                        )))])
+                ))
             }
             _ => {
                 // Do a general "!= 0" check to evaluate a boolean: {value = 0, 0} = 0
-                Ok(GraphExpression::Binary {
-                    kind: GraphBinaryKind::Equal,
-                    lhs: Box::new(GraphExpression::Unary {
-                        kind: GraphUnaryKind::Piecewise,
-                        inner: Box::new(GraphExpression::Sequence {
-                            elements: Vec::from([
-                                GraphExpression::Binary {
-                                    kind: GraphBinaryKind::Equal,
-                                    lhs: Box::new(self.translate_value(value)?),
-                                    rhs: Box::new(GraphExpression::Integer(0)),
-                                },
-                                GraphExpression::Integer(0),
-                            ]),
-                        }),
-                    }),
-                    rhs: Box::new(GraphExpression::Integer(0)),
-                })
+                Ok(desmos_expression!(
+                    (Piecewise [
+                        ({self.translate_value(value)?} Equal (@int 0)),
+                        (@int 0),
+                    ]) Equal (@int 0)
+                ))
             }
         }
     }
@@ -1337,33 +1187,19 @@ impl<'target> GraphExpressionListBuilder<'target> {
         if action.is_empty() {
             // Usually omitting the action expression is not an option, so update a dummy
             // variable instead.
-            return Ok(GraphExpression::Binary {
-                kind: GraphBinaryKind::RightArrow,
-                lhs: Box::new(self.create_dummy_noop()),
-                rhs: Box::new(GraphExpression::Integer(0)),
-            });
+            return Ok(desmos_expression!(
+                {self.create_dummy_noop()} RightArrow (@int 0)
+            ))
         }
 
         match &action.kind {
             ActionValueKind::Disable => {
                 // Generate an expression like {0 = 1: unreachable -> 0} since the missing
                 // conditional default case is what causes the "disable" behavior.
-                Ok(GraphExpression::Unary {
-                    kind: GraphUnaryKind::Piecewise,
-                    inner: Box::new(GraphExpression::Binary {
-                        kind: GraphBinaryKind::Colon,
-                        lhs: Box::new(GraphExpression::Binary {
-                            kind: GraphBinaryKind::Equal,
-                            lhs: Box::new(GraphExpression::Integer(0)),
-                            rhs: Box::new(GraphExpression::Integer(1)),
-                        }),
-                        rhs: Box::new(GraphExpression::Binary {
-                            kind: GraphBinaryKind::RightArrow,
-                            lhs: Box::new(self.get_dummy_unreachable()),
-                            rhs: Box::new(GraphExpression::Integer(0)),
-                        }),
-                    }),
-                })
+                Ok(desmos_expression!(
+                    Piecewise (((@int 0) Equal (@int 1))
+                        Colon ({self.get_dummy_unreachable()} RightArrow (@int 0)))
+                ))
             }
             ActionValueKind::Compound { actions } => match actions.as_ref() {
                 [] => {
@@ -1374,39 +1210,29 @@ impl<'target> GraphExpressionListBuilder<'target> {
                     self.translate_action_value(action)
                 }
                 _ => {
-                    Ok(GraphExpression::Unary {
-                        kind: GraphUnaryKind::Parentheses,
-                        inner: Box::new(GraphExpression::Sequence {
-                            elements: actions
-                                .iter()
-                                .map(|action| self.translate_action_value(action))
-                                .collect::<crate::Result<_>>()?,
-                        }),
-                    })
+                    Ok(desmos_expression!(
+                        Parentheses [@? actions
+                            .iter()
+                            .map(|action| self.translate_action_value(action))]
+                    ))
                 }
             }
             ActionValueKind::Update { variable, value, .. } => {
-                Ok(GraphExpression::Binary {
-                    kind: GraphBinaryKind::RightArrow,
-                    lhs: Box::new(self.target_info.get_global_symbol(&variable.identifier)),
-                    rhs: Box::new(self.translate_value(value)?),
-                })
+                Ok(desmos_expression!(
+                    {self.target_info.get_global_symbol(&variable.identifier)}
+                    RightArrow {self.translate_value(value)?}
+                ))
             }
             ActionValueKind::ActionCall { action, arguments, .. } => {
                 if arguments.is_empty() {
                     self.translate_value(action)
                 }
                 else {
-                    Ok(GraphExpression::Binary {
-                        kind: GraphBinaryKind::Call,
-                        lhs: Box::new(self.translate_value(action)?),
-                        rhs: Box::new(GraphExpression::Sequence {
-                            elements: arguments
-                                .iter()
-                                .map(|argument| self.translate_value(argument))
-                                .collect::<crate::Result<_>>()?,
-                        }),
-                    })
+                    Ok(desmos_expression!(
+                        {self.translate_value(action)?} Call [@? arguments
+                            .iter()
+                            .map(|argument| self.translate_value(argument))]
+                    ))
                 }
             }
             ActionValueKind::Conditional { condition_consequents, alternative } => {
@@ -1416,11 +1242,10 @@ impl<'target> GraphExpressionListBuilder<'target> {
                         elements: {
                             let mut elements: Vec<_> = condition_consequents
                                 .iter()
-                                .map(|(condition, consequent)| Ok(GraphExpression::Binary {
-                                    kind: GraphBinaryKind::Colon,
-                                    lhs: Box::new(self.translate_condition(condition)?),
-                                    rhs: Box::new(self.translate_action_value(consequent)?),
-                                }))
+                                .map(|(condition, consequent)| Ok(desmos_expression!(
+                                    {self.translate_condition(condition)?}
+                                    Colon {self.translate_action_value(consequent)?}
+                                )))
                                 .collect::<crate::Result<_>>()?;
                             // TODO: propagate disable
                             elements.push(self.translate_action_value(alternative)?);

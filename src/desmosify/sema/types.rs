@@ -47,6 +47,10 @@ impl ListState {
             (None, None) => None,
         }
     }
+
+    pub fn merge_all(states: impl IntoIterator<Item = Option<Self>>) -> Option<Self> {
+        states.into_iter().fold(None, Self::merge)
+    }
 }
 
 #[derive(Clone, PartialEq, Debug)]
@@ -78,11 +82,11 @@ pub enum Type {
     InternalBool,
     Str,
     Image,
-    Point2 {
+    Point2D {
         x_type: Box<Self>,
         y_type: Box<Self>,
     },
-    Point3 {
+    Point3D {
         x_type: Box<Self>,
         y_type: Box<Self>,
         z_type: Box<Self>,
@@ -107,27 +111,27 @@ pub enum Type {
 }
 
 impl Type {
-    pub fn point2(x_type: Self, y_type: Self) -> Self {
-        Self::Point2 {
+    pub fn point_2d(x_type: Self, y_type: Self) -> Self {
+        Self::Point2D {
             x_type: Box::new(x_type),
             y_type: Box::new(y_type),
         }
     }
 
-    pub fn real_point2() -> Self {
-        Self::point2(Self::Real, Self::Real)
+    pub fn real_point_2d() -> Self {
+        Self::point_2d(Self::Real, Self::Real)
     }
 
-    pub fn point3(x_type: Self, y_type: Self, z_type: Self) -> Self {
-        Self::Point3 {
+    pub fn point_3d(x_type: Self, y_type: Self, z_type: Self) -> Self {
+        Self::Point3D {
             x_type: Box::new(x_type),
             y_type: Box::new(y_type),
             z_type: Box::new(z_type),
         }
     }
 
-    pub fn real_point3() -> Self {
-        Self::point3(Self::Real, Self::Real, Self::Real)
+    pub fn real_point_3d() -> Self {
+        Self::point_3d(Self::Real, Self::Real, Self::Real)
     }
 
     pub fn union(variants: impl IntoIterator<Item = Self>) -> Self {
@@ -139,8 +143,8 @@ impl Type {
     pub fn real_or_real_point() -> Self {
         Self::union([
             Self::Real,
-            Self::real_point2(),
-            Self::real_point3(),
+            Self::real_point_2d(),
+            Self::real_point_3d(),
         ])
     }
 
@@ -155,7 +159,7 @@ impl Type {
             Self::Vector,
             Self::Angle,
             Self::DirectedAngle,
-            Self::real_point2(),
+            Self::real_point_2d(),
         ])
     }
 
@@ -262,16 +266,16 @@ impl Type {
             (Self::Int, Self::Real) => Some(Self::Real),
             (Self::Bool, Self::Int | Self::Real) => Some(target.clone()),
             (
-                Self::Point2 { x_type: self_x, y_type: self_y },
-                Self::Point2 { x_type: target_x, y_type: target_y },
-            ) => Some(Self::Point2 {
+                Self::Point2D { x_type: self_x, y_type: self_y },
+                Self::Point2D { x_type: target_x, y_type: target_y },
+            ) => Some(Self::Point2D {
                 x_type: Box::new(self_x.coerce_to(target_x)?),
                 y_type: Box::new(self_y.coerce_to(target_y)?),
             }),
             (
-                Self::Point3 { x_type: self_x, y_type: self_y, z_type: self_z },
-                Self::Point3 { x_type: target_x, y_type: target_y, z_type: target_z },
-            ) => Some(Self::Point3 {
+                Self::Point3D { x_type: self_x, y_type: self_y, z_type: self_z },
+                Self::Point3D { x_type: target_x, y_type: target_y, z_type: target_z },
+            ) => Some(Self::Point3D {
                 x_type: Box::new(self_x.coerce_to(target_x)?),
                 y_type: Box::new(self_y.coerce_to(target_y)?),
                 z_type: Box::new(self_z.coerce_to(target_z)?),
@@ -312,8 +316,8 @@ impl Type {
             Self::InternalBool => true,
             Self::Str => false,
             Self::Image => false,
-            Self::Point2 { .. } => true,
-            Self::Point3 { .. } => true,
+            Self::Point2D { .. } => true,
+            Self::Point3D { .. } => true,
             Self::Enum { .. } => true,
             Self::UserFunction { .. } => false,
             Self::IntrinsicFunction(..) => false,
@@ -342,7 +346,7 @@ impl Type {
     }
 
     pub fn is_numeric_point_2d(&self) -> bool {
-        self.can_coerce_to(&Type::Point2 {
+        self.can_coerce_to(&Type::Point2D {
             x_type: Box::new(Type::Real),
             y_type: Box::new(Type::Real),
         })
@@ -363,7 +367,7 @@ impl Type {
     }
 
     pub fn is_numeric_point_3d(&self) -> bool {
-        self.can_coerce_to(&Type::Point3 {
+        self.can_coerce_to(&Type::Point3D {
             x_type: Box::new(Type::Real),
             y_type: Box::new(Type::Real),
             z_type: Box::new(Type::Real),
@@ -445,16 +449,16 @@ impl Type {
             (Self::Any, _) => Ok(other.clone()),
             (_, Self::Any) => Ok(self.clone()),
             (
-                Self::Point2 { x_type: self_x, y_type: self_y },
-                Self::Point2 { x_type: other_x, y_type: other_y },
-            ) => Ok(Self::Point2 {
+                Self::Point2D { x_type: self_x, y_type: self_y },
+                Self::Point2D { x_type: other_x, y_type: other_y },
+            ) => Ok(Self::Point2D {
                 x_type: Box::new(Self::merge(self_x, other_x)?),
                 y_type: Box::new(Self::merge(self_y, other_y)?),
             }),
             (
-                Self::Point3 { x_type: self_x, y_type: self_y, z_type: self_z },
-                Self::Point3 { x_type: other_x, y_type: other_y, z_type: other_z },
-            ) => Ok(Self::Point3 {
+                Self::Point3D { x_type: self_x, y_type: self_y, z_type: self_z },
+                Self::Point3D { x_type: other_x, y_type: other_y, z_type: other_z },
+            ) => Ok(Self::Point3D {
                 x_type: Box::new(Self::merge(self_x, other_x)?),
                 y_type: Box::new(Self::merge(self_y, other_y)?),
                 z_type: Box::new(Self::merge(self_z, other_z)?),
@@ -553,10 +557,10 @@ impl std::fmt::Display for Type {
             Self::InternalBool => write!(f, "internal_bool"),
             Self::Str => write!(f, "str"),
             Self::Image => write!(f, "image"),
-            Self::Point2 { x_type, y_type } => {
+            Self::Point2D { x_type, y_type } => {
                 write!(f, "({x_type}, {y_type})")
             }
-            Self::Point3 { x_type, y_type, z_type } => {
+            Self::Point3D { x_type, y_type, z_type } => {
                 write!(f, "({x_type}, {y_type}, {z_type})")
             }
             Self::Enum { type_identifier } => {

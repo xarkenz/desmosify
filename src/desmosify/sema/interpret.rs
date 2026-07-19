@@ -5,7 +5,7 @@ use crate::sema::{Program, ProgramAction, ProgramEnumeration, ProgramImmutable, 
 use crate::sema::context::{GlobalContext, LocalContext};
 use crate::sema::display::{DragMode, LabelOrientation, LineStyle, PointStyle, ProgramDisplay, ProgramDisplayAttribute, ProgramDisplayAttributeKind, ProgramDisplayElement};
 use crate::sema::types::{ListState, Type};
-use crate::sema::values::{ActionValue, ActionValueKind, GlobalReference, LocalReference, Value, IndexKind, ValueKind, ListMapLoop, BinaryKind, UnaryKind, ActionReference, InequalityKind};
+use crate::sema::values::{ActionValue, ActionValueKind, GlobalReference, LocalReference, Value, IndexKind, ValueKind, ListMapLoop, BinaryKind, UnaryKind, ActionReference, InequalityKind, TernaryKind};
 use crate::target::Target;
 
 pub fn interpret_program(source_paths: &[PathBuf], target: &mut dyn Target, context: &GlobalContext) -> crate::Result<Program> {
@@ -831,10 +831,11 @@ pub fn interpret_expression(
             let (x_list, x_type) = x.get_type().into_flatten_list();
             let (y_list, y_type) = y.get_type().into_flatten_list();
 
-            ValueKind::Point2 {
-                x: Box::new(x),
-                y: Box::new(y),
-                point_type: Type::Point2 {
+            ValueKind::Binary {
+                kind: BinaryKind::Point2D,
+                lhs: Box::new(x),
+                rhs: Box::new(y),
+                result_type: Type::Point2D {
                     x_type: Box::new(x_type),
                     y_type: Box::new(y_type),
                 }.unflatten_list(ListState::merge(x_list, y_list)),
@@ -849,15 +850,16 @@ pub fn interpret_expression(
             let (y_list, y_type) = y.get_type().into_flatten_list();
             let (z_list, z_type) = z.get_type().into_flatten_list();
 
-            ValueKind::Point3 {
-                x: Box::new(x),
-                y: Box::new(y),
-                z: Box::new(z),
-                point_type: Type::Point3 {
+            ValueKind::Ternary {
+                kind: TernaryKind::Point3D,
+                first: Box::new(x),
+                second: Box::new(y),
+                third: Box::new(z),
+                result_type: Type::Point3D {
                     x_type: Box::new(x_type),
                     y_type: Box::new(y_type),
                     z_type: Box::new(z_type),
-                }.unflatten_list(ListState::merge(ListState::merge(x_list, y_list), z_list)),
+                }.unflatten_list(ListState::merge_all([x_list, y_list, z_list])),
             }
         }
         ExpressionKind::List { items } => {
@@ -1200,17 +1202,17 @@ pub fn interpret_binary_operation(
             // The result must be arithmetic, but at most one operand may be a point
             lhs = lhs.coerce_to_arithmetic(Type::require_numeric_or_point)?;
             let lhs_type = lhs.get_type().into_flatten_list().1;
-            if matches!(lhs_type, Type::Point2 { .. } | Type::Point3 { .. }) {
+            if matches!(lhs_type, Type::Point2D { .. } | Type::Point3D { .. }) {
                 rhs = rhs.coerce_to_arithmetic(Type::require_numeric)?;
                 let rhs_type = rhs.get_type().into_flatten_list().1;
                 match &lhs_type {
-                    Type::Point2 { x_type, y_type } => Type::Point2 {
+                    Type::Point2D { x_type, y_type } => Type::Point2D {
                         x_type: Box::new(x_type.merge(&rhs_type)
                             .map_err(|error| error.with_span(span))?),
                         y_type: Box::new(y_type.merge(&rhs_type)
                             .map_err(|error| error.with_span(span))?),
                     },
-                    Type::Point3 { x_type, y_type, z_type } => Type::Point3 {
+                    Type::Point3D { x_type, y_type, z_type } => Type::Point3D {
                         x_type: Box::new(x_type.merge(&rhs_type)
                             .map_err(|error| error.with_span(span))?),
                         y_type: Box::new(y_type.merge(&rhs_type)
@@ -1225,13 +1227,13 @@ pub fn interpret_binary_operation(
                 rhs = rhs.coerce_to_arithmetic(Type::require_numeric_or_point)?;
                 let rhs_type = rhs.get_type().into_flatten_list().1;
                 match &rhs_type {
-                    Type::Point2 { x_type, y_type } => Type::Point2 {
+                    Type::Point2D { x_type, y_type } => Type::Point2D {
                         x_type: Box::new(x_type.merge(&lhs_type)
                             .map_err(|error| error.with_span(span))?),
                         y_type: Box::new(y_type.merge(&lhs_type)
                             .map_err(|error| error.with_span(span))?),
                     },
-                    Type::Point3 { x_type, y_type, z_type } => Type::Point3 {
+                    Type::Point3D { x_type, y_type, z_type } => Type::Point3D {
                         x_type: Box::new(x_type.merge(&lhs_type)
                             .map_err(|error| error.with_span(span))?),
                         y_type: Box::new(y_type.merge(&lhs_type)
@@ -1247,11 +1249,11 @@ pub fn interpret_binary_operation(
         BinaryKind::Divide => {
             // The result is always assumed to be real, but lhs may be a point
             let result_type = match lhs.get_type().flatten_list().1 {
-                Type::Point2 { .. } => Type::Point2 {
+                Type::Point2D { .. } => Type::Point2D {
                     x_type: Box::new(Type::Real),
                     y_type: Box::new(Type::Real),
                 },
-                Type::Point3 { .. } => Type::Point3 {
+                Type::Point3D { .. } => Type::Point3D {
                     x_type: Box::new(Type::Real),
                     y_type: Box::new(Type::Real),
                     z_type: Box::new(Type::Real),
@@ -1351,35 +1353,35 @@ fn interpret_access_operation(
                 }
             }
         }
-        Type::Point2 { x_type, y_type } => {
+        Type::Point2D { x_type, y_type } => {
             match member_identifier.as_ref() {
                 "x" => Ok(ValueKind::Unary {
-                    kind: UnaryKind::GetX,
+                    kind: UnaryKind::XOfPoint2D,
                     operand: Box::new(lhs),
                     result_type: x_type.as_ref().clone().unflatten_list(lhs_list),
                 }),
                 "y" => Ok(ValueKind::Unary {
-                    kind: UnaryKind::GetY,
+                    kind: UnaryKind::YOfPoint2D,
                     operand: Box::new(lhs),
                     result_type: y_type.as_ref().clone().unflatten_list(lhs_list),
                 }),
                 _ => Err(invalid_access_error())
             }
         }
-        Type::Point3 { x_type, y_type, z_type } => {
+        Type::Point3D { x_type, y_type, z_type } => {
             match member_identifier.as_ref() {
                 "x" => Ok(ValueKind::Unary {
-                    kind: UnaryKind::GetX,
+                    kind: UnaryKind::XOfPoint3D,
                     operand: Box::new(lhs),
                     result_type: x_type.as_ref().clone().unflatten_list(lhs_list),
                 }),
                 "y" => Ok(ValueKind::Unary {
-                    kind: UnaryKind::GetY,
+                    kind: UnaryKind::YOfPoint3D,
                     operand: Box::new(lhs),
                     result_type: y_type.as_ref().clone().unflatten_list(lhs_list),
                 }),
                 "z" => Ok(ValueKind::Unary {
-                    kind: UnaryKind::GetZ,
+                    kind: UnaryKind::ZOfPoint3D,
                     operand: Box::new(lhs),
                     result_type: z_type.as_ref().clone().unflatten_list(lhs_list),
                 }),

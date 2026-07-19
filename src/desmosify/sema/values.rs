@@ -53,9 +53,11 @@ pub enum UnaryKind {
     Positive,
     Negative,
     LogicalNot,
-    GetX,
-    GetY,
-    GetZ,
+    XOfPoint2D,
+    YOfPoint2D,
+    XOfPoint3D,
+    YOfPoint3D,
+    ZOfPoint3D,
     Sin,
     Cos,
     Tan,
@@ -84,13 +86,24 @@ pub enum UnaryKind {
     Sqrt,
     Cbrt,
     Factorial,
+    Sort,
+    Shuffle,
+    Unique,
+    PrefixSum,
+    AreaOfPolygon,
+    PerimeterOfPolygon,
+    VerticesOfPolygon,
+    SegmentsOfPolygon,
+    UndirectedAnglesOfPolygon,
+    DirectedAnglesOfPolygon,
+    RadiusOfCircle,
+    CenterOfCircle,
     MidpointOfSegment2D,
     MidpointOfSegment3D,
-    Vector2DStart,
-    Vector3DStart,
-    Vector2DEnd,
-    Vector3DEnd,
-    PrefixSum,
+    StartOfVector2D,
+    StartOfVector3D,
+    EndOfVector2D,
+    EndOfVector3D,
     BoolToInternal,
     BoolFromInternal,
 }
@@ -109,21 +122,79 @@ pub enum BinaryKind {
     NotEqual,
     LogicalAnd,
     LogicalOr,
+    /// lhs = y, rhs = x
     Arctan2,
+    /// lhs = base, rhs = value
     Log,
+    /// lhs = value, rhs = digits
     RoundDigits,
+    /// lhs = index, rhs = value
     NthRoot,
-    MidpointOfPoints2D,
-    MidpointOfPoints3D,
-    Segment,
+    /// lhs = list, rhs = key_list
+    SortKeyed,
+    /// lhs = list, rhs = seed
+    ShuffleSeeded,
+    /// lhs = x, rhs = y
+    Point2D,
+    /// lhs = start, rhs = end
+    Segment2D,
+    /// lhs = start, rhs = end
     Segment3D,
-    Line,
-    Ray,
-    Vector,
+    /// lhs = start, rhs = end
+    Line2D,
+    /// lhs = closed_end, rhs = open_end
+    Ray2D,
+    /// lhs = start, rhs = end
+    Vector2D,
+    /// lhs = start, rhs = end
     Vector3D,
-    Circle,
-    Sphere3D,
-    Rectangle,
+    /// lhs = center, rhs = radius
+    Circle2DFromRadius,
+    /// lhs = center, rhs = edge
+    Circle2DFromEdge,
+    /// lhs = center, rhs = radius
+    Sphere3DFromRadius,
+    /// lhs = corner_1, rhs = corner_2
+    Rectangle2D,
+    /// lhs = object, rhs = distance
+    Glider,
+    /// lhs = object, rhs = axis
+    Reflect,
+    /// lhs = object, rhs = vector
+    TranslateByVector,
+    /// lhs = start, rhs = end
+    MidpointOfPoints2D,
+    /// lhs = start, rhs = end
+    MidpointOfPoints3D,
+}
+
+#[derive(Copy, Clone, PartialEq, Debug)]
+pub enum TernaryKind {
+    /// first = x, second = y, third = z
+    Point3D,
+    /// first = start, second = thru, third = end
+    Arc2D,
+    /// first = leg_a, second = center, third = leg_b
+    UndirectedAngle,
+    /// first = start_leg, second = center, third = end_leg
+    DirectedAngle,
+    /// first = a, second = b, third = c
+    Triangle3D,
+    /// first = object, second = point, third = factor
+    Dilate,
+    /// first = object, second = point, third = amount
+    RotateByAmount,
+    /// first = object, second = point, third = angle
+    RotateByAngle,
+    /// first = object, second = point, third = directed_angle
+    RotateByDirectedAngle,
+    /// first = object, second = start_point, third = end_point
+    TranslateByPoints,
+    Rgb,
+    Hsv,
+    Okhsv,
+    Oklab,
+    Oklch,
 }
 
 #[derive(Copy, Clone, PartialEq, Debug)]
@@ -165,15 +236,6 @@ pub enum ParameterizedReducerKind {
     Quartile,
     Quantile,
     Tscore,
-}
-
-#[derive(Copy, Clone, PartialEq, Debug)]
-pub enum ColorKind {
-    Rgb,
-    Hsv,
-    Okhsv,
-    Oklab,
-    Oklch,
 }
 
 #[derive(Clone, PartialEq)]
@@ -278,6 +340,13 @@ pub enum ValueKind {
         rhs: Box<Value>,
         result_type: Type,
     },
+    Ternary {
+        kind: TernaryKind,
+        first: Box<Value>,
+        second: Box<Value>,
+        third: Box<Value>,
+        result_type: Type,
+    },
     InequalityChain {
         lhs: Box<Value>,
         chain: Box<[(InequalityKind, Value)]>,
@@ -305,19 +374,12 @@ pub enum ValueKind {
         parameter: Box<Value>,
         result_type: Type,
     },
-    Color {
-        kind: ColorKind,
-        value_1: Box<Value>,
-        value_2: Box<Value>,
-        value_3: Box<Value>,
-        list_state: Option<ListState>,
-    },
     Random {
         source: Option<Box<Value>>,
         sample_count: Option<Box<Value>>,
         result_type: Type,
     },
-    SeededRandom {
+    RandomSeeded {
         source: Option<Box<Value>>,
         sample_count: Box<Value>,
         seed: Box<Value>,
@@ -326,56 +388,6 @@ pub enum ValueKind {
     Join {
         values: Box<[Value]>,
         result_type: Type,
-    },
-    Sort {
-        list: Box<Value>,
-        key_list: Option<Box<Value>>,
-    },
-    Shuffle {
-        list: Box<Value>,
-        seed: Option<Box<Value>>,
-    },
-    Unique {
-        list: Box<Value>,
-    },
-    Dilation {
-        object: Box<Value>,
-        point: Box<Value>,
-        factor: Box<Value>,
-        result_type: Type,
-    },
-    Rotation {
-        object: Box<Value>,
-        point: Box<Value>,
-        angle: Box<Value>,
-        result_type: Type,
-    },
-    Reflection {
-        object: Box<Value>,
-        line: Box<Value>,
-        result_type: Type,
-    },
-    TranslationByPoints {
-        object: Box<Value>,
-        point_1: Box<Value>,
-        point_2: Box<Value>,
-        result_type: Type,
-    },
-    TranslationByVector {
-        object: Box<Value>,
-        vector: Box<Value>,
-        result_type: Type,
-    },
-    Point2 {
-        x: Box<Value>,
-        y: Box<Value>,
-        point_type: Type,
-    },
-    Point3 {
-        x: Box<Value>,
-        y: Box<Value>,
-        z: Box<Value>,
-        point_type: Type,
     },
     List {
         items: Box<[Value]>,
@@ -500,6 +512,9 @@ impl ValueKind {
             Self::Binary { result_type, .. } => {
                 result_type.clone()
             }
+            Self::Ternary { result_type, .. } => {
+                result_type.clone()
+            }
             Self::InequalityChain { result_type, .. } => {
                 result_type.clone()
             }
@@ -515,47 +530,14 @@ impl ValueKind {
             Self::ParameterizedReducer { result_type, .. } => {
                 result_type.clone()
             }
-            Self::Color { list_state, .. } => {
-                Type::Color.unflatten_list(*list_state)
-            }
             Self::Join { result_type, .. } => {
                 result_type.clone()
-            }
-            Self::Sort { list, .. } => {
-                list.get_type()
             }
             Self::Random { result_type, .. } => {
                 result_type.clone()
             }
-            Self::SeededRandom { result_type, .. } => {
+            Self::RandomSeeded { result_type, .. } => {
                 result_type.clone()
-            }
-            Self::Shuffle { list, .. } => {
-                list.get_type()
-            }
-            Self::Unique { list } => {
-                list.get_type()
-            }
-            Self::Dilation { result_type, .. } => {
-                result_type.clone()
-            }
-            Self::Rotation { result_type, .. } => {
-                result_type.clone()
-            }
-            Self::Reflection { result_type, .. } => {
-                result_type.clone()
-            }
-            Self::TranslationByPoints { result_type, .. } => {
-                result_type.clone()
-            }
-            Self::TranslationByVector { result_type, .. } => {
-                result_type.clone()
-            }
-            Self::Point2 { point_type, .. } => {
-                point_type.clone()
-            }
-            Self::Point3 { point_type, .. } => {
-                point_type.clone()
             }
             Self::List { item_type, .. } => {
                 item_type.clone().into_list(ListState::IsList)
@@ -687,19 +669,27 @@ impl ValueKind {
                 (Self::EnumVariant { variant_ordinal, .. }, Type::Real) => {
                     Self::Real(variant_ordinal as f64)
                 }
-                (Self::Point2 { x, y, .. }, Type::Point2 { x_type, y_type }) => {
-                    Self::Point2 {
-                        x: Box::new(x.coerce_to(x_type, allow_list)?),
-                        y: Box::new(y.coerce_to(y_type, allow_list)?),
-                        point_type: coerced_type.clone(),
+                (
+                    Self::Binary { kind: BinaryKind::Point2D, lhs, rhs, .. },
+                    Type::Point2D { x_type, y_type },
+                ) => {
+                    Self::Binary {
+                        kind: BinaryKind::Point2D,
+                        lhs: Box::new(lhs.coerce_to(x_type, allow_list)?),
+                        rhs: Box::new(rhs.coerce_to(y_type, allow_list)?),
+                        result_type: coerced_type.clone(),
                     }
                 }
-                (Self::Point3 { x, y, z, .. }, Type::Point3 { x_type, y_type, z_type }) => {
-                    Self::Point3 {
-                        x: Box::new(x.coerce_to(x_type, allow_list)?),
-                        y: Box::new(y.coerce_to(y_type, allow_list)?),
-                        z: Box::new(z.coerce_to(z_type, allow_list)?),
-                        point_type: coerced_type.clone(),
+                (
+                    Self::Ternary { kind: TernaryKind::Point3D, first, second, third, .. },
+                    Type::Point3D { x_type, y_type, z_type },
+                ) => {
+                    Self::Ternary {
+                        kind: TernaryKind::Point3D,
+                        first: Box::new(first.coerce_to(x_type, allow_list)?),
+                        second: Box::new(second.coerce_to(y_type, allow_list)?),
+                        third: Box::new(third.coerce_to(z_type, allow_list)?),
+                        result_type: coerced_type.clone(),
                     }
                 }
                 (other, _) => other
@@ -821,7 +811,7 @@ impl std::fmt::Debug for ValueKind {
                 write!(f, "{kind:?}<{self_type}>")?;
                 f.debug_tuple("").field(list).field(parameter).finish()
             }
-            Self::Color { kind, value_1, value_2, value_3, .. } => {
+            Self::Ternary { kind, first: value_1, second: value_2, third: value_3, .. } => {
                 write!(f, "{kind:?}<{self_type}>")?;
                 f.debug_tuple("").field(value_1).field(value_2).field(value_3).finish()
             }
@@ -835,15 +825,6 @@ impl std::fmt::Debug for ValueKind {
                     )
                     .finish()
             }
-            Self::Sort { list, key_list } => {
-                write!(f, "Sort<{self_type}>")?;
-                let mut tuple = f.debug_tuple("");
-                tuple.field(list);
-                if let Some(key_list) = key_list {
-                    tuple.field(key_list);
-                }
-                tuple.finish()
-            }
             Self::Random { source, sample_count, .. } => {
                 write!(f, "Random<{self_type}>")?;
                 let mut tuple = f.debug_tuple("");
@@ -855,54 +836,13 @@ impl std::fmt::Debug for ValueKind {
                 }
                 tuple.finish()
             }
-            Self::SeededRandom { source, sample_count, seed, .. } => {
+            Self::RandomSeeded { source, sample_count, seed, .. } => {
                 write!(f, "Random<{self_type}>")?;
                 let mut tuple = f.debug_tuple("");
                 if let Some(source) = source {
                     tuple.field(source);
                 }
                 tuple.field(sample_count).field(seed).finish()
-            }
-            Self::Shuffle { list, seed } => {
-                write!(f, "Shuffle<{self_type}>")?;
-                let mut tuple = f.debug_tuple("");
-                tuple.field(list);
-                if let Some(seed) = seed {
-                    tuple.field(seed);
-                }
-                tuple.finish()
-            }
-            Self::Unique { list } => {
-                write!(f, "Unique<{self_type}>")?;
-                f.debug_tuple("").field(list).finish()
-            }
-            Self::Dilation { object, point, factor, .. } => {
-                write!(f, "Dilation<{self_type}>")?;
-                f.debug_tuple("").field(object).field(point).field(factor).finish()
-            }
-            Self::Rotation { object, point, angle, .. } => {
-                write!(f, "Rotation<{self_type}>")?;
-                f.debug_tuple("").field(object).field(point).field(angle).finish()
-            }
-            Self::Reflection { object, line, .. } => {
-                write!(f, "Reflection<{self_type}>")?;
-                f.debug_tuple("").field(object).field(line).finish()
-            }
-            Self::TranslationByPoints { object, point_1, point_2, .. } => {
-                write!(f, "TranslationByPoints<{self_type}>")?;
-                f.debug_tuple("").field(object).field(point_1).field(point_2).finish()
-            }
-            Self::TranslationByVector { object, vector, .. } => {
-                write!(f, "TranslationByVector<{self_type}>")?;
-                f.debug_tuple("").field(object).field(vector).finish()
-            }
-            Self::Point2 { x, y, .. } => {
-                write!(f, "Point2<{self_type}>")?;
-                f.debug_tuple("").field(x).field(y).finish()
-            }
-            Self::Point3 { x, y, z, .. } => {
-                write!(f, "Point3<{self_type}>")?;
-                f.debug_tuple("").field(x).field(y).field(z).finish()
             }
             Self::List { items, .. } => {
                 write!(f, "List<{self_type}>")?;

@@ -67,4 +67,16 @@ macro_rules! desmos_expression {
             )),+]),
         }
     };
+    (@ineq $lhs:tt [@ $chain:expr]) => {
+        $crate::desmos::GraphExpression::InequalityChain {
+            lhs: Box::new(desmos_expression!($lhs)),
+            chain: Vec::from_iter($chain),
+        }
+    };
+    (@ineq $lhs:tt [@? $chain:expr]) => {
+        $crate::desmos::GraphExpression::InequalityChain {
+            lhs: Box::new(desmos_expression!($lhs)),
+            chain: crate::Result::from_iter($chain)?,
+        }
+    };
 }

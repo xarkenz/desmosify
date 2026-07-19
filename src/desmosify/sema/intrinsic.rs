@@ -3,7 +3,7 @@ use crate::ast::{DefinitionKind, RangeKind, TypeDefinition};
 use crate::sema::context::{GlobalContext, LocalContext};
 use crate::sema::display::ImageValue;
 use crate::sema::types::{ListState, Type};
-use crate::sema::values::{BinaryKind, ColorKind, InequalityKind, MathematicalConstant, ReducerKind, UnaryKind, Value, ValueKind};
+use crate::sema::values::{BinaryKind, InequalityKind, MathematicalConstant, ReducerKind, TernaryKind, UnaryKind, Value, ValueKind};
 use crate::target::Target;
 
 pub fn get_core_intrinsics(target: &dyn Target) -> impl Iterator<Item = (&'static str, ValueKind)> {
@@ -16,19 +16,19 @@ pub fn get_core_intrinsics(target: &dyn Target) -> impl Iterator<Item = (&'stati
             ("pi", ValueKind::Mathematical(MathematicalConstant::Pi)),
             ("tau", ValueKind::Mathematical(MathematicalConstant::Tau)),
             ("e", ValueKind::Mathematical(MathematicalConstant::E)),
-            ("black", ValueKind::Color {
-                kind: ColorKind::Hsv,
-                value_1: Box::new(ValueKind::Int(0).into()),
-                value_2: Box::new(ValueKind::Int(0).into()),
-                value_3: Box::new(ValueKind::Int(0).into()),
-                list_state: None,
+            ("black", ValueKind::Ternary {
+                kind: TernaryKind::Hsv,
+                first: Box::new(ValueKind::Int(0).into()),
+                second: Box::new(ValueKind::Int(0).into()),
+                third: Box::new(ValueKind::Int(0).into()),
+                result_type: Type::Color,
             }),
-            ("white", ValueKind::Color {
-                kind: ColorKind::Hsv,
-                value_1: Box::new(ValueKind::Int(0).into()),
-                value_2: Box::new(ValueKind::Int(0).into()),
-                value_3: Box::new(ValueKind::Int(1).into()),
-                list_state: None,
+            ("white", ValueKind::Ternary {
+                kind: TernaryKind::Hsv,
+                first: Box::new(ValueKind::Int(0).into()),
+                second: Box::new(ValueKind::Int(0).into()),
+                third: Box::new(ValueKind::Int(1).into()),
+                result_type: Type::Color,
             }),
             ("width_pixels", ValueKind::ViewportWidth),
             ("height_pixels", ValueKind::ViewportHeight),
@@ -166,7 +166,7 @@ pub const CORE_INTRINSIC_FUNCTIONS: &[&IntrinsicFunction] = &[
     &PREFIX_SUM,
     // Statistics
     &MEAN,
-    // &MEDIAN,
+    &MEDIAN,
     &MIN,
     &MAX,
     // &QUARTILE,
@@ -209,6 +209,7 @@ pub const CORE_INTRINSIC_FUNCTIONS: &[&IntrinsicFunction] = &[
     // Geometry
     &MIDPOINT,
     // &INTERSECTION,
+    // &STRICT_INTERSECTION,
     &SEGMENT,
     &SEGMENT3D,
     &LINE,
@@ -219,26 +220,26 @@ pub const CORE_INTRINSIC_FUNCTIONS: &[&IntrinsicFunction] = &[
     // &PERPENDICULAR,
     &CIRCLE,
     &SPHERE3D,
-    // &ARC,
-    // &ANGLE,
-    // &DIRECTED_ANGLE,
+    &ARC,
+    &ANGLE,
+    &DIRECTED_ANGLE,
     &POLYGON,
     &RECT,
-    // &TRIANGLE3D,
-    // &GLIDER,
+    &TRIANGLE3D,
+    &GLIDER,
     // Properties & Measurements
     // &DOT,
     // &CROSS,
     // &DISTANCE,
     // &LENGTH,
-    // &AREA,
-    // &PERIMETER,
-    // &VERTICES,
-    // &ANGLES,
-    // &DIRECTED_ANGLES,
-    // &SEGMENTS,
-    // &RADIUS,
-    // &CENTER,
+    &AREA,
+    &PERIMETER,
+    &VERTICES,
+    &ANGLES,
+    &DIRECTED_ANGLES,
+    &SEGMENTS,
+    &RADIUS,
+    &CENTER,
     // &COTERMINAL,
     // &SUPPLEMENT,
     &START,
@@ -268,7 +269,23 @@ pub const CORE_INTRINSIC_FUNCTIONS: &[&IntrinsicFunction] = &[
     &TARGET_SYMBOL,
 ];
 
-pub fn interpret_unary_call(
+pub fn interpret_strict_unary_call(
+    kind: UnaryKind,
+    argument_type: Type,
+    result_type: Option<Type>,
+    arguments: Box<[Value]>,
+) -> crate::Result<ValueKind> {
+    let argument = arguments.into_iter().next().unwrap()
+        .coerce_to(&argument_type, false)?;
+
+    Ok(ValueKind::Unary {
+        kind,
+        result_type: result_type.unwrap_or(argument_type),
+        operand: Box::new(argument),
+    })
+}
+
+pub fn interpret_broadcastable_unary_call(
     kind: UnaryKind,
     argument_type: Type,
     result_type: Option<Type>,
@@ -287,36 +304,7 @@ pub fn interpret_unary_call(
     })
 }
 
-macro_rules! unary_intrinsic {
-    ($identifier:literal, ($argument_type:expr) => $kind:ident) => {
-        IntrinsicFunction {
-            identifier: $identifier,
-            min_arity: 1,
-            max_arity: Some(1),
-            interpret_call: |_, _, _, arguments| interpret_unary_call(
-                UnaryKind::$kind,
-                $argument_type,
-                None,
-                arguments,
-            ),
-        }
-    };
-    ($identifier:literal, ($argument_type:expr) => $kind:ident, $result_type:expr) => {
-        IntrinsicFunction {
-            identifier: $identifier,
-            min_arity: 1,
-            max_arity: Some(1),
-            interpret_call: |_, _, _, arguments| interpret_unary_call(
-                UnaryKind::$kind,
-                $argument_type,
-                Some($result_type),
-                arguments,
-            ),
-        }
-    };
-}
-
-pub fn interpret_binary_call(
+pub fn interpret_broadcastable_binary_call(
     kind: BinaryKind,
     lhs_type: Type,
     rhs_type: Type,
@@ -343,24 +331,39 @@ pub fn interpret_binary_call(
     })
 }
 
-macro_rules! binary_intrinsic {
-    ($identifier:literal, ($lhs_type:expr, $rhs_type:expr) => $kind:ident, $result_type:expr) => {
-        IntrinsicFunction {
-            identifier: $identifier,
-            min_arity: 2,
-            max_arity: Some(2),
-            interpret_call: |_, _, _, arguments| interpret_binary_call(
-                BinaryKind::$kind,
-                $lhs_type,
-                $rhs_type,
-                $result_type,
-                arguments,
-            ),
-        }
-    };
+pub fn interpret_broadcastable_ternary_call(
+    kind: TernaryKind,
+    first_type: Type,
+    second_type: Type,
+    third_type: Type,
+    result_type: Type,
+    arguments: Box<[Value]>,
+) -> crate::Result<ValueKind> {
+    let mut arguments = arguments.into_iter();
+
+    let first = arguments.next().unwrap()
+        .coerce_to(&first_type, true)?;
+    let second = arguments.next().unwrap()
+        .coerce_to(&second_type, true)?;
+    let third = arguments.next().unwrap()
+        .coerce_to(&third_type, true)?;
+
+    let list_state = ListState::merge_all([
+        first.get_type().list_state(),
+        second.get_type().list_state(),
+        third.get_type().list_state(),
+    ]);
+
+    Ok(ValueKind::Ternary {
+        kind,
+        first: Box::new(first),
+        second: Box::new(second),
+        third: Box::new(third),
+        result_type: result_type.unflatten_list(list_state),
+    })
 }
 
-pub fn interpret_reducer_call(
+pub fn interpret_broadcastable_reducer_call(
     kind: ReducerKind,
     element_type: Option<Type>,
     result_type: Option<Type>,
@@ -422,54 +425,29 @@ pub fn interpret_reducer_call(
     })
 }
 
-macro_rules! reducer_intrinsic {
-    ($identifier:literal => $kind:ident) => {
+macro_rules! strict_intrinsic {
+    // Unary
+    ($identifier:expr, ($argument_type:expr) => $kind:ident) => {
         IntrinsicFunction {
             identifier: $identifier,
             min_arity: 1,
-            max_arity: None,
-            interpret_call: |_, _, _, arguments| interpret_reducer_call(
-                ReducerKind::$kind,
-                None,
-                None,
-                arguments,
-            ),
-        }
-    };
-    ($identifier:literal => $kind:ident, $result_type:expr) => {
-        IntrinsicFunction {
-            identifier: $identifier,
-            min_arity: 1,
-            max_arity: None,
-            interpret_call: |_, _, _, arguments| interpret_reducer_call(
-                ReducerKind::$kind,
-                None,
-                Some($result_type),
-                arguments,
-            ),
-        }
-    };
-    ($identifier:literal, [$element_type:expr] => $kind:ident) => {
-        IntrinsicFunction {
-            identifier: $identifier,
-            min_arity: 1,
-            max_arity: None,
-            interpret_call: |_, _, _, arguments| interpret_reducer_call(
-                ReducerKind::$kind,
-                Some($element_type),
+            max_arity: Some(1),
+            interpret_call: |_, _, _, arguments| interpret_strict_unary_call(
+                UnaryKind::$kind,
+                $argument_type,
                 None,
                 arguments,
             ),
         }
     };
-    ($identifier:literal, [$element_type:expr] => $kind:ident, $result_type:expr) => {
+    ($identifier:expr, ($argument_type:expr) => $kind:ident, $result_type:expr) => {
         IntrinsicFunction {
             identifier: $identifier,
             min_arity: 1,
-            max_arity: None,
-            interpret_call: |_, _, _, arguments| interpret_reducer_call(
-                ReducerKind::$kind,
-                Some($element_type),
+            max_arity: Some(1),
+            interpret_call: |_, _, _, arguments| interpret_strict_unary_call(
+                UnaryKind::$kind,
+                $argument_type,
                 Some($result_type),
                 arguments,
             ),
@@ -477,43 +455,116 @@ macro_rules! reducer_intrinsic {
     };
 }
 
-pub fn interpret_color_call(
-    kind: ColorKind,
-    arguments: Box<[Value]>,
-) -> crate::Result<ValueKind> {
-    let mut arguments = arguments.into_iter();
-    let value_1 = arguments.next().unwrap()
-        .coerce_to(&Type::Real, true)?;
-    let value_2 = arguments.next().unwrap()
-        .coerce_to(&Type::Real, true)?;
-    let value_3 = arguments.next().unwrap()
-        .coerce_to(&Type::Real, true)?;
-    let list_state = ListState::merge(
-        ListState::merge(
-            value_1.get_type().list_state(),
-            value_2.get_type().list_state(),
-        ),
-        value_3.get_type().list_state(),
-    );
-
-    Ok(ValueKind::Color {
-        kind,
-        value_1: Box::new(value_1),
-        value_2: Box::new(value_2),
-        value_3: Box::new(value_3),
-        list_state,
-    })
-}
-
-macro_rules! color_intrinsic {
-    ($id:expr => $kind:ident) => {
+macro_rules! broadcastable_intrinsic {
+    // Unary
+    ($identifier:expr, ($argument_type:expr) => $kind:ident) => {
         IntrinsicFunction {
-            identifier: $id,
+            identifier: $identifier,
+            min_arity: 1,
+            max_arity: Some(1),
+            interpret_call: |_, _, _, arguments| interpret_broadcastable_unary_call(
+                UnaryKind::$kind,
+                $argument_type,
+                None,
+                arguments,
+            ),
+        }
+    };
+    ($identifier:expr, ($argument_type:expr) => $kind:ident, $result_type:expr) => {
+        IntrinsicFunction {
+            identifier: $identifier,
+            min_arity: 1,
+            max_arity: Some(1),
+            interpret_call: |_, _, _, arguments| interpret_broadcastable_unary_call(
+                UnaryKind::$kind,
+                $argument_type,
+                Some($result_type),
+                arguments,
+            ),
+        }
+    };
+    // Binary
+    ($identifier:expr, ($lhs_type:expr, $rhs_type:expr) => $kind:ident, $result_type:expr) => {
+        IntrinsicFunction {
+            identifier: $identifier,
+            min_arity: 2,
+            max_arity: Some(2),
+            interpret_call: |_, _, _, arguments| interpret_broadcastable_binary_call(
+                BinaryKind::$kind,
+                $lhs_type,
+                $rhs_type,
+                $result_type,
+                arguments,
+            ),
+        }
+    };
+    // Ternary
+    ($identifier:expr, ($first_type:expr, $second_type:expr, $third_type: expr) => $kind:ident, $result_type:expr) => {
+        IntrinsicFunction {
+            identifier: $identifier,
             min_arity: 3,
             max_arity: Some(3),
-            interpret_call: |_, _, _, arguments| {
-                interpret_color_call(ColorKind::$kind, arguments)
-            },
+            interpret_call: |_, _, _, arguments| interpret_broadcastable_ternary_call(
+                TernaryKind::$kind,
+                $first_type,
+                $second_type,
+                $third_type,
+                $result_type,
+                arguments,
+            ),
+        }
+    };
+    // Reducer
+    ($identifier:expr, [?] => $kind:ident) => {
+        IntrinsicFunction {
+            identifier: $identifier,
+            min_arity: 1,
+            max_arity: None,
+            interpret_call: |_, _, _, arguments| interpret_broadcastable_reducer_call(
+                ReducerKind::$kind,
+                None,
+                None,
+                arguments,
+            ),
+        }
+    };
+    ($identifier:expr, [?] => $kind:ident, $result_type:expr) => {
+        IntrinsicFunction {
+            identifier: $identifier,
+            min_arity: 1,
+            max_arity: None,
+            interpret_call: |_, _, _, arguments| interpret_broadcastable_reducer_call(
+                ReducerKind::$kind,
+                None,
+                Some($result_type),
+                arguments,
+            ),
+        }
+    };
+    ($identifier:expr, [$element_type:expr] => $kind:ident) => {
+        IntrinsicFunction {
+            identifier: $identifier,
+            min_arity: 1,
+            max_arity: None,
+            interpret_call: |_, _, _, arguments| interpret_broadcastable_reducer_call(
+                ReducerKind::$kind,
+                Some($element_type),
+                None,
+                arguments,
+            ),
+        }
+    };
+    ($identifier:expr, [$element_type:expr] => $kind:ident, $result_type:expr) => {
+        IntrinsicFunction {
+            identifier: $identifier,
+            min_arity: 1,
+            max_arity: None,
+            interpret_call: |_, _, _, arguments| interpret_broadcastable_reducer_call(
+                ReducerKind::$kind,
+                Some($element_type),
+                Some($result_type),
+                arguments,
+            ),
         }
     };
 }
@@ -543,93 +594,93 @@ pub fn read_file_bytes(local_context: &LocalContext, path_value: &Value) -> crat
 
 // ------ Trigonometric ------
 
-pub static SIN: IntrinsicFunction = unary_intrinsic!(
+pub static SIN: IntrinsicFunction = broadcastable_intrinsic!(
     "sin", (Type::Real) => Sin
 );
 
-pub static COS: IntrinsicFunction = unary_intrinsic!(
+pub static COS: IntrinsicFunction = broadcastable_intrinsic!(
     "cos", (Type::Real) => Cos
 );
 
-pub static TAN: IntrinsicFunction = unary_intrinsic!(
+pub static TAN: IntrinsicFunction = broadcastable_intrinsic!(
     "tan", (Type::Real) => Tan
 );
 
-pub static CSC: IntrinsicFunction = unary_intrinsic!(
+pub static CSC: IntrinsicFunction = broadcastable_intrinsic!(
     "csc", (Type::Real) => Csc
 );
 
-pub static SEC: IntrinsicFunction = unary_intrinsic!(
+pub static SEC: IntrinsicFunction = broadcastable_intrinsic!(
     "sec", (Type::Real) => Sec
 );
 
-pub static COT: IntrinsicFunction = unary_intrinsic!(
+pub static COT: IntrinsicFunction = broadcastable_intrinsic!(
     "cot", (Type::Real) => Cot
 );
 
-pub static ARCSIN: IntrinsicFunction = unary_intrinsic!(
+pub static ARCSIN: IntrinsicFunction = broadcastable_intrinsic!(
     "arcsin", (Type::Real) => Arcsin
 );
 
-pub static ARCCOS: IntrinsicFunction = unary_intrinsic!(
+pub static ARCCOS: IntrinsicFunction = broadcastable_intrinsic!(
     "arccos", (Type::Real) => Arccos
 );
 
-pub static ARCTAN: IntrinsicFunction = unary_intrinsic!(
+pub static ARCTAN: IntrinsicFunction = broadcastable_intrinsic!(
     "arctan", (Type::Real) => Arctan
 );
 
-pub static ARCTAN2: IntrinsicFunction = binary_intrinsic!(
+pub static ARCTAN2: IntrinsicFunction = broadcastable_intrinsic!(
     "arctan2", (Type::Real, Type::Real) => Arctan2, Type::Real
 );
 
-pub static ARCCSC: IntrinsicFunction = unary_intrinsic!(
+pub static ARCCSC: IntrinsicFunction = broadcastable_intrinsic!(
     "arccsc", (Type::Real) => Arccsc
 );
 
-pub static ARCSEC: IntrinsicFunction = unary_intrinsic!(
+pub static ARCSEC: IntrinsicFunction = broadcastable_intrinsic!(
     "arcsec", (Type::Real) => Arcsec
 );
 
-pub static ARCCOT: IntrinsicFunction = unary_intrinsic!(
+pub static ARCCOT: IntrinsicFunction = broadcastable_intrinsic!(
     "arccot", (Type::Real) => Arccot
 );
 
-pub static SINH: IntrinsicFunction = unary_intrinsic!(
+pub static SINH: IntrinsicFunction = broadcastable_intrinsic!(
     "sinh", (Type::Real) => Sinh
 );
 
-pub static COSH: IntrinsicFunction = unary_intrinsic!(
+pub static COSH: IntrinsicFunction = broadcastable_intrinsic!(
     "cosh", (Type::Real) => Cosh
 );
 
-pub static TANH: IntrinsicFunction = unary_intrinsic!(
+pub static TANH: IntrinsicFunction = broadcastable_intrinsic!(
     "tanh", (Type::Real) => Tanh
 );
 
-pub static CSCH: IntrinsicFunction = unary_intrinsic!(
+pub static CSCH: IntrinsicFunction = broadcastable_intrinsic!(
     "csch", (Type::Real) => Csch
 );
 
-pub static SECH: IntrinsicFunction = unary_intrinsic!(
+pub static SECH: IntrinsicFunction = broadcastable_intrinsic!(
     "sech", (Type::Real) => Sech
 );
 
-pub static COTH: IntrinsicFunction = unary_intrinsic!(
+pub static COTH: IntrinsicFunction = broadcastable_intrinsic!(
     "coth", (Type::Real) => Coth
 );
 
 // ------ Calculus ------
 
-pub static EXP: IntrinsicFunction = unary_intrinsic!(
+pub static EXP: IntrinsicFunction = broadcastable_intrinsic!(
     "exp", (Type::Real) => Exp
 );
 
-pub static LN: IntrinsicFunction = unary_intrinsic!(
+pub static LN: IntrinsicFunction = broadcastable_intrinsic!(
     "ln", (Type::Real) => Ln
 );
 
-pub static LOG: IntrinsicFunction = binary_intrinsic!(
+pub static LOG: IntrinsicFunction = broadcastable_intrinsic!(
     "log", (Type::Real, Type::Real) => Log, Type::Real
 );
 
@@ -643,47 +694,47 @@ pub static LOG: IntrinsicFunction = binary_intrinsic!(
 
 // ------ Number Theory ------
 
-pub static LCM: IntrinsicFunction = reducer_intrinsic!(
+pub static LCM: IntrinsicFunction = broadcastable_intrinsic!(
     "lcm", [Type::Int] => Lcm
 );
 
-pub static GCD: IntrinsicFunction = reducer_intrinsic!(
+pub static GCD: IntrinsicFunction = broadcastable_intrinsic!(
     "gcd", [Type::Int] => Gcd
 );
 
-pub static CEIL: IntrinsicFunction = unary_intrinsic!(
+pub static CEIL: IntrinsicFunction = broadcastable_intrinsic!(
     "ceil", (Type::Real) => Ceil, Type::Int
 );
 
-pub static FLOOR: IntrinsicFunction = unary_intrinsic!(
+pub static FLOOR: IntrinsicFunction = broadcastable_intrinsic!(
     "floor", (Type::Real) => Floor, Type::Int
 );
 
-pub static ROUND: IntrinsicFunction = unary_intrinsic!(
+pub static ROUND: IntrinsicFunction = broadcastable_intrinsic!(
     "round", (Type::Real) => Round, Type::Int
 );
 
-pub static ROUND_DIGITS: IntrinsicFunction = binary_intrinsic!(
+pub static ROUND_DIGITS: IntrinsicFunction = broadcastable_intrinsic!(
     "round_digits", (Type::Real, Type::Int) => RoundDigits, Type::Real
 );
 
-pub static ABS: IntrinsicFunction = unary_intrinsic!(
+pub static ABS: IntrinsicFunction = broadcastable_intrinsic!(
     "abs", (Type::union([Type::Int, Type::Real])) => Abs
 );
 
-pub static SIGN: IntrinsicFunction = unary_intrinsic!(
+pub static SIGN: IntrinsicFunction = broadcastable_intrinsic!(
     "sign", (Type::Real) => Sign, Type::Int
 );
 
-pub static SQRT: IntrinsicFunction = unary_intrinsic!(
+pub static SQRT: IntrinsicFunction = broadcastable_intrinsic!(
     "sqrt", (Type::Real) => Sqrt, Type::Real
 );
 
-pub static CBRT: IntrinsicFunction = unary_intrinsic!(
+pub static CBRT: IntrinsicFunction = broadcastable_intrinsic!(
     "cbrt", (Type::Real) => Cbrt, Type::Real
 );
 
-pub static NTH_ROOT: IntrinsicFunction = binary_intrinsic!(
+pub static NTH_ROOT: IntrinsicFunction = broadcastable_intrinsic!(
     "nth_root", (Type::Real, Type::Real) => NthRoot, Type::Real
 );
 
@@ -732,30 +783,41 @@ pub static SORT: IntrinsicFunction = IntrinsicFunction {
     interpret_call: |_, _, _, arguments| {
         let mut arguments = arguments.into_iter();
 
-        let mut list = arguments.next().unwrap();
+        let list = arguments.next().unwrap();
         list.get_type()
             .require_flatten_list()
             .map_err(|error| error.with_span(list.span))?;
 
-        let key_list = arguments.next()
-            .map(|key_list| {
-                key_list.get_type()
-                    .require_flatten_list()
-                    .map_err(|error| error.with_span(list.span))?;
-                key_list.coerce_to(&Type::Real, true)
+        let key_type = Type::union([
+            Type::Bool,
+            Type::Int,
+            Type::Real,
+            Type::Complex,
+        ]);
+
+        if let Some(key_list) = arguments.next() {
+            key_list.get_type()
+                .require_flatten_list()
+                .map_err(|error| error.with_span(list.span))?;
+
+            let key_list = key_list.coerce_to(&key_type, true)?;
+
+            Ok(ValueKind::Binary {
+                kind: BinaryKind::SortKeyed,
+                result_type: list.get_type(),
+                lhs: Box::new(list),
+                rhs: Box::new(key_list),
             })
-            .transpose()?;
-
-        // FIXME: the types here are busted
-        if key_list.is_none() {
-            // The values in the original list are used as keys
-            list = list.coerce_to(&Type::Real, true)?;
         }
+        else {
+            let list = list.coerce_to(&key_type, true)?;
 
-        Ok(ValueKind::Sort {
-            list: Box::new(list),
-            key_list: key_list.map(Box::new),
-        })
+            Ok(ValueKind::Unary {
+                kind: UnaryKind::Sort,
+                result_type: list.get_type(),
+                operand: Box::new(list),
+            })
+        }
     },
 };
 
@@ -771,14 +833,23 @@ pub static SHUFFLE: IntrinsicFunction = IntrinsicFunction {
             .require_flatten_list()
             .map_err(|error| error.with_span(list.span))?;
 
-        let seed = arguments.next()
-            .map(|seed| seed.coerce_to(&Type::Real, false))
-            .transpose()?;
+        if let Some(seed) = arguments.next() {
+            let seed = seed.coerce_to(&Type::Real, false)?;
 
-        Ok(ValueKind::Shuffle {
-            list: Box::new(list),
-            seed: seed.map(Box::new),
-        })
+            Ok(ValueKind::Binary {
+                kind: BinaryKind::ShuffleSeeded,
+                result_type: list.get_type(),
+                lhs: Box::new(list),
+                rhs: Box::new(seed),
+            })
+        }
+        else {
+            Ok(ValueKind::Unary {
+                kind: UnaryKind::Shuffle,
+                result_type: list.get_type(),
+                operand: Box::new(list),
+            })
+        }
     },
 };
 
@@ -788,14 +859,16 @@ pub static UNIQUE: IntrinsicFunction = IntrinsicFunction {
     max_arity: Some(1),
     interpret_call: |_, _, _, arguments| {
         // It seems like unique() accepts basically any type, so don't bother checking the item type
-        // TODO: check if any types can go in a list but cannot be uniqued
+        // FIXME: per desmos code, only distributions cannot be uniqued
         let list = arguments.into_iter().next().unwrap();
         list.get_type()
             .require_flatten_list()
             .map_err(|error| error.with_span(list.span))?;
 
-        Ok(ValueKind::Unique {
-            list: Box::new(list),
+        Ok(ValueKind::Unary {
+            kind: UnaryKind::Unique,
+            result_type: list.get_type(),
+            operand: Box::new(list),
         })
     },
 };
@@ -821,17 +894,19 @@ pub static PREFIX_SUM: IntrinsicFunction = IntrinsicFunction {
 
 // ------ Statistics ------
 
-pub static MEAN: IntrinsicFunction = reducer_intrinsic!(
-    "mean", [Type::union([Type::Real, Type::real_point2(), Type::real_point3()])] => Mean
+pub static MEAN: IntrinsicFunction = broadcastable_intrinsic!(
+    "mean", [Type::union([Type::Real, Type::real_point_2d(), Type::real_point_3d()])] => Mean
 );
 
-// MEDIAN
+pub static MEDIAN: IntrinsicFunction = broadcastable_intrinsic!(
+    "median", [Type::Real] => Median
+);
 
-pub static MIN: IntrinsicFunction = reducer_intrinsic!(
+pub static MIN: IntrinsicFunction = broadcastable_intrinsic!(
     "min", [Type::union([Type::Bool, Type::Int, Type::Real])] => Min
 );
 
-pub static MAX: IntrinsicFunction = reducer_intrinsic!(
+pub static MAX: IntrinsicFunction = broadcastable_intrinsic!(
     "max", [Type::union([Type::Bool, Type::Int, Type::Real])] => Max
 );
 
@@ -859,19 +934,19 @@ pub static MAX: IntrinsicFunction = reducer_intrinsic!(
 
 // STATS
 
-pub static COUNT: IntrinsicFunction = reducer_intrinsic!(
-    "count" => Count, Type::Int
+pub static COUNT: IntrinsicFunction = broadcastable_intrinsic!(
+    "count", [?] => Count, Type::Int
 );
 
-pub static TOTAL: IntrinsicFunction = reducer_intrinsic!(
+pub static TOTAL: IntrinsicFunction = broadcastable_intrinsic!(
     "total", [Type::union([
         Type::Int,
         Type::Real,
-        Type::point2(
+        Type::point_2d(
             Type::union([Type::Int, Type::Real]),
             Type::union([Type::Int, Type::Real]),
         ),
-        Type::point3(
+        Type::point_3d(
             Type::union([Type::Int, Type::Real]),
             Type::union([Type::Int, Type::Real]),
             Type::union([Type::Int, Type::Real]),
@@ -977,7 +1052,7 @@ fn interpret_random_call_end(
         if let Some(seed) = arguments.next() {
             let seed = seed.coerce_to(&Type::Real, false)?;
 
-            Ok(ValueKind::SeededRandom {
+            Ok(ValueKind::RandomSeeded {
                 source,
                 sample_count: Box::new(sample_count),
                 seed: Box::new(seed),
@@ -1054,14 +1129,14 @@ pub static MIDPOINT: IntrinsicFunction = IntrinsicFunction {
 
         if let Some(point_2) = arguments.next() {
             let point_1 = point_1_or_segment.coerce_to(&Type::union([
-                Type::real_point2(),
-                Type::real_point3(),
+                Type::real_point_2d(),
+                Type::real_point_3d(),
             ]), true)?;
             let (point_1_list, point_type) = point_1.get_type().into_flatten_list();
 
             let kind = match &point_type {
-                Type::Point2 { .. } => BinaryKind::MidpointOfPoints2D,
-                Type::Point3 { .. } => BinaryKind::MidpointOfPoints3D,
+                Type::Point2D { .. } => BinaryKind::MidpointOfPoints2D,
+                Type::Point3D { .. } => BinaryKind::MidpointOfPoints3D,
                 _ => unreachable!()
             };
 
@@ -1087,8 +1162,8 @@ pub static MIDPOINT: IntrinsicFunction = IntrinsicFunction {
             let (list_state, segment_type) = segment.get_type().into_flatten_list();
 
             let (kind, point_type) = match segment_type {
-                Type::Segment => (UnaryKind::MidpointOfSegment2D, Type::real_point2()),
-                Type::Segment3D => (UnaryKind::MidpointOfSegment3D, Type::real_point3()),
+                Type::Segment => (UnaryKind::MidpointOfSegment2D, Type::real_point_2d()),
+                Type::Segment3D => (UnaryKind::MidpointOfSegment3D, Type::real_point_3d()),
                 _ => unreachable!()
             };
 
@@ -1103,59 +1178,106 @@ pub static MIDPOINT: IntrinsicFunction = IntrinsicFunction {
 
 // INTERSECTION
 
-pub static SEGMENT: IntrinsicFunction = binary_intrinsic!(
-    "segment", (Type::real_point2(), Type::real_point2()) => Segment, Type::Segment
+// STRICT_INTERSECTION
+
+pub static SEGMENT: IntrinsicFunction = broadcastable_intrinsic!(
+    "segment", (Type::real_point_2d(), Type::real_point_2d()) => Segment2D, Type::Segment
 );
 
-pub static SEGMENT3D: IntrinsicFunction = binary_intrinsic!(
-    "segment3d", (Type::real_point3(), Type::real_point3()) => Segment3D, Type::Segment3D
+pub static SEGMENT3D: IntrinsicFunction = broadcastable_intrinsic!(
+    "segment3d", (Type::real_point_3d(), Type::real_point_3d()) => Segment3D, Type::Segment3D
 );
 
-pub static LINE: IntrinsicFunction = binary_intrinsic!(
-    "line", (Type::real_point2(), Type::real_point2()) => Line, Type::Line
+pub static LINE: IntrinsicFunction = broadcastable_intrinsic!(
+    "line", (Type::real_point_2d(), Type::real_point_2d()) => Line2D, Type::Line
 );
 
-pub static RAY: IntrinsicFunction = binary_intrinsic!(
-    "ray", (Type::real_point2(), Type::real_point2()) => Ray, Type::Ray
+pub static RAY: IntrinsicFunction = broadcastable_intrinsic!(
+    "ray", (Type::real_point_2d(), Type::real_point_2d()) => Ray2D, Type::Ray
 );
 
-pub static VECTOR: IntrinsicFunction = binary_intrinsic!(
-    "vector", (Type::real_point2(), Type::real_point2()) => Vector, Type::Vector
+pub static VECTOR: IntrinsicFunction = broadcastable_intrinsic!(
+    "vector", (Type::real_point_2d(), Type::real_point_2d()) => Vector2D, Type::Vector
 );
 
-pub static VECTOR3D: IntrinsicFunction = binary_intrinsic!(
-    "vector3d", (Type::real_point3(), Type::real_point3()) => Vector3D, Type::Vector3D
+pub static VECTOR3D: IntrinsicFunction = broadcastable_intrinsic!(
+    "vector3d", (Type::real_point_3d(), Type::real_point_3d()) => Vector3D, Type::Vector3D
 );
 
 // PARALLEL
 
 // PERPENDICULAR
 
-pub static CIRCLE: IntrinsicFunction = binary_intrinsic!(
-    "circle", (Type::real_point2(), Type::Real) => Circle, Type::Circle
+pub static CIRCLE: IntrinsicFunction = IntrinsicFunction {
+    identifier: "circle",
+    min_arity: 2,
+    max_arity: Some(2),
+    interpret_call: |_, _, _, arguments| {
+        let mut arguments = arguments.into_iter();
+
+        let lhs = arguments.next().unwrap()
+            .coerce_to(&Type::real_point_2d(), true)?;
+        let rhs = arguments.next().unwrap()
+            .coerce_to(&Type::union([
+                Type::Real,
+                Type::real_point_2d(),
+            ]), true)?;
+
+        let list_state = ListState::merge(
+            lhs.get_type().list_state(),
+            rhs.get_type().list_state(),
+        );
+
+        Ok(ValueKind::Binary {
+            kind: match rhs.get_type() {
+                Type::Point2D { .. } => BinaryKind::Circle2DFromEdge,
+                _ => BinaryKind::Circle2DFromRadius,
+            },
+            lhs: Box::new(lhs),
+            rhs: Box::new(rhs),
+            result_type: Type::Circle.unflatten_list(list_state),
+        })
+    },
+};
+
+pub static SPHERE3D: IntrinsicFunction = broadcastable_intrinsic!(
+    "sphere3d", (Type::real_point_3d(), Type::Real) => Sphere3DFromRadius, Type::Sphere3D
 );
 
-pub static SPHERE3D: IntrinsicFunction = binary_intrinsic!(
-    "sphere3d", (Type::real_point3(), Type::Real) => Sphere3D, Type::Sphere3D
+pub static ARC: IntrinsicFunction = broadcastable_intrinsic!(
+    "arc", (Type::real_point_2d(), Type::real_point_2d(), Type::real_point_2d()) => Arc2D, Type::Arc
 );
 
-// ARC
-
-// ANGLE
-
-// DIRECTED_ANGLE
-
-pub static POLYGON: IntrinsicFunction = reducer_intrinsic!(
-    "polygon", [Type::real_point2()] => Polygon, Type::Polygon
+pub static ANGLE: IntrinsicFunction = broadcastable_intrinsic!(
+    "angle", (Type::real_point_2d(), Type::real_point_2d(), Type::real_point_2d()) => UndirectedAngle, Type::Angle
 );
 
-pub static RECT: IntrinsicFunction = binary_intrinsic!(
-    "rect", (Type::real_point2(), Type::real_point2()) => Rectangle, Type::Polygon
+pub static DIRECTED_ANGLE: IntrinsicFunction = broadcastable_intrinsic!(
+    "directed_angle", (Type::real_point_2d(), Type::real_point_2d(), Type::real_point_2d()) => DirectedAngle, Type::DirectedAngle
 );
 
-// TRIANGLE3D
+pub static POLYGON: IntrinsicFunction = broadcastable_intrinsic!(
+    "polygon", [Type::real_point_2d()] => Polygon, Type::Polygon
+);
 
-// GLIDER
+pub static RECT: IntrinsicFunction = broadcastable_intrinsic!(
+    "rect", (Type::real_point_2d(), Type::real_point_2d()) => Rectangle2D, Type::Polygon
+);
+
+pub static TRIANGLE3D: IntrinsicFunction = broadcastable_intrinsic!(
+    "triangle", (Type::real_point_3d(), Type::real_point_3d(), Type::real_point_3d()) => Triangle3D, Type::Triangle3D
+);
+
+pub static GLIDER: IntrinsicFunction = broadcastable_intrinsic!(
+    "glider", (Type::union([
+        Type::Segment,
+        Type::Circle,
+        Type::Line,
+        Type::Ray,
+        Type::Arc,
+        Type::Polygon,
+    ]), Type::Real) => Glider, Type::real_point_2d()
+);
 
 // ------ Properties & Measurements ------
 
@@ -1167,21 +1289,37 @@ pub static RECT: IntrinsicFunction = binary_intrinsic!(
 
 // LENGTH
 
-// AREA
+pub static AREA: IntrinsicFunction = broadcastable_intrinsic!(
+    "area", (Type::Polygon) => AreaOfPolygon, Type::Real
+);
 
-// PERIMETER
+pub static PERIMETER: IntrinsicFunction = broadcastable_intrinsic!(
+    "perimeter", (Type::Polygon) => PerimeterOfPolygon, Type::Real
+);
 
-// VERTICES
+pub static VERTICES: IntrinsicFunction = strict_intrinsic!(
+    "vertices", (Type::Polygon) => VerticesOfPolygon, Type::real_point_2d().into_list(ListState::IsList)
+);
 
-// ANGLES
+pub static ANGLES: IntrinsicFunction = strict_intrinsic!(
+    "angles", (Type::Polygon) => UndirectedAnglesOfPolygon, Type::Angle.into_list(ListState::IsList)
+);
 
-// DIRECTED_ANGLES
+pub static DIRECTED_ANGLES: IntrinsicFunction = strict_intrinsic!(
+    "directed_angles", (Type::Polygon) => DirectedAnglesOfPolygon, Type::DirectedAngle.into_list(ListState::IsList)
+);
 
-// SEGMENTS
+pub static SEGMENTS: IntrinsicFunction = strict_intrinsic!(
+    "segments", (Type::Polygon) => SegmentsOfPolygon, Type::Segment.into_list(ListState::IsList)
+);
 
-// RADIUS
+pub static RADIUS: IntrinsicFunction = broadcastable_intrinsic!(
+    "radius", (Type::Circle) => RadiusOfCircle, Type::Real
+);
 
-// CENTER
+pub static CENTER: IntrinsicFunction = broadcastable_intrinsic!(
+    "center", (Type::Circle) => CenterOfCircle, Type::Real
+);
 
 // COTERMINAL
 
@@ -1197,8 +1335,8 @@ fn interpret_start_end_call(
     let (list_state, vector_type) = vector.get_type().into_flatten_list();
 
     let (kind, point_type) = match vector_type {
-        Type::Vector => (kind_2d, Type::real_point2()),
-        Type::Vector3D => (kind_3d, Type::real_point3()),
+        Type::Vector => (kind_2d, Type::real_point_2d()),
+        Type::Vector3D => (kind_3d, Type::real_point_3d()),
         _ => unreachable!()
     };
 
@@ -1213,18 +1351,22 @@ pub static START: IntrinsicFunction = IntrinsicFunction {
     identifier: "start",
     min_arity: 1,
     max_arity: Some(1),
-    interpret_call: |_, _, _, arguments| {
-        interpret_start_end_call(UnaryKind::Vector2DStart, UnaryKind::Vector3DStart, arguments)
-    },
+    interpret_call: |_, _, _, arguments| interpret_start_end_call(
+        UnaryKind::StartOfVector2D,
+        UnaryKind::StartOfVector3D,
+        arguments,
+    ),
 };
 
 pub static END: IntrinsicFunction = IntrinsicFunction {
     identifier: "end",
     min_arity: 1,
     max_arity: Some(1),
-    interpret_call: |_, _, _, arguments| {
-        interpret_start_end_call(UnaryKind::Vector2DEnd, UnaryKind::Vector3DEnd, arguments)
-    },
+    interpret_call: |_, _, _, arguments| interpret_start_end_call(
+        UnaryKind::EndOfVector2D,
+        UnaryKind::EndOfVector3D,
+        arguments,
+    ),
 };
 
 // ------ Transformations ------
@@ -1241,23 +1383,22 @@ pub static DILATE: IntrinsicFunction = IntrinsicFunction {
         let (object_list, object_type) = object.get_type().into_flatten_list();
 
         let point = arguments.next().unwrap()
-            .coerce_to(&Type::real_point2(), true)?;
+            .coerce_to(&Type::real_point_2d(), true)?;
 
         let factor = arguments.next().unwrap()
             .coerce_to(&Type::Real, true)?;
 
-        let list_state = ListState::merge(
-            ListState::merge(
-                object_list,
-                point.get_type().list_state(),
-            ),
+        let list_state = ListState::merge_all([
+            object_list,
+            point.get_type().list_state(),
             factor.get_type().list_state(),
-        );
+        ]);
 
-        Ok(ValueKind::Dilation {
-            object: Box::new(object),
-            point: Box::new(point),
-            factor: Box::new(factor),
+        Ok(ValueKind::Ternary {
+            kind: TernaryKind::Dilate,
+            first: Box::new(object),
+            second: Box::new(point),
+            third: Box::new(factor),
             result_type: object_type.unflatten_list(list_state),
         })
     },
@@ -1275,23 +1416,30 @@ pub static ROTATE: IntrinsicFunction = IntrinsicFunction {
         let (object_list, object_type) = object.get_type().into_flatten_list();
 
         let point = arguments.next().unwrap()
-            .coerce_to(&Type::real_point2(), true)?;
+            .coerce_to(&Type::real_point_2d(), true)?;
 
         let angle = arguments.next().unwrap()
-            .coerce_to(&Type::Real, true)?;
+            .coerce_to(&Type::union([
+                Type::Real,
+                Type::Angle,
+                Type::DirectedAngle,
+            ]), true)?;
 
-        let list_state = ListState::merge(
-            ListState::merge(
-                object_list,
-                point.get_type().list_state(),
-            ),
+        let list_state = ListState::merge_all([
+            object_list,
+            point.get_type().list_state(),
             angle.get_type().list_state(),
-        );
+        ]);
 
-        Ok(ValueKind::Rotation {
-            object: Box::new(object),
-            point: Box::new(point),
-            angle: Box::new(angle),
+        Ok(ValueKind::Ternary {
+            kind: match angle.get_type() {
+                Type::Angle => TernaryKind::RotateByAngle,
+                Type::DirectedAngle => TernaryKind::RotateByDirectedAngle,
+                _ => TernaryKind::RotateByAmount,
+            },
+            first: Box::new(object),
+            second: Box::new(point),
+            third: Box::new(angle),
             result_type: object_type.unflatten_list(list_state),
         })
     },
@@ -1316,9 +1464,10 @@ pub static REFLECT: IntrinsicFunction = IntrinsicFunction {
             line.get_type().list_state(),
         );
 
-        Ok(ValueKind::Reflection {
-            object: Box::new(object),
-            line: Box::new(line),
+        Ok(ValueKind::Binary {
+            kind: BinaryKind::Reflect,
+            lhs: Box::new(object),
+            rhs: Box::new(line),
             result_type: object_type.unflatten_list(list_state),
         })
     },
@@ -1338,22 +1487,21 @@ pub static TRANSLATE: IntrinsicFunction = IntrinsicFunction {
         let point_1_or_vector = arguments.next().unwrap();
 
         if let Some(point_2) = arguments.next() {
-            let real_point2 = Type::real_point2();
+            let real_point2 = Type::real_point_2d();
             let point_1 = point_1_or_vector.coerce_to(&real_point2, true)?;
             let point_2 = point_2.coerce_to(&real_point2, true)?;
 
-            let list_state = ListState::merge(
+            let list_state = ListState::merge_all([
                 object_list,
-                ListState::merge(
-                    point_1.get_type().list_state(),
-                    point_2.get_type().list_state(),
-                ),
-            );
+                point_1.get_type().list_state(),
+                point_2.get_type().list_state(),
+            ]);
 
-            Ok(ValueKind::TranslationByPoints {
-                object: Box::new(object),
-                point_1: Box::new(point_1),
-                point_2: Box::new(point_2),
+            Ok(ValueKind::Ternary {
+                kind: TernaryKind::TranslateByPoints,
+                first: Box::new(object),
+                second: Box::new(point_1),
+                third: Box::new(point_2),
                 result_type: object_type.unflatten_list(list_state),
             })
         }
@@ -1365,9 +1513,10 @@ pub static TRANSLATE: IntrinsicFunction = IntrinsicFunction {
                 vector.get_type().list_state(),
             );
 
-            Ok(ValueKind::TranslationByVector {
-                object: Box::new(object),
-                vector: Box::new(vector),
+            Ok(ValueKind::Binary {
+                kind: BinaryKind::TranslateByVector,
+                lhs: Box::new(object),
+                rhs: Box::new(vector),
                 result_type: object_type.unflatten_list(list_state),
             })
         }
@@ -1376,15 +1525,25 @@ pub static TRANSLATE: IntrinsicFunction = IntrinsicFunction {
 
 // ------ Color ------
 
-pub static RGB: IntrinsicFunction = color_intrinsic!("rgb" => Rgb);
+pub static RGB: IntrinsicFunction = broadcastable_intrinsic!(
+    "rgb", (Type::Real, Type::Real, Type::Real) => Rgb, Type::Color
+);
 
-pub static HSV: IntrinsicFunction = color_intrinsic!("hsv" => Hsv);
+pub static HSV: IntrinsicFunction = broadcastable_intrinsic!(
+    "hsv", (Type::Real, Type::Real, Type::Real) => Hsv, Type::Color
+);
 
-pub static OKHSV: IntrinsicFunction = color_intrinsic!("okhsv" => Okhsv);
+pub static OKHSV: IntrinsicFunction = broadcastable_intrinsic!(
+    "okhsv", (Type::Real, Type::Real, Type::Real) => Okhsv, Type::Color
+);
 
-pub static OKLAB: IntrinsicFunction = color_intrinsic!("oklab" => Oklab);
+pub static OKLAB: IntrinsicFunction = broadcastable_intrinsic!(
+    "oklab", (Type::Real, Type::Real, Type::Real) => Oklab, Type::Color
+);
 
-pub static OKLCH: IntrinsicFunction = color_intrinsic!("oklch" => Oklch);
+pub static OKLCH: IntrinsicFunction = broadcastable_intrinsic!(
+    "oklch", (Type::Real, Type::Real, Type::Real) => Oklch, Type::Color
+);
 
 // ------ Sound ------
 
@@ -1392,11 +1551,11 @@ pub static OKLCH: IntrinsicFunction = color_intrinsic!("oklch" => Oklch);
 
 // ------ Desmosify ------
 
-pub static BOOL_TO_INTERNAL: IntrinsicFunction = unary_intrinsic!(
+pub static BOOL_TO_INTERNAL: IntrinsicFunction = broadcastable_intrinsic!(
     "bool_to_internal", (Type::Bool) => BoolToInternal, Type::InternalBool
 );
 
-pub static BOOL_FROM_INTERNAL: IntrinsicFunction = unary_intrinsic!(
+pub static BOOL_FROM_INTERNAL: IntrinsicFunction = broadcastable_intrinsic!(
     "bool_from_internal", (Type::InternalBool) => BoolFromInternal, Type::Bool
 );
 
@@ -1542,7 +1701,7 @@ pub static IMAGE: IntrinsicFunction = IntrinsicFunction {
         let name_value = arguments.next().unwrap();
         let name = name_value.get_const_str()?;
         let center = arguments.next().unwrap()
-            .coerce_to(&Type::Point2 {
+            .coerce_to(&Type::Point2D {
                 x_type: Box::new(Type::Real),
                 y_type: Box::new(Type::Real),
             }, true)?;

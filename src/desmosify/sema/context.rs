@@ -290,14 +290,14 @@ impl GlobalContext {
             }
             TypeExpressionKind::Point2 { x_type, y_type } => {
                 // Allow broadcastable components for the purposes of giving a nicer error message
-                Ok(Type::Point2 {
+                Ok(Type::Point2D {
                     x_type: Box::new(check_point_component(self.resolve_type(x_type, true)?)?),
                     y_type: Box::new(check_point_component(self.resolve_type(y_type, true)?)?),
                 })
             }
             TypeExpressionKind::Point3 { x_type, y_type, z_type } => {
                 // Allow broadcastable components for the purposes of giving a nicer error message
-                Ok(Type::Point3 {
+                Ok(Type::Point3D {
                     x_type: Box::new(check_point_component(self.resolve_type(x_type, true)?)?),
                     y_type: Box::new(check_point_component(self.resolve_type(y_type, true)?)?),
                     z_type: Box::new(check_point_component(self.resolve_type(z_type, true)?)?),

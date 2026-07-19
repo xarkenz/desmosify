@@ -31,8 +31,8 @@ intrinsics can be used. There are a few notations which may be unfamiliar:
 
 - `..args: type` indicates that the intrinsics is variadic—that is, it accepts an unlimited number of arguments. All of
   the arguments that correspond to `args` must be of type `type`.
-- `// T: type1 | type2` indicates that `T` is a generic type and can be replaced with either `type1` or `type2`.
-- `// T: any` indicates that `T` is a generic type and can be replaced with any type.
+- `T: type1 | type2` indicates that `T` is a generic type and can be replaced with either `type1` or `type2`.
+- `T: any` indicates that `T` is a generic type and can be replaced with any type.
 - `{description}` indicates a type described in plain English.
 
 ## Trigonometry
@@ -309,7 +309,7 @@ Compute the angle from the origin to `(x, y)` in the range (-π, π].
 ### `@abs` — Absolute value
 
 ```
-// T: real | int
+T: real | int
 @abs(x: T+): T+
 
 // @abs(5) => 5
@@ -358,7 +358,7 @@ Compute the angle from the origin to `(x, y)` in the range (-π, π].
 ### `@join` — Join into a single list
 
 ```
-// T: any
+T: any
 @join(..components: T+): [T]
 
 // @join([1, 2], [3], 4) => [1, 2, 3, 4]
@@ -370,8 +370,8 @@ Join two or more lists/values into a single list by concatenating them in order.
 ### `@sort` — Sort a list in ascending order
 
 ```
-// K: real | int | bool
-// T: any
+K: real | int | bool
+T: any
 @sort(list: [K]): [K]
 @sort(list: [T], keys: [K]): [T]
 
@@ -392,7 +392,7 @@ To sort in descending order, the idioms `-@sort(-list)` or `-@sort(list, -keys)`
 ### `@shuffle` — Randomly shuffle a list
 
 ```
-// T: any
+T: any
 @shuffle(list: [T]): [T]
 @shuffle(list: [T], seed: real): [T]
 
@@ -405,7 +405,7 @@ Shuffle the items in `list` using global randomness (and `seed` if it is provide
 ### `@unique` — Remove duplicate items in a list
 
 ```
-// T: any
+T: any
 @unique(list: [T]): [T]
 
 // @unique([1, 4, 1, 3, 3, 2, 3, 4]) => [1, 4, 3, 2]
@@ -418,7 +418,7 @@ comparable with `==`, such as points and colors.
 ### `@prefix_sum` — Calculate the prefix sum of a list
 
 ```
-// T: real | int
+T: real | int
 //  | (real | int, real | int)
 //  | (real | int, real | int, real | int)
 @prefix_sum(list: [T]): [T]
@@ -438,7 +438,7 @@ This intrinsic is implemented using the
 ### `@mean` — Mean/Average value
 
 ```
-// T: real | (real, real) | (real, real, real)
+T: real | (real, real) | (real, real, real)
 @mean(..values: T+): T+
 @mean(values: [T]): T
 
@@ -449,11 +449,27 @@ This intrinsic is implemented using the
 
 Compute the arithmetic mean/average value in `values`.
 
+{: #median }
+### `@median` — Median value
+
+```
+@median(..values: real+): real+
+@median(values: [real]): real
+
+// @median(3, 1, 5) => 3.0
+// @median([3, 1, 5]) => 3.0
+// @median(3, 1, 5, 2) => 2.5
+// @median([3, 1, 5, 2]) => 2.5
+// @median([]) => undefined
+```
+
+Compute the median value in `values`.
+
 {: #min }
 ### `@min` — Minimum value
 
 ```
-// T: real | int | bool
+T: real | int | bool
 @min(..values: T+): T+
 @min(values: [T]): T
 
@@ -468,7 +484,7 @@ Compute the minimum value in `values`. `bool` values are interpreted as 0 or 1.
 ### `@max` — Maximum value
 
 ```
-// T: real | int | bool
+T: real | int | bool
 @max(..values: T+): T+
 @max(values: [T]): T
 
@@ -497,7 +513,7 @@ Compute the number of values in `values`.
 ### `@total` — Total of values
 
 ```
-// T: real | int
+T: real | int
 //  | (real | int, real | int)
 //  | (real | int, real | int, real | int)
 @total(..values: T+): T+
@@ -564,7 +580,7 @@ Return `false` if at least one input value is `false` or `true` otherwise. This 
 ### `@choose_random` — Choose random values from a list/distribution
 
 ```
-// T: any
+T: any
 @choose_random(list: [T]): T
 @choose_random(list: [T], sample_count: int): [T]
 @choose_random(list: [T], sample_count: int, seed: real): [T]
@@ -584,62 +600,59 @@ Return `false` if at least one input value is `false` or `true` otherwise. This 
 ### `@midpoint` — Midpoint
 
 ```
-@midpoint(point_1: (real, real)+, point_2: (real, real)+): (real, real)+
-@midpoint(point_1: (real, real, real)+, point_2: (real, real, real)+): (real, real, real)+
+@midpoint(start: (real, real)+, end: (real, real)+): (real, real)+
+@midpoint(start: (real, real, real)+, end: (real, real, real)+): (real, real, real)+
 @midpoint(seg: segment+): (real, real)+
 @midpoint(seg: segment3d+): (real, real, real)+
 ```
-
-{: .compatibility-note }
-This forms of this intrinsic accepting a segment are *not* available on `--target desmos-graphing`.
 
 {: #segment }
 ### `@segment` — Construct a 2D line segment
 
 ```
-@segment(point_1: (real, real)+, point_2: (real, real)+): segment+
+@segment(start: (real, real)+, end: (real, real)+): segment+
 ```
 
 {: .compatibility-note }
 This intrinsic is *not* available on `--target desmos-graphing`.
 
-Construct a 2D line segment from `point_1` to `point_2`.
+Construct a 2D line segment from `start` to `end`.
 
 {: #segment3d }
 ### `@segment3d` — Construct a 3D line segment
 
 ```
-@segment3d(point_1: (real, real, real)+, point_2: (real, real, real)+): segment3d+
+@segment3d(start: (real, real, real)+, end: (real, real, real)+): segment3d+
 ```
 
 {: .compatibility-note }
 This intrinsic is *not* available on `--target desmos-graphing`.
 
-Construct a 3D line segment from `point_1` to `point_2`.
+Construct a 3D line segment from `start` to `end`.
 
 {: #line }
 ### `@line` — Construct a 2D line
 
 ```
-@line(point_1: (real, real)+, point_2: (real, real)+): line+
+@line(start: (real, real)+, end: (real, real)+): line+
 ```
 
 {: .compatibility-note }
 This intrinsic is *only* available on `--target desmos-geometry`.
 
-Construct a 2D line passing through `point_1` and `point_2`.
+Construct a 2D line passing through `start` and `end`.
 
 {: #ray }
 ### `@ray` — Construct a 2D line ray
 
 ```
-@ray(point_1: (real, real)+, point_2: (real, real)+): ray+
+@ray(closed_end: (real, real)+, open_end: (real, real)+): ray+
 ```
 
 {: .compatibility-note }
 This intrinsic is *only* available on `--target desmos-geometry`.
 
-Construct a 2D line ray starting at `point_1` and passing through `point_2`.
+Construct a 2D line ray starting at `closed_end` and passing through `open_end`.
 
 {: #vector }
 ### `@vector` — Construct a 2D vector
@@ -670,12 +683,13 @@ Construct a 3D vector from `start` to `end`.
 
 ```
 @circle(center: (real, real)+, radius: real+): circle+
+@circle(center: (real, real)+, edge: (real, real)+): circle+
 ```
 
 {: .compatibility-note }
 This intrinsic is *only* available on `--target desmos-geometry`.
 
-Construct a 2D circle centered at `center` with radius `radius`.
+Construct a 2D circle centered at `center` with radius `radius` or `@distance(center, edge)`.
 
 {: #sphere3d }
 ### `@sphere3d` — Construct a 3D sphere
@@ -689,18 +703,58 @@ This intrinsic is *only* available on `--target desmos-graphing3d`.
 
 Construct a 3D sphere centered at `center` with radius `radius`.
 
+{: #arc }
+### `@arc` — Construct a 2D circular arc
+
+```
+@arc(start: (real, real)+, thru: (real, real)+, end: (real, real)+): arc+
+```
+
+{: .compatibility-note }
+This intrinsic is *only* available on `--target desmos-geometry`.
+
+Construct a 2D circular arc from `start` to `end` which runs through `thru`.
+
+{: #angle }
+### `@angle` — Construct an undirected angle marker
+
+```
+@angle(leg_a: (real, real)+, center: (real, real)+, leg_b: (real, real)+): angle+
+```
+
+{: .compatibility-note }
+This intrinsic is *only* available on `--target desmos-geometry`.
+
+Construct an undirected angle marker at `center` which measures the nearest angle between `leg_a` and `leg_b`. The order
+of `leg_a` and `leg_b` do not matter, and the value of the angle is always positive. Since the nearest angle is
+measured, this never constructs a reflex angle.
+
+{: #directed_angle }
+### `@directed_angle` — Construct a directed angle marker
+
+```
+@directed_angle(start_leg: (real, real)+, center: (real, real)+, end_leg: (real, real)+): directed_angle+
+```
+
+{: .compatibility-note }
+This intrinsic is *only* available on `--target desmos-geometry`.
+
+Construct a directed angle marker at `center` which measures the nearest angle between `start_leg` and `end_leg`. The
+measured angle is positive if `end_leg` is counterclockwise relative to `start_leg`, and negative if the opposite is
+true. Since the smallest angle is measured, this never constructs a reflex angle.
+
 {: #polygon }
 ### `@polygon` — Construct a 2D polygon
 
 ```
-@polygon(..points: (real, real)+): polygon+
-@polygon(points: [(real, real)]): polygon
+@polygon(..vertices: (real, real)+): polygon+
+@polygon(vertices: [(real, real)]): polygon
 ```
 
 {: .compatibility-note }
 This intrinsic is *not* available on `--target desmos-graphing3d`.
 
-Construct a closed 2D polygon using `points`. If zero or one points are provided, the polygon is not displayed.
+Construct a closed 2D polygon using `vertices`. If zero or one vertices are provided, the polygon is not displayed.
 
 {: #rect }
 ### `@rect` — Construct a 2D rectangle
@@ -714,10 +768,120 @@ This intrinsic is *not* available on `--target desmos-graphing3d`.
 
 Construct a 2D rectangle polygon with corners at `corner_1` and `corner_2`.
 
+{: #triangle3d }
+### `@triangle3d` — Construct a 3D triangle
+
+```
+@triangle3d(a: (real, real, real)+, b: (real, real, real)+, c: (real, real, real)+): triangle3d+
+```
+
+{: .compatibility-note }
+This intrinsic is *only* available on `--target desmos-graphing3d`.
+
+Construct a 3D triangle with vertices at `a`, `b`, and `c`.
+
+{: #glider }
+### `@glider` — Construct a directed angle marker
+
+```
+T: segment | circle | line | ray | arc | polygon
+@glider(object: T+, distance: real+): (real, real)+
+```
+
+{: .compatibility-note }
+This intrinsic is *only* available on `--target desmos-geometry`.
+
+Obtain a point along the line/curve/perimeter of `object`.
+- For `segment`, `line`, `ray`, and `arc`, a distance of 0 gets the `start` point, and a distance of 1 gets the `end`
+  point. Distances less than 0 and greater than 1 are clamped if the object does not continue in that direction. (For
+  example, `ray` distances are clamped to the range `[0, ∞)`.)
+- For `polygon`, a distance of 0 gets the first vertex, a distance of 1 gets the second vertex, and so on. Distances are
+  are clamped to the range `[0, n]` where `n` is the number of vertices.
+
 ## Properties & Measurements
 
+{: #area }
+### `@area` — Area of a 2D polygon
+
+```
+@area(p: polygon+): real+
+```
+
+{: .compatibility-note }
+This intrinsic is *only* available on `--target desmos-geometry`.
+
+{: #perimeter }
+### `@perimeter` — Perimeter of a 2D polygon
+
+```
+@perimeter(p: polygon+): real+
+```
+
+{: .compatibility-note }
+This intrinsic is *only* available on `--target desmos-geometry`.
+
+{: #vertices }
+### `@vertices` — Vertices of a 2D polygon
+
+```
+@vertices(p: polygon): [(real, real)]
+```
+
+{: .compatibility-note }
+This intrinsic is *only* available on `--target desmos-geometry`.
+
+{: #angles }
+### `@angles` — Undirected interior angles of a 2D polygon
+
+```
+@angles(p: polygon): [angle]
+```
+
+{: .compatibility-note }
+This intrinsic is *only* available on `--target desmos-geometry`.
+
+{: #directed_angles }
+### `@directed_angles` — Directed interior angles of a 2D polygon
+
+```
+@directed_angles(p: polygon): [directed_angle]
+```
+
+{: .compatibility-note }
+This intrinsic is *only* available on `--target desmos-geometry`.
+
+{: #segments }
+### `@segments` — Segments of a 2D polygon
+
+```
+@segments(p: polygon): [segment]
+```
+
+{: .compatibility-note }
+This intrinsic is *only* available on `--target desmos-geometry`.
+
+{: #radius }
+### `@radius` — Radius of a 2D circle
+
+```
+@radius(c: circle+): real+
+```
+
+{: .compatibility-note }
+This intrinsic is *only* available on `--target desmos-geometry`.
+
+{: #center }
+### `@center` — Center point of a 2D circle
+
+```
+@center(c: circle+): (real, real)+
+```
+
+{: .compatibility-note }
+This intrinsic is *only* available on `--target desmos-geometry`.
+
 {: #start }
-### `@start` — Vector start point
+### `@start` — Start point of a vector
 
 ```
 @start(v: vector+): (real, real)+
@@ -727,8 +891,8 @@ Construct a 2D rectangle polygon with corners at `corner_1` and `corner_2`.
 {: .compatibility-note }
 This intrinsic is *not* available on `--target desmos-graphing`.
 
-{: #start }
-### `@end` — Vector end point
+{: #end }
+### `@end` — End point of a vector
 
 ```
 @end(v: vector+): (real, real)+
@@ -741,10 +905,10 @@ This intrinsic is *not* available on `--target desmos-graphing`.
 ## Transformations
 
 {: #dilate }
-### `@dilate` — Dilate/Scale an object on a point
+### `@dilate` — Dilate (scale) an object about a point
 
 ```
-// T: (real, real) | polygon | segment | circle | arc | line | ray | vector
+T: (real, real) | polygon | segment | circle | arc | line | ray | vector
 @dilate(object: T+, point: (real, real)+, factor: real+): T+
 ```
 
@@ -757,21 +921,22 @@ Dilate `object` by a factor of `factor` with `point` as the focal point.
 ### `@rotate` — Rotate an object about a point
 
 ```
-// T: (real, real) | polygon | segment | circle | arc | line | ray | vector
-@rotate(object: T+, point: (real, real)+, angle: real+): T+
+T: (real, real) | polygon | segment | circle | arc | line | ray | vector
+A: real | angle | directed_angle
+@rotate(object: T+, point: (real, real)+, angle: A+): T+
 ```
 
 {: .compatibility-note }
 This intrinsic is *only* available on `--target desmos-geometry`.
 
-Rotate `object` about `point` by `angle` radians.
+Rotate `object` about `point` by `angle` (`real` angle is in radians).
 
 {: #reflect }
 ### `@reflect` — Reflect an object across a line
 
 ```
-// T: (real, real) | polygon | segment | circle | arc | line | ray | vector
-// L: segment | line | ray | vector
+T: (real, real) | polygon | segment | circle | arc | line | ray | vector
+L: segment | line | ray | vector
 @reflect(object: T+, line: L+): T+
 ```
 
@@ -784,7 +949,7 @@ Reflect `object` across `line`.
 ### `@translate` — Translate an object
 
 ```
-// T: (real, real) | polygon | segment | circle | arc | line | ray | vector
+T: (real, real) | polygon | segment | circle | arc | line | ray | vector
 @translate(object: T+, start: (real, real)+, end: (real, real)+): T+
 @translate(object: T+, displacement: vector+): T+
 ```
@@ -933,7 +1098,7 @@ This is basically useless.
 ### `@enum_values` — List all valid values of an `enum` type
 
 ```
-// T: {some enum type}
+T: {some enum type}
 @enum_values(enum_type: {type T}): [T]
 
 // enum E { A, B, C }
@@ -944,7 +1109,7 @@ This is basically useless.
 ### `@enum_value` — Get the corresponding `enum` value
 
 ```
-// T: {some enum type}
+T: {some enum type}
 @enum_value(enum_type: {type T}, ordinal: int+): T+
 
 // enum E { A, B, C }
