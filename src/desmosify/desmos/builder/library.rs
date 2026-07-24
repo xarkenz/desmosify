@@ -1,5 +1,6 @@
-use crate::desmos::{BoxedGraphEntry, GraphBinaryKind, GraphExpression, GraphExpressionEntry};
-use crate::desmos::target::DesmosTargetInfo;
+use crate::desmos::{BoxedGraphEntry, GraphExpression, GraphExpressionEntry};
+use crate::desmos::builder::fragile::FragileHandler;
+use crate::desmos::target::DesmosTargetContext;
 use crate::desmos_expression;
 
 macro_rules! library_builder_definition {
@@ -28,87 +29,37 @@ macro_rules! library_builder_definition {
 }
 
 library_builder_definition! {
-    bool_to_internal,
-    bool_from_internal,
     range_inclusive,
     range_exclusive,
     index_range_inclusive,
     index_range_exclusive,
     index_range_from,
     rectangle,
+    compose_reducer,
     prefix_sum,
 }
 
 impl LibraryBuilder {
     fn get_symbol(&self, subscript: impl Into<String>) -> GraphExpression {
-        GraphExpression::Binary {
-            kind: GraphBinaryKind::Subscript,
-            lhs: Box::new(self.prefix.clone()),
-            rhs: Box::new(GraphExpression::Alphanumeric(subscript.into())),
-        }
+        desmos_expression!({&self.prefix} Subscript (@alnum subscript))
     }
 
-    pub fn create_expression_entry(&mut self, info: &mut DesmosTargetInfo, expression: GraphExpression) -> BoxedGraphEntry {
+    fn create_expression_entry(&mut self, context: &mut DesmosTargetContext, expression: GraphExpression) -> BoxedGraphEntry {
         Box::new(GraphExpressionEntry {
-            id: info.create_entry_id(),
+            id: context.create_entry_id(),
             folder_id: self.folder_id.clone(),
             expression,
             ..Default::default()
         })
     }
 
-    pub fn bool_to_internal(&mut self, info: &mut DesmosTargetInfo) -> GraphExpression {
-        let symbol = self.get_symbol("ToBool");
-
-        if self.bool_to_internal.is_empty() {
-            let local_restriction = info.create_local_symbol();
-
-            // ToBool(restriction) = restrictionToBoolean(restriction)
-            let expression = desmos_expression!(
-                ({&symbol} Call [{&local_restriction}])
-                Equal
-                ((@operatorname "restrictionToBoolean") Call [{&local_restriction}])
-            );
-
-            self.bool_to_internal = [
-                self.create_expression_entry(info, expression),
-            ].into();
-        }
-
-        symbol
-    }
-
-    pub fn bool_from_internal(&mut self, info: &mut DesmosTargetInfo) -> GraphExpression {
-        let symbol = self.get_symbol("FromBool");
-
-        if self.bool_from_internal.is_empty() {
-            let local_internal = info.create_local_symbol();
-
-            // FromBool(internal) = {restriction(internal) = 1, 0}
-            let expression = desmos_expression!(
-                ({&symbol} Call [{&local_internal}])
-                Equal
-                (Piecewise [
-                    (((@operatorname "restriction") Call [{&local_internal}]) Equal (@int 1)),
-                    (@int 0),
-                ])
-            );
-
-            self.bool_from_internal = [
-                self.create_expression_entry(info, expression),
-            ].into();
-        }
-
-        symbol
-    }
-
-    pub fn range_inclusive(&mut self, info: &mut DesmosTargetInfo) -> GraphExpression {
+    pub fn range_inclusive(&mut self, context: &mut DesmosTargetContext) -> GraphExpression {
         let symbol = self.get_symbol("RangeInc");
 
         if self.range_inclusive.is_empty() {
-            let local_start = info.create_local_symbol();
-            let local_end = info.create_local_symbol();
-            let local_step = info.create_local_symbol();
+            let local_start = context.create_local_symbol();
+            let local_end = context.create_local_symbol();
+            let local_step = context.create_local_symbol();
 
             // RangeInc(start, end, step) = {
             //     start sign(step) > end sign(step): [],
@@ -135,21 +86,21 @@ impl LibraryBuilder {
             );
 
             self.range_inclusive = [
-                self.create_expression_entry(info, expression),
+                self.create_expression_entry(context, expression),
             ].into();
         }
 
         symbol
     }
 
-    pub fn range_exclusive(&mut self, info: &mut DesmosTargetInfo) -> GraphExpression {
+    pub fn range_exclusive(&mut self, context: &mut DesmosTargetContext) -> GraphExpression {
         let symbol = self.get_symbol("RangeExc");
 
         if self.range_exclusive.is_empty() {
-            let local_start = info.create_local_symbol();
-            let local_end = info.create_local_symbol();
-            let local_step = info.create_local_symbol();
-            let local_inc = info.create_local_symbol();
+            let local_start = context.create_local_symbol();
+            let local_end = context.create_local_symbol();
+            let local_step = context.create_local_symbol();
+            let local_inc = context.create_local_symbol();
 
             // RangeExc(start, end, step) = inc[{inc = end, 0} = 0]
             //     with inc = RangeInc(start, end, step)
@@ -158,7 +109,7 @@ impl LibraryBuilder {
                 Equal
                 (({&local_inc} Index ((Piecewise [
                     ({&local_inc} Equal {&local_end}), (@int 0)
-                ]) Equal (@int 0))) With ({&local_inc} Equal ({self.range_inclusive(info)} Call [
+                ]) Equal (@int 0))) With ({&local_inc} Equal ({self.range_inclusive(context)} Call [
                     {&local_start},
                     {&local_end},
                     {&local_step},
@@ -166,22 +117,22 @@ impl LibraryBuilder {
             );
 
             self.range_exclusive = [
-                self.create_expression_entry(info, expression),
+                self.create_expression_entry(context, expression),
             ].into();
         }
 
         symbol
     }
 
-    pub fn index_range_inclusive(&mut self, info: &mut DesmosTargetInfo) -> GraphExpression {
+    pub fn index_range_inclusive(&mut self, context: &mut DesmosTargetContext) -> GraphExpression {
         let symbol = self.get_symbol("IdxRangeInc");
 
         if self.index_range_inclusive.is_empty() {
-            let local_list = info.create_local_symbol();
-            let local_start = info.create_local_symbol();
-            let local_end = info.create_local_symbol();
-            let local_step = info.create_local_symbol();
-            let local_index = info.create_local_symbol();
+            let local_list = context.create_local_symbol();
+            let local_start = context.create_local_symbol();
+            let local_end = context.create_local_symbol();
+            let local_step = context.create_local_symbol();
+            let local_index = context.create_local_symbol();
 
             // IdxRangeInc(list, start, end, step) = [
             //     list[index] for index = RangeInc(start, end, step)
@@ -190,7 +141,7 @@ impl LibraryBuilder {
                 ({&symbol} Call [{&local_list}, {&local_start}, {&local_end}, {&local_step}])
                 Equal
                 (({&local_list} Index {&local_index})
-                    For ({&local_index} Equal ({self.range_inclusive(info)} Call [
+                    For ({&local_index} Equal ({self.range_inclusive(context)} Call [
                         {&local_start},
                         {&local_end},
                         {&local_step},
@@ -198,22 +149,22 @@ impl LibraryBuilder {
             );
 
             self.index_range_inclusive = [
-                self.create_expression_entry(info, expression),
+                self.create_expression_entry(context, expression),
             ].into();
         }
 
         symbol
     }
 
-    pub fn index_range_exclusive(&mut self, info: &mut DesmosTargetInfo) -> GraphExpression {
+    pub fn index_range_exclusive(&mut self, context: &mut DesmosTargetContext) -> GraphExpression {
         let symbol = self.get_symbol("IdxRangeExc");
 
         if self.index_range_exclusive.is_empty() {
-            let local_list = info.create_local_symbol();
-            let local_start = info.create_local_symbol();
-            let local_end = info.create_local_symbol();
-            let local_step = info.create_local_symbol();
-            let local_index = info.create_local_symbol();
+            let local_list = context.create_local_symbol();
+            let local_start = context.create_local_symbol();
+            let local_end = context.create_local_symbol();
+            let local_step = context.create_local_symbol();
+            let local_index = context.create_local_symbol();
 
             // IdxRangeExc(list, start, end, step) = [
             //     list[index] for index = RangeExc(start, end, step)
@@ -222,7 +173,7 @@ impl LibraryBuilder {
                 ({&symbol} Call [{&local_list}, {&local_start}, {&local_end}, {&local_step}])
                 Equal
                 (({&local_list} Index {&local_index})
-                    For ({&local_index} Equal ({self.range_exclusive(info)} Call [
+                    For ({&local_index} Equal ({self.range_exclusive(context)} Call [
                         {&local_start},
                         {&local_end},
                         {&local_step},
@@ -230,26 +181,26 @@ impl LibraryBuilder {
             );
 
             self.index_range_exclusive = [
-                self.create_expression_entry(info, expression),
+                self.create_expression_entry(context, expression),
             ].into();
         }
 
         symbol
     }
 
-    pub fn index_range_from(&mut self, info: &mut DesmosTargetInfo) -> GraphExpression {
+    pub fn index_range_from(&mut self, context: &mut DesmosTargetContext) -> GraphExpression {
         let symbol = self.get_symbol("IdxRangeFrom");
 
         if self.index_range_from.is_empty() {
-            let local_list = info.create_local_symbol();
-            let local_start = info.create_local_symbol();
-            let local_step = info.create_local_symbol();
+            let local_list = context.create_local_symbol();
+            let local_start = context.create_local_symbol();
+            let local_step = context.create_local_symbol();
 
             // IdxRangeFrom(list, start, step) = IdxRangeInc(list, start, list.count, step)
             let expression = desmos_expression!(
                 ({&symbol} Call [{&local_list}, {&local_start}, {&local_step}])
                 Equal
-                ({self.index_range_inclusive(info)} Call [
+                ({self.index_range_inclusive(context)} Call [
                     {&local_list},
                     {&local_start},
                     ({&local_list} Dot (@operatorname "count")),
@@ -258,19 +209,19 @@ impl LibraryBuilder {
             );
 
             self.index_range_from = [
-                self.create_expression_entry(info, expression),
+                self.create_expression_entry(context, expression),
             ].into();
         }
 
         symbol
     }
 
-    pub fn rectangle(&mut self, info: &mut DesmosTargetInfo) -> GraphExpression {
+    pub fn rectangle(&mut self, context: &mut DesmosTargetContext) -> GraphExpression {
         let symbol = self.get_symbol("Rect");
 
         if self.rectangle.is_empty() {
-            let local_p1 = info.create_local_symbol();
-            let local_p2 = info.create_local_symbol();
+            let local_p1 = context.create_local_symbol();
+            let local_p2 = context.create_local_symbol();
 
             // Rect(p1, p2) = polygon(p1, (p2.x, p1.y), p2, (p1.x, p2.y))
             let expression = desmos_expression!(
@@ -291,7 +242,47 @@ impl LibraryBuilder {
             );
 
             self.rectangle = [
-                self.create_expression_entry(info, expression),
+                self.create_expression_entry(context, expression),
+            ].into();
+        }
+
+        symbol
+    }
+
+    pub fn compose_reducer(&mut self, context: &mut DesmosTargetContext, fragile: &mut FragileHandler) -> GraphExpression {
+        let symbol = self.get_symbol("ComposeReducer");
+
+        if self.compose_reducer.is_empty() {
+            let local_list = context.create_local_symbol();
+
+            // ComposeReducer(list) = {
+            //     list.count = 0: translation((0, 0)),
+            //     list.count = 1: list[1],
+            //     compose(list[1], ComposeReducer(list[2...])
+            // }
+            let local_list_count = desmos_expression!(
+                {&local_list} Dot (@operatorname "count")
+            );
+            let expression = desmos_expression!(
+                ({&symbol} Call [{&local_list}])
+                Equal
+                (Piecewise [
+                    (({&local_list_count} Equal (@int 0)) Colon (
+                        {fragile.get_symbol("translation", 1, context)}
+                        Call [(Parentheses [(@int 0), (@int 0)])]
+                    )),
+                    (({local_list_count} Equal (@int 1)) Colon (
+                        {&local_list} Index (@int 1)
+                    )),
+                    ({fragile.get_symbol("compose", 2, context)} Call [
+                        ({&local_list} Index (@int 1)),
+                        ({&symbol} Call [({&local_list} Index ((@int 2) Range ()))]),
+                    ]),
+                ])
+            );
+
+            self.compose_reducer = [
+                self.create_expression_entry(context, expression),
             ].into();
         }
 
@@ -301,14 +292,14 @@ impl LibraryBuilder {
     /// Nevin Brackett-Rozinsky O(n) Prefix Sum (Wackscope Algorithm)
     ///
     /// https://www.desmos.com/calculator/p091kr6k84
-    pub fn prefix_sum(&mut self, info: &mut DesmosTargetInfo) -> GraphExpression {
+    pub fn prefix_sum(&mut self, context: &mut DesmosTargetContext) -> GraphExpression {
         let symbol = self.get_symbol("PrefixSumNW");
 
         if self.prefix_sum.is_empty() {
             let helper_symbol = self.get_symbol("PrefixSumNWHelper");
-            let local_list = info.create_local_symbol();
-            let local_index = info.create_local_symbol();
-            let local_wackscope_list = info.create_local_symbol();
+            let local_list = context.create_local_symbol();
+            let local_index = context.create_local_symbol();
+            let local_wackscope_list = context.create_local_symbol();
 
             // PrefixSumNW(list) = {
             //     list.count <= 1: list,
@@ -344,8 +335,8 @@ impl LibraryBuilder {
             );
 
             self.prefix_sum = [
-                self.create_expression_entry(info, helper_expression),
-                self.create_expression_entry(info, expression),
+                self.create_expression_entry(context, expression),
+                self.create_expression_entry(context, helper_expression),
             ].into();
         }
 

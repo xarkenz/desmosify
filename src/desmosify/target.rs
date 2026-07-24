@@ -1,4 +1,5 @@
 use std::path::Path;
+use crate::cli::DesmosifyArgs;
 use crate::sema::Program;
 
 pub trait Target : std::fmt::Debug {
@@ -13,14 +14,14 @@ pub trait Target : std::fmt::Debug {
     fn compile_to(&mut self, program: &Program, output_path: &Path) -> crate::Result<()>;
 }
 
-pub fn create_target_by_name(name: &str) -> crate::Result<Box<dyn Target>> {
-    if name.starts_with("desmos") {
-        crate::desmos::target::create_target_by_name(name)
+pub fn create_target(args: &DesmosifyArgs) -> crate::Result<Box<dyn Target>> {
+    if args.target_name.starts_with("desmos") {
+        crate::desmos::target::create_target(args)
     }
     else {
         Err(Box::new(crate::Error {
             kind: crate::ErrorKind::UnsupportedTarget {
-                name: name.into(),
+                name: args.target_name.as_str().into(),
             },
             span: None,
         }))

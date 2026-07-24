@@ -1,24 +1,27 @@
 use crate::ast::RangeKind;
 use crate::desmos::{BoxedGraphEntry, GraphBinaryKind, GraphExpression, GraphExpressionEntry, GraphExpressionList, GraphFolderEntry, GraphImageEntry, GraphInequalityKind, GraphSlider, GraphSliderLoopMode, GraphTextEntry, GraphTicker, GraphUnaryKind};
+use crate::desmos::builder::fragile::FragileHandler;
 use crate::desmos::builder::library::LibraryBuilder;
-use crate::desmos::target::DesmosTargetInfo;
+use crate::desmos::target::DesmosTargetContext;
 use crate::desmos_expression;
 use crate::sema::{Program, ProgramAction, ProgramImmutable, ProgramPublicEntry, ProgramPublicLine, ProgramTicker, ProgramVariable, ProgramVariableKind};
 use crate::sema::display::{ImageValue, ProgramDisplayAttributeKind, ProgramDisplayElement};
 use crate::sema::values::{ActionValue, ActionValueKind, BinaryKind, DoubleReducerKind, IndexKind, InequalityKind, MathematicalConstant, ParameterizedReducerKind, ReducerKind, TernaryKind, UnaryKind, Value, ValueKind};
 
-mod library;
+pub mod library;
+pub mod fragile;
 
 pub const CONSTRUCTIONS_FOLDER_ID: &str = "**dcg_geo_folder**";
 pub const IMMUTABLES_FOLDER_ID: &str = "desmosify_immutables";
 pub const VARIABLES_FOLDER_ID: &str = "desmosify_variables";
 pub const ACTIONS_FOLDER_ID: &str = "desmosify_actions";
 pub const DISPLAY_FOLDER_ID: &str = "desmosify_display";
-pub const LIBRARY_FOLDER_ID: &str = "desmosify_library";
 pub const MISC_FOLDER_ID: &str = "desmosify_misc";
+pub const LIBRARY_FOLDER_ID: &str = "desmosify_library";
+pub const FRAGILE_FOLDER_ID: &str = "desmosify_fragile";
 
-pub struct GraphExpressionListBuilder<'target> {
-    target_info: &'target mut DesmosTargetInfo,
+pub struct GraphExpressionListBuilder<'ctx> {
+    context: &'ctx mut DesmosTargetContext,
     ticker: Option<GraphTicker>,
     construction_entries: Vec<BoxedGraphEntry>,
     public_entries: Vec<BoxedGraphEntry>,
@@ -26,34 +29,35 @@ pub struct GraphExpressionListBuilder<'target> {
     variable_entries: Vec<BoxedGraphEntry>,
     action_entries: Vec<BoxedGraphEntry>,
     display_entries: Vec<BoxedGraphEntry>,
-    library: LibraryBuilder,
     misc_entries: Vec<BoxedGraphEntry>,
+    library: LibraryBuilder,
+    fragile: FragileHandler,
     next_dummy_noop_id: u64,
     dummy_unreachable_created: bool,
 }
 
-impl<'target> GraphExpressionListBuilder<'target> {
-    pub fn build_program(program: &Program, target_info: &'target mut DesmosTargetInfo) -> crate::Result<GraphExpressionList> {
-        let mut builder = Self::new(target_info);
+impl<'ctx> GraphExpressionListBuilder<'ctx> {
+    pub fn build_program(program: &Program, context: &'ctx mut DesmosTargetContext) -> crate::Result<GraphExpressionList> {
+        let mut builder = Self::new(context);
         builder.set_program(program)?;
         Ok(builder.finish())
     }
 
-    pub fn new(target_info: &'target mut DesmosTargetInfo) -> Self {
-        let mut construction_entries = Vec::<BoxedGraphEntry>::new();
-        if target_info.use_geometry_folder {
-            construction_entries.push(Box::new(GraphFolderEntry {
-                id: CONSTRUCTIONS_FOLDER_ID.into(),
-                title: "geometry".into(),
-                collapsed: true,
-                secret: true,
-            }));
-        }
-
+    pub fn new(context: &'ctx mut DesmosTargetContext) -> Self {
         Self {
-            target_info,
             ticker: None,
-            construction_entries,
+            construction_entries: {
+                let mut entries = Vec::<BoxedGraphEntry>::new();
+                if context.descriptor().use_geometry_folder {
+                    entries.push(Box::new(GraphFolderEntry {
+                        id: CONSTRUCTIONS_FOLDER_ID.into(),
+                        title: "geometry".into(),
+                        collapsed: true,
+                        secret: true,
+                    }));
+                }
+                entries
+            },
             public_entries: Vec::new(),
             immutable_entries: Vec::new(),
             variable_entries: Vec::new(),
@@ -63,7 +67,13 @@ impl<'target> GraphExpressionListBuilder<'target> {
                 Some(LIBRARY_FOLDER_ID.into()),
                 GraphExpression::Letter('L'),
             ),
+            fragile: FragileHandler::new(
+                context.descriptor().fragile_strategy,
+                Some(FRAGILE_FOLDER_ID),
+                GraphExpression::Letter('F'),
+            ),
             misc_entries: Vec::new(),
+            context,
             next_dummy_noop_id: 0,
             dummy_unreachable_created: false,
         }
@@ -91,7 +101,7 @@ impl<'target> GraphExpressionListBuilder<'target> {
 
         if !self.public_entries.is_empty() {
             self.public_entries.push(Box::new(GraphExpressionEntry {
-                id: self.target_info.create_entry_id(),
+                id: self.context.create_entry_id(),
                 ..Default::default()
             }));
         }
@@ -122,14 +132,19 @@ impl<'target> GraphExpressionListBuilder<'target> {
                     self.display_entries,
                 ))
                 .chain(finish_folder(
+                    MISC_FOLDER_ID,
+                    "desmosify: misc",
+                    self.misc_entries,
+                ))
+                .chain(finish_folder(
                     LIBRARY_FOLDER_ID,
                     "desmosify: library",
                     self.library.finish(),
                 ))
                 .chain(finish_folder(
-                    MISC_FOLDER_ID,
-                    "desmosify: misc",
-                    self.misc_entries,
+                    FRAGILE_FOLDER_ID,
+                    "desmosify: fragile",
+                    self.fragile.finish(),
                 ))
                 .collect(),
         }
@@ -143,7 +158,7 @@ impl<'target> GraphExpressionListBuilder<'target> {
         );
 
         self.misc_entries.push(Box::new(GraphExpressionEntry {
-            id: self.target_info.create_entry_id(),
+            id: self.context.create_entry_id(),
             folder_id: Some(MISC_FOLDER_ID.into()),
             expression: desmos_expression!(
                     {&symbol} Equal (@int 0)
@@ -161,7 +176,7 @@ impl<'target> GraphExpressionListBuilder<'target> {
 
         if !self.dummy_unreachable_created {
             self.misc_entries.push(Box::new(GraphExpressionEntry {
-                id: self.target_info.create_entry_id(),
+                id: self.context.create_entry_id(),
                 folder_id: Some(MISC_FOLDER_ID.into()),
                 expression: desmos_expression!(
                     {&symbol} Equal (@int 0)
@@ -212,13 +227,13 @@ impl<'target> GraphExpressionListBuilder<'target> {
                 Ok(GraphExpression::Integer(*variant_ordinal))
             }
             ValueKind::Global(reference) => {
-                Ok(self.target_info.get_global_symbol(&reference.identifier))
+                Ok(self.context.get_global_symbol(&reference.identifier))
             }
             ValueKind::Action(reference) => {
-                Ok(self.target_info.get_action_symbol(&reference.identifier))
+                Ok(self.context.get_action_symbol(&reference.identifier))
             }
             ValueKind::Local(reference) => {
-                Ok(self.target_info.get_local_symbol(reference.id))
+                Ok(self.context.get_local_symbol(reference.id))
             }
             ValueKind::ViewportWidth => {
                 Ok(GraphExpression::OperatorName("width".into()))
@@ -260,10 +275,10 @@ impl<'target> GraphExpressionListBuilder<'target> {
                 ))
             }
             ValueKind::Reducer { kind, list, .. } => {
-                self.translate_reducer(*kind, [list.as_ref()], unsupported_error)
+                self.translate_reducer(*kind, [list.as_ref()], false, unsupported_error)
             }
             ValueKind::ArgumentsReducer { kind, arguments, .. } => {
-                self.translate_reducer(*kind, arguments, unsupported_error)
+                self.translate_reducer(*kind, arguments, true, unsupported_error)
             }
             ValueKind::DoubleReducer { kind, list_1, list_2, .. } => {
                 self.translate_double_reducer(*kind, list_1, list_2, unsupported_error)
@@ -304,8 +319,8 @@ impl<'target> GraphExpressionListBuilder<'target> {
             ValueKind::ListRange { kind, start, end, step, .. } => {
                 Ok(desmos_expression!(
                     {match kind {
-                        RangeKind::Inclusive => self.library.range_inclusive(self.target_info),
-                        RangeKind::Exclusive => self.library.range_exclusive(self.target_info),
+                        RangeKind::Inclusive => self.library.range_inclusive(self.context),
+                        RangeKind::Exclusive => self.library.range_exclusive(self.context),
                     }} Call [
                         {self.translate_value(start)?},
                         {self.translate_value(end)?},
@@ -327,7 +342,7 @@ impl<'target> GraphExpressionListBuilder<'target> {
                         .iter()
                         .rev()
                         .map(|map_loop| Ok(desmos_expression!(
-                            {self.target_info.get_local_symbol(map_loop.local.id)}
+                            {self.context.get_local_symbol(map_loop.local.id)}
                             Equal {self.translate_value(&map_loop.list)?}
                         )))])
                 ))
@@ -346,8 +361,8 @@ impl<'target> GraphExpressionListBuilder<'target> {
                 IndexKind::Range { kind, from_index, to_index, step} => {
                     Ok(desmos_expression!(
                         {match kind {
-                            RangeKind::Inclusive => self.library.index_range_inclusive(self.target_info),
-                            RangeKind::Exclusive => self.library.index_range_exclusive(self.target_info),
+                            RangeKind::Inclusive => self.library.index_range_inclusive(self.context),
+                            RangeKind::Exclusive => self.library.index_range_exclusive(self.context),
                         }} Call [
                             {self.translate_value(list)?},
                             {self.translate_value(from_index)?},
@@ -358,7 +373,7 @@ impl<'target> GraphExpressionListBuilder<'target> {
                 }
                 IndexKind::RangeFrom { from_index, step } => {
                     Ok(desmos_expression!(
-                        {self.library.index_range_from(self.target_info)} Call [
+                        {self.library.index_range_from(self.context)} Call [
                             {self.translate_value(list)?},
                             {self.translate_value(from_index)?},
                             {self.translate_value(step)?},
@@ -368,8 +383,8 @@ impl<'target> GraphExpressionListBuilder<'target> {
                 IndexKind::RangeTo { kind, to_index } => {
                     Ok(desmos_expression!(
                         {match kind {
-                            RangeKind::Inclusive => self.library.index_range_inclusive(self.target_info),
-                            RangeKind::Exclusive => self.library.index_range_exclusive(self.target_info),
+                            RangeKind::Inclusive => self.library.index_range_inclusive(self.context),
+                            RangeKind::Exclusive => self.library.index_range_exclusive(self.context),
                         }} Call [
                             {self.translate_value(list)?},
                             (@int 1),
@@ -415,10 +430,10 @@ impl<'target> GraphExpressionListBuilder<'target> {
             }
             ValueKind::InlineAction { parameters, action } => {
                 let action = self.translate_action_value(action)?;
-                let action_symbol = self.target_info.create_inline_action_symbol();
+                let action_symbol = self.context.create_inline_action_symbol();
 
                 let entry = Box::new(GraphExpressionEntry {
-                    id: self.target_info.create_entry_id(),
+                    id: self.context.create_entry_id(),
                     folder_id: Some(ACTIONS_FOLDER_ID.into()),
                     expression: if parameters.is_empty() {
                         desmos_expression!(
@@ -427,7 +442,7 @@ impl<'target> GraphExpressionListBuilder<'target> {
                     } else {
                         desmos_expression!(
                             ({&action_symbol} Call [@ parameters.iter().map(|parameter| {
-                                self.target_info.get_local_symbol(parameter.id)
+                                self.context.get_local_symbol(parameter.id)
                             })])
                             Equal {action}
                         )
@@ -646,7 +661,19 @@ impl<'target> GraphExpressionListBuilder<'target> {
             }
             UnaryKind::PrefixSum => {
                 Ok(desmos_expression!(
-                    {self.library.prefix_sum(self.target_info)}
+                    {self.library.prefix_sum(self.context)}
+                    Call {self.translate_value(operand)?}
+                ))
+            }
+            UnaryKind::LineFromSegment2D => {
+                Ok(desmos_expression!(
+                    {self.fragile.get_symbol("lineFromSegment", 1, self.context)}
+                    Call {self.translate_value(operand)?}
+                ))
+            }
+            UnaryKind::LineFromRay2D => {
+                Ok(desmos_expression!(
+                    {self.fragile.get_symbol("lineFromRay", 1, self.context)}
                     Call {self.translate_value(operand)?}
                 ))
             }
@@ -705,16 +732,37 @@ impl<'target> GraphExpressionListBuilder<'target> {
                     (@operatorname "end") Call {self.translate_value(operand)?}
                 ))
             }
+            UnaryKind::ReflectionByLine2D => {
+                Ok(desmos_expression!(
+                    {self.fragile.get_symbol("reflection", 1, self.context)}
+                    Call {self.translate_value(operand)?}
+                ))
+            }
+            UnaryKind::TranslationByPoint2D => {
+                Ok(desmos_expression!(
+                    {self.fragile.get_symbol("translation", 1, self.context)}
+                    Call {self.translate_value(operand)?}
+                ))
+            }
+            UnaryKind::InverseOfTransform2D => {
+                Ok(desmos_expression!(
+                    {self.fragile.get_symbol("inverse", 1, self.context)}
+                    Call {self.translate_value(operand)?}
+                ))
+            }
             UnaryKind::BoolToInternal => {
                 Ok(desmos_expression!(
-                    {self.library.bool_to_internal(self.target_info)}
+                    {self.fragile.get_symbol("restrictionToBoolean", 1, self.context)}
                     Call (Piecewise {self.translate_condition(operand)?})
                 ))
             }
             UnaryKind::BoolFromInternal => {
                 Ok(desmos_expression!(
-                    {self.library.bool_from_internal(self.target_info)}
-                    Call {self.translate_value(operand)?}
+                    Piecewise [
+                        (({self.fragile.get_symbol("restriction", 1, self.context)}
+                            Call [{self.translate_value(operand)?}]) Equal (@int 1)),
+                        (@int 0),
+                    ]
                 ))
             }
         }
@@ -873,7 +921,7 @@ impl<'target> GraphExpressionListBuilder<'target> {
                     ]
                 ))
             }
-            BinaryKind::Segment2D | BinaryKind::Segment3D => {
+            BinaryKind::SegmentFromPoints2D | BinaryKind::SegmentFromPoints3D => {
                 Ok(desmos_expression!(
                     (@operatorname "segment") Call [
                         {self.translate_value(lhs)?},
@@ -881,7 +929,7 @@ impl<'target> GraphExpressionListBuilder<'target> {
                     ]
                 ))
             }
-            BinaryKind::Line2D => {
+            BinaryKind::LineFromPoints2D => {
                 Ok(desmos_expression!(
                     (@operatorname "line") Call [
                         {self.translate_value(lhs)?},
@@ -889,7 +937,7 @@ impl<'target> GraphExpressionListBuilder<'target> {
                     ]
                 ))
             }
-            BinaryKind::Ray2D => {
+            BinaryKind::RayFromPoints2D => {
                 Ok(desmos_expression!(
                     (@operatorname "ray") Call [
                         {self.translate_value(lhs)?},
@@ -897,7 +945,7 @@ impl<'target> GraphExpressionListBuilder<'target> {
                     ]
                 ))
             }
-            BinaryKind::Vector2D | BinaryKind::Vector3D => {
+            BinaryKind::VectorFromPoints2D | BinaryKind::VectorFromPoints3D => {
                 Ok(desmos_expression!(
                     (@operatorname "vector") Call [
                         {self.translate_value(lhs)?},
@@ -905,7 +953,7 @@ impl<'target> GraphExpressionListBuilder<'target> {
                     ]
                 ))
             }
-            BinaryKind::Circle2DFromRadius | BinaryKind::Circle2DFromEdge => {
+            BinaryKind::CircleFromRadius2D | BinaryKind::CircleFromEdge2D => {
                 Ok(desmos_expression!(
                     (@operatorname "circle") Call [
                         {self.translate_value(lhs)?},
@@ -913,7 +961,7 @@ impl<'target> GraphExpressionListBuilder<'target> {
                     ]
                 ))
             }
-            BinaryKind::Sphere3DFromRadius => {
+            BinaryKind::SphereFromRadius3D => {
                 Ok(desmos_expression!(
                     (@operatorname "sphere") Call [
                         {self.translate_value(lhs)?},
@@ -921,15 +969,15 @@ impl<'target> GraphExpressionListBuilder<'target> {
                     ]
                 ))
             }
-            BinaryKind::Rectangle2D => {
+            BinaryKind::RectangleFromPoints2D => {
                 Ok(desmos_expression!(
-                    {self.library.rectangle(self.target_info)} Call [
+                    {self.library.rectangle(self.context)} Call [
                         {self.translate_value(lhs)?},
                         {self.translate_value(rhs)?},
                     ]
                 ))
             }
-            BinaryKind::Glider => {
+            BinaryKind::Glider2D => {
                 Ok(desmos_expression!(
                     (@operatorname "glider") Call [
                         {self.translate_value(lhs)?},
@@ -937,7 +985,7 @@ impl<'target> GraphExpressionListBuilder<'target> {
                     ]
                 ))
             }
-            BinaryKind::Reflect => {
+            BinaryKind::Reflect2D => {
                 Ok(desmos_expression!(
                     (@operatorname "reflect") Call [
                         {self.translate_value(lhs)?},
@@ -945,9 +993,33 @@ impl<'target> GraphExpressionListBuilder<'target> {
                     ]
                 ))
             }
-            BinaryKind::TranslateByVector => {
+            BinaryKind::TranslateByVector2D => {
                 Ok(desmos_expression!(
                     (@operatorname "translate") Call [
+                        {self.translate_value(lhs)?},
+                        {self.translate_value(rhs)?},
+                    ]
+                ))
+            }
+            BinaryKind::Dilation2D => {
+                Ok(desmos_expression!(
+                    {self.fragile.get_symbol("dilation", 2, self.context)} Call [
+                        {self.translate_value(lhs)?},
+                        {self.translate_value(rhs)?},
+                    ]
+                ))
+            }
+            BinaryKind::Rotation2D => {
+                Ok(desmos_expression!(
+                    {self.fragile.get_symbol("rotation", 2, self.context)} Call [
+                        {self.translate_value(lhs)?},
+                        {self.translate_value(rhs)?},
+                    ]
+                ))
+            }
+            BinaryKind::ApplyTransform2D => {
+                Ok(desmos_expression!(
+                    {self.fragile.get_symbol("apply", 2, self.context)} Call [
                         {self.translate_value(lhs)?},
                         {self.translate_value(rhs)?},
                     ]
@@ -991,12 +1063,12 @@ impl<'target> GraphExpressionListBuilder<'target> {
                     (@operatorname "arc") Call {arguments}
                 ))
             }
-            TernaryKind::UndirectedAngle => {
+            TernaryKind::UndirectedAngle2D => {
                 Ok(desmos_expression!(
                     (@operatorname "angle") Call {arguments}
                 ))
             }
-            TernaryKind::DirectedAngle => {
+            TernaryKind::DirectedAngle2D => {
                 Ok(desmos_expression!(
                     (@operatorname "directedangle") Call {arguments}
                 ))
@@ -1006,17 +1078,17 @@ impl<'target> GraphExpressionListBuilder<'target> {
                     (@operatorname "triangle") Call {arguments}
                 ))
             }
-            TernaryKind::Dilate => {
+            TernaryKind::Dilate2D => {
                 Ok(desmos_expression!(
                     (@operatorname "dilate") Call {arguments}
                 ))
             }
-            TernaryKind::RotateByAmount | TernaryKind::RotateByAngle | TernaryKind::RotateByDirectedAngle => {
+            TernaryKind::Rotate2D => {
                 Ok(desmos_expression!(
                     (@operatorname "rotate") Call {arguments}
                 ))
             }
-            TernaryKind::TranslateByPoints => {
+            TernaryKind::TranslateByPoints2D => {
                 Ok(desmos_expression!(
                     (@operatorname "translate") Call {arguments}
                 ))
@@ -1053,27 +1125,53 @@ impl<'target> GraphExpressionListBuilder<'target> {
         &mut self,
         kind: ReducerKind,
         arguments: impl IntoIterator<Item = &'a Value>,
+        is_arg_reducer: bool,
         unsupported_error: impl Fn() -> Box<crate::Error>,
     ) -> crate::Result<GraphExpression> {
         let _ = unsupported_error; // We'll use you soon enough
 
+        let name = match kind {
+            ReducerKind::Lcm => "lcm",
+            ReducerKind::Gcd => "gcd",
+            ReducerKind::Mean => "mean",
+            ReducerKind::Median => "median",
+            ReducerKind::Min => "min",
+            ReducerKind::Max => "max",
+            ReducerKind::Stdev => "stdev",
+            ReducerKind::Stdevp => "stdevp",
+            ReducerKind::Var => "var",
+            ReducerKind::Varp => "varp",
+            ReducerKind::Mad => "mad",
+            ReducerKind::Count => "count",
+            ReducerKind::Total => "total",
+            ReducerKind::Polygon2D => "polygon",
+            ReducerKind::ComposeTransforms2D => {
+                // This is a fake reducer for something that is actually a binary function, so we
+                // have to lower it into that format.
+                return if is_arg_reducer {
+                    let arguments: Vec<_> = arguments
+                        .into_iter()
+                        .map(|argument| self.translate_value(argument))
+                        .collect::<crate::Result<_>>()?;
+                    let fragile_compose = self.fragile.get_symbol("compose", 2, self.context);
+                    Ok(arguments
+                        .into_iter()
+                        .reduce(|lhs, rhs| desmos_expression!(
+                            {&fragile_compose} Call [{lhs}, {rhs}]
+                        ))
+                        .unwrap())
+                }
+                else {
+                    Ok(desmos_expression!(
+                        {self.library.compose_reducer(self.context, &mut self.fragile)}
+                        Call {self.translate_value(arguments.into_iter().next().unwrap())?}
+                    ))
+                }
+            }
+        };
+
         Ok(desmos_expression!(
-            (@operatorname match kind {
-                ReducerKind::Lcm => "lcm",
-                ReducerKind::Gcd => "gcd",
-                ReducerKind::Mean => "mean",
-                ReducerKind::Median => "median",
-                ReducerKind::Min => "min",
-                ReducerKind::Max => "max",
-                ReducerKind::Stdev => "stdev",
-                ReducerKind::Stdevp => "stdevp",
-                ReducerKind::Var => "var",
-                ReducerKind::Varp => "varp",
-                ReducerKind::Mad => "mad",
-                ReducerKind::Count => "count",
-                ReducerKind::Total => "total",
-                ReducerKind::Polygon => "polygon",
-            })
+            (@operatorname name)
             Call [@? arguments
                 .into_iter()
                 .map(|argument| self.translate_value(argument))]
@@ -1219,7 +1317,7 @@ impl<'target> GraphExpressionListBuilder<'target> {
             }
             ActionValueKind::Update { variable, value, .. } => {
                 Ok(desmos_expression!(
-                    {self.target_info.get_global_symbol(&variable.identifier)}
+                    {self.context.get_global_symbol(&variable.identifier)}
                     RightArrow {self.translate_value(value)?}
                 ))
             }
@@ -1261,22 +1359,22 @@ impl<'target> GraphExpressionListBuilder<'target> {
         let value = self.translate_value(&immutable.value)?;
 
         Ok(Box::new(GraphExpressionEntry {
-            id: self.target_info.create_entry_id(),
+            id: self.context.create_entry_id(),
             folder_id,
             expression: GraphExpression::Binary {
                 kind: GraphBinaryKind::Equal,
                 lhs: Box::new(match &immutable.parameters {
                     Some(parameters) => GraphExpression::Binary {
                         kind: GraphBinaryKind::Call,
-                        lhs: Box::new(self.target_info.get_global_symbol(&immutable.identifier)),
+                        lhs: Box::new(self.context.get_global_symbol(&immutable.identifier)),
                         rhs: Box::new(GraphExpression::Sequence {
                             elements: parameters
                                 .iter()
-                                .map(|parameter| self.target_info.get_local_symbol(parameter.id))
+                                .map(|parameter| self.context.get_local_symbol(parameter.id))
                                 .collect(),
                         }),
                     },
-                    None => self.target_info.get_global_symbol(&immutable.identifier),
+                    None => self.context.get_global_symbol(&immutable.identifier),
                 }),
                 rhs: Box::new(value),
             },
@@ -1328,11 +1426,11 @@ impl<'target> GraphExpressionListBuilder<'target> {
         }
 
         Ok(Box::new(GraphExpressionEntry {
-            id: self.target_info.create_entry_id(),
+            id: self.context.create_entry_id(),
             folder_id,
             expression: GraphExpression::Binary {
                 kind: GraphBinaryKind::Equal,
-                lhs: Box::new(self.target_info.get_global_symbol(&variable.identifier)),
+                lhs: Box::new(self.context.get_global_symbol(&variable.identifier)),
                 rhs: Box::new(value),
             },
             slider,
@@ -1350,20 +1448,20 @@ impl<'target> GraphExpressionListBuilder<'target> {
         let action = self.translate_action_value(&program_action.action)?;
 
         Ok(Box::new(GraphExpressionEntry {
-            id: self.target_info.create_entry_id(),
+            id: self.context.create_entry_id(),
             folder_id,
             expression: GraphExpression::Binary {
                 kind: GraphBinaryKind::Equal,
                 lhs: Box::new(if program_action.parameters.is_empty() {
-                    self.target_info.get_action_symbol(&program_action.identifier)
+                    self.context.get_action_symbol(&program_action.identifier)
                 } else {
                     GraphExpression::Binary {
                         kind: GraphBinaryKind::Call,
-                        lhs: Box::new(self.target_info.get_action_symbol(&program_action.identifier)),
+                        lhs: Box::new(self.context.get_action_symbol(&program_action.identifier)),
                         rhs: Box::new(GraphExpression::Sequence {
                             elements: program_action.parameters
                                 .iter()
-                                .map(|parameter| self.target_info.get_local_symbol(parameter.id))
+                                .map(|parameter| self.context.get_local_symbol(parameter.id))
                                 .collect(),
                         }),
                     }
@@ -1401,7 +1499,7 @@ impl<'target> GraphExpressionListBuilder<'target> {
     }
 
     pub fn add_public_line(&mut self, public_line: &ProgramPublicLine, folder_id: Option<String>) -> crate::Result<()> {
-        let id = self.target_info.create_entry_id();
+        let id = self.context.create_entry_id();
         let entry: BoxedGraphEntry = match public_line {
             ProgramPublicLine::Expression(value) => match &value.kind {
                 ValueKind::Str(text) => {
@@ -1453,7 +1551,7 @@ impl<'target> GraphExpressionListBuilder<'target> {
                 self.add_public_line(public_line, None)
             }
             ProgramPublicEntry::Folder { label, lines } => {
-                let folder_id = self.target_info.create_entry_id();
+                let folder_id = self.context.create_entry_id();
                 let folder_entry = Box::new(GraphFolderEntry {
                     id: folder_id.clone(),
                     title: label.to_string(),
@@ -1484,7 +1582,7 @@ impl<'target> GraphExpressionListBuilder<'target> {
 
     fn add_image_display_element(&mut self, element: &ProgramDisplayElement, image: &ImageValue) -> crate::Result<()> {
         let mut entry = GraphImageEntry {
-            id: self.target_info.create_entry_id(),
+            id: self.context.create_entry_id(),
             folder_id: Some(DISPLAY_FOLDER_ID.into()),
             image_url: image.url.to_string(),
             name: image.name.to_string(),
@@ -1523,7 +1621,7 @@ impl<'target> GraphExpressionListBuilder<'target> {
 
     fn add_expression_display_element(&mut self, element: &ProgramDisplayElement) -> crate::Result<()> {
         let mut entry = GraphExpressionEntry {
-            id: self.target_info.create_entry_id(),
+            id: self.context.create_entry_id(),
             folder_id: Some(DISPLAY_FOLDER_ID.into()),
             expression: self.translate_value(&element.value)?,
             ..Default::default()

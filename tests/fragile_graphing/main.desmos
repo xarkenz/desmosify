@@ -1,0 +1,17 @@
+var slider(0 ..= 2) transform_param: real = 1;
+let square: polygon = @polygon((0,0), (1,0), (1,1), (0,1));
+let my_rotation: transformation = @rotation((2,2), transform_param);
+display {
+    square: line(), fill();
+    @apply(my_rotation, square): line(), fill();
+    @apply(@inverse(my_rotation), square): line(), fill();
+    @apply(@compose(my_rotation, my_rotation, my_rotation), square): line(), fill();
+    @apply(@compose([my_rotation; 10]), square): line(), fill();
+    @apply(@compose([]), square): line(), fill();
+}
+
+let internal_true: internal_bool = @bool_to_internal(true);
+let internal_false: internal_bool = @bool_to_internal(false);
+var my_bool: bool = true;
+let my_internal_bool: internal_bool = @bool_to_internal(my_bool);
+let my_output_bool: bool = @bool_from_internal(my_internal_bool) || @bool_from_internal(internal_true);

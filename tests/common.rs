@@ -13,6 +13,7 @@ pub fn run_test(
             .collect(),
         output_path: Path::new("tests").join(output_path),
         target_name: target_name.as_ref().to_string(),
+        fragile_strategy: Default::default(),
     };
 
     if desmosify::cli::invoke_wrapper(&args) != ExitCode::SUCCESS {

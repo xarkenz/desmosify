@@ -249,6 +249,13 @@ pub const CORE_INTRINSIC_FUNCTIONS: &[&IntrinsicFunction] = &[
     &ROTATE,
     &REFLECT,
     &TRANSLATE,
+    &DILATION,
+    &ROTATION,
+    &REFLECTION,
+    &TRANSLATION,
+    &APPLY,
+    &COMPOSE,
+    &INVERSE,
     // Color
     &RGB,
     &HSV,
@@ -1118,6 +1125,198 @@ pub static CHOOSE_RANDOM: IntrinsicFunction = IntrinsicFunction {
 
 // ------ Geometry ------
 
+// INTERSECTION
+
+// STRICT_INTERSECTION
+
+pub static SEGMENT: IntrinsicFunction = broadcastable_intrinsic!(
+    "segment", (Type::real_point_2d(), Type::real_point_2d()) => SegmentFromPoints2D, Type::Segment
+);
+
+pub static SEGMENT3D: IntrinsicFunction = broadcastable_intrinsic!(
+    "segment3d", (Type::real_point_3d(), Type::real_point_3d()) => SegmentFromPoints3D, Type::Segment3D
+);
+
+pub static LINE: IntrinsicFunction = IntrinsicFunction {
+    identifier: "line",
+    min_arity: 1,
+    max_arity: Some(2),
+    interpret_call: |_, _, _, arguments| {
+        let mut arguments = arguments.into_iter();
+
+        let first_argument = arguments.next().unwrap();
+
+        if let Some(end) = arguments.next() {
+            let real_point_2d = Type::real_point_2d();
+            let start = first_argument.coerce_to(&real_point_2d, true)?;
+            let end = end.coerce_to(&real_point_2d, true)?;
+
+            let list_state = ListState::merge(
+                start.get_type().list_state(),
+                end.get_type().list_state(),
+            );
+
+            Ok(ValueKind::Binary {
+                kind: BinaryKind::LineFromPoints2D,
+                lhs: Box::new(start),
+                rhs: Box::new(end),
+                result_type: Type::Line.unflatten_list(list_state),
+            })
+        }
+        else {
+            let segment_or_ray = first_argument.coerce_to(&Type::union([
+                Type::Segment,
+                Type::Ray,
+            ]), true)?;
+
+            let (list_state, argument_type) = segment_or_ray.get_type().into_flatten_list();
+
+            Ok(ValueKind::Unary {
+                kind: match argument_type {
+                    Type::Segment => UnaryKind::LineFromSegment2D,
+                    Type::Ray => UnaryKind::LineFromRay2D,
+                    _ => unreachable!()
+                },
+                operand: Box::new(segment_or_ray),
+                result_type: Type::Line.unflatten_list(list_state),
+            })
+        }
+    },
+};
+
+pub static RAY: IntrinsicFunction = broadcastable_intrinsic!(
+    "ray", (Type::real_point_2d(), Type::real_point_2d()) => RayFromPoints2D, Type::Ray
+);
+
+pub static VECTOR: IntrinsicFunction = broadcastable_intrinsic!(
+    "vector", (Type::real_point_2d(), Type::real_point_2d()) => VectorFromPoints2D, Type::Vector
+);
+
+pub static VECTOR3D: IntrinsicFunction = broadcastable_intrinsic!(
+    "vector3d", (Type::real_point_3d(), Type::real_point_3d()) => VectorFromPoints3D, Type::Vector3D
+);
+
+// PARALLEL
+
+// PERPENDICULAR
+
+pub static CIRCLE: IntrinsicFunction = IntrinsicFunction {
+    identifier: "circle",
+    min_arity: 2,
+    max_arity: Some(2),
+    interpret_call: |_, _, _, arguments| {
+        let mut arguments = arguments.into_iter();
+
+        let lhs = arguments.next().unwrap()
+            .coerce_to(&Type::real_point_2d(), true)?;
+        let rhs = arguments.next().unwrap()
+            .coerce_to(&Type::union([
+                Type::Real,
+                Type::real_point_2d(),
+            ]), true)?;
+
+        let list_state = ListState::merge(
+            lhs.get_type().list_state(),
+            rhs.get_type().list_state(),
+        );
+
+        Ok(ValueKind::Binary {
+            kind: match rhs.get_type() {
+                Type::Point2D { .. } => BinaryKind::CircleFromEdge2D,
+                _ => BinaryKind::CircleFromRadius2D,
+            },
+            lhs: Box::new(lhs),
+            rhs: Box::new(rhs),
+            result_type: Type::Circle.unflatten_list(list_state),
+        })
+    },
+};
+
+pub static SPHERE3D: IntrinsicFunction = broadcastable_intrinsic!(
+    "sphere3d", (Type::real_point_3d(), Type::Real) => SphereFromRadius3D, Type::Sphere3D
+);
+
+pub static ARC: IntrinsicFunction = broadcastable_intrinsic!(
+    "arc", (Type::real_point_2d(), Type::real_point_2d(), Type::real_point_2d()) => Arc2D, Type::Arc
+);
+
+pub static ANGLE: IntrinsicFunction = broadcastable_intrinsic!(
+    "angle", (Type::real_point_2d(), Type::real_point_2d(), Type::real_point_2d()) => UndirectedAngle2D, Type::Angle
+);
+
+pub static DIRECTED_ANGLE: IntrinsicFunction = broadcastable_intrinsic!(
+    "directed_angle", (Type::real_point_2d(), Type::real_point_2d(), Type::real_point_2d()) => DirectedAngle2D, Type::DirectedAngle
+);
+
+pub static POLYGON: IntrinsicFunction = broadcastable_intrinsic!(
+    "polygon", [Type::real_point_2d()] => Polygon2D, Type::Polygon
+);
+
+pub static RECT: IntrinsicFunction = broadcastable_intrinsic!(
+    "rect", (Type::real_point_2d(), Type::real_point_2d()) => RectangleFromPoints2D, Type::Polygon
+);
+
+pub static TRIANGLE3D: IntrinsicFunction = broadcastable_intrinsic!(
+    "triangle", (Type::real_point_3d(), Type::real_point_3d(), Type::real_point_3d()) => Triangle3D, Type::Triangle3D
+);
+
+pub static GLIDER: IntrinsicFunction = broadcastable_intrinsic!(
+    "glider", (Type::union([
+        Type::Segment,
+        Type::Circle,
+        Type::Line,
+        Type::Ray,
+        Type::Arc,
+        Type::Polygon,
+    ]), Type::Real) => Glider2D, Type::real_point_2d()
+);
+
+// ------ Properties & Measurements ------
+
+// DOT
+
+// CROSS
+
+// DISTANCE
+
+// LENGTH
+
+pub static AREA: IntrinsicFunction = broadcastable_intrinsic!(
+    "area", (Type::Polygon) => AreaOfPolygon, Type::Real
+);
+
+pub static PERIMETER: IntrinsicFunction = broadcastable_intrinsic!(
+    "perimeter", (Type::Polygon) => PerimeterOfPolygon, Type::Real
+);
+
+pub static VERTICES: IntrinsicFunction = strict_intrinsic!(
+    "vertices", (Type::Polygon) => VerticesOfPolygon, Type::real_point_2d().into_list(ListState::IsList)
+);
+
+pub static ANGLES: IntrinsicFunction = strict_intrinsic!(
+    "angles", (Type::Polygon) => UndirectedAnglesOfPolygon, Type::Angle.into_list(ListState::IsList)
+);
+
+pub static DIRECTED_ANGLES: IntrinsicFunction = strict_intrinsic!(
+    "directed_angles", (Type::Polygon) => DirectedAnglesOfPolygon, Type::DirectedAngle.into_list(ListState::IsList)
+);
+
+pub static SEGMENTS: IntrinsicFunction = strict_intrinsic!(
+    "segments", (Type::Polygon) => SegmentsOfPolygon, Type::Segment.into_list(ListState::IsList)
+);
+
+pub static RADIUS: IntrinsicFunction = broadcastable_intrinsic!(
+    "radius", (Type::Circle) => RadiusOfCircle, Type::Real
+);
+
+pub static CENTER: IntrinsicFunction = broadcastable_intrinsic!(
+    "center", (Type::Circle) => CenterOfCircle, Type::Real
+);
+
+// COTERMINAL
+
+// SUPPLEMENT
+
 pub static MIDPOINT: IntrinsicFunction = IntrinsicFunction {
     identifier: "midpoint",
     min_arity: 1,
@@ -1176,155 +1375,6 @@ pub static MIDPOINT: IntrinsicFunction = IntrinsicFunction {
     },
 };
 
-// INTERSECTION
-
-// STRICT_INTERSECTION
-
-pub static SEGMENT: IntrinsicFunction = broadcastable_intrinsic!(
-    "segment", (Type::real_point_2d(), Type::real_point_2d()) => Segment2D, Type::Segment
-);
-
-pub static SEGMENT3D: IntrinsicFunction = broadcastable_intrinsic!(
-    "segment3d", (Type::real_point_3d(), Type::real_point_3d()) => Segment3D, Type::Segment3D
-);
-
-pub static LINE: IntrinsicFunction = broadcastable_intrinsic!(
-    "line", (Type::real_point_2d(), Type::real_point_2d()) => Line2D, Type::Line
-);
-
-pub static RAY: IntrinsicFunction = broadcastable_intrinsic!(
-    "ray", (Type::real_point_2d(), Type::real_point_2d()) => Ray2D, Type::Ray
-);
-
-pub static VECTOR: IntrinsicFunction = broadcastable_intrinsic!(
-    "vector", (Type::real_point_2d(), Type::real_point_2d()) => Vector2D, Type::Vector
-);
-
-pub static VECTOR3D: IntrinsicFunction = broadcastable_intrinsic!(
-    "vector3d", (Type::real_point_3d(), Type::real_point_3d()) => Vector3D, Type::Vector3D
-);
-
-// PARALLEL
-
-// PERPENDICULAR
-
-pub static CIRCLE: IntrinsicFunction = IntrinsicFunction {
-    identifier: "circle",
-    min_arity: 2,
-    max_arity: Some(2),
-    interpret_call: |_, _, _, arguments| {
-        let mut arguments = arguments.into_iter();
-
-        let lhs = arguments.next().unwrap()
-            .coerce_to(&Type::real_point_2d(), true)?;
-        let rhs = arguments.next().unwrap()
-            .coerce_to(&Type::union([
-                Type::Real,
-                Type::real_point_2d(),
-            ]), true)?;
-
-        let list_state = ListState::merge(
-            lhs.get_type().list_state(),
-            rhs.get_type().list_state(),
-        );
-
-        Ok(ValueKind::Binary {
-            kind: match rhs.get_type() {
-                Type::Point2D { .. } => BinaryKind::Circle2DFromEdge,
-                _ => BinaryKind::Circle2DFromRadius,
-            },
-            lhs: Box::new(lhs),
-            rhs: Box::new(rhs),
-            result_type: Type::Circle.unflatten_list(list_state),
-        })
-    },
-};
-
-pub static SPHERE3D: IntrinsicFunction = broadcastable_intrinsic!(
-    "sphere3d", (Type::real_point_3d(), Type::Real) => Sphere3DFromRadius, Type::Sphere3D
-);
-
-pub static ARC: IntrinsicFunction = broadcastable_intrinsic!(
-    "arc", (Type::real_point_2d(), Type::real_point_2d(), Type::real_point_2d()) => Arc2D, Type::Arc
-);
-
-pub static ANGLE: IntrinsicFunction = broadcastable_intrinsic!(
-    "angle", (Type::real_point_2d(), Type::real_point_2d(), Type::real_point_2d()) => UndirectedAngle, Type::Angle
-);
-
-pub static DIRECTED_ANGLE: IntrinsicFunction = broadcastable_intrinsic!(
-    "directed_angle", (Type::real_point_2d(), Type::real_point_2d(), Type::real_point_2d()) => DirectedAngle, Type::DirectedAngle
-);
-
-pub static POLYGON: IntrinsicFunction = broadcastable_intrinsic!(
-    "polygon", [Type::real_point_2d()] => Polygon, Type::Polygon
-);
-
-pub static RECT: IntrinsicFunction = broadcastable_intrinsic!(
-    "rect", (Type::real_point_2d(), Type::real_point_2d()) => Rectangle2D, Type::Polygon
-);
-
-pub static TRIANGLE3D: IntrinsicFunction = broadcastable_intrinsic!(
-    "triangle", (Type::real_point_3d(), Type::real_point_3d(), Type::real_point_3d()) => Triangle3D, Type::Triangle3D
-);
-
-pub static GLIDER: IntrinsicFunction = broadcastable_intrinsic!(
-    "glider", (Type::union([
-        Type::Segment,
-        Type::Circle,
-        Type::Line,
-        Type::Ray,
-        Type::Arc,
-        Type::Polygon,
-    ]), Type::Real) => Glider, Type::real_point_2d()
-);
-
-// ------ Properties & Measurements ------
-
-// DOT
-
-// CROSS
-
-// DISTANCE
-
-// LENGTH
-
-pub static AREA: IntrinsicFunction = broadcastable_intrinsic!(
-    "area", (Type::Polygon) => AreaOfPolygon, Type::Real
-);
-
-pub static PERIMETER: IntrinsicFunction = broadcastable_intrinsic!(
-    "perimeter", (Type::Polygon) => PerimeterOfPolygon, Type::Real
-);
-
-pub static VERTICES: IntrinsicFunction = strict_intrinsic!(
-    "vertices", (Type::Polygon) => VerticesOfPolygon, Type::real_point_2d().into_list(ListState::IsList)
-);
-
-pub static ANGLES: IntrinsicFunction = strict_intrinsic!(
-    "angles", (Type::Polygon) => UndirectedAnglesOfPolygon, Type::Angle.into_list(ListState::IsList)
-);
-
-pub static DIRECTED_ANGLES: IntrinsicFunction = strict_intrinsic!(
-    "directed_angles", (Type::Polygon) => DirectedAnglesOfPolygon, Type::DirectedAngle.into_list(ListState::IsList)
-);
-
-pub static SEGMENTS: IntrinsicFunction = strict_intrinsic!(
-    "segments", (Type::Polygon) => SegmentsOfPolygon, Type::Segment.into_list(ListState::IsList)
-);
-
-pub static RADIUS: IntrinsicFunction = broadcastable_intrinsic!(
-    "radius", (Type::Circle) => RadiusOfCircle, Type::Real
-);
-
-pub static CENTER: IntrinsicFunction = broadcastable_intrinsic!(
-    "center", (Type::Circle) => CenterOfCircle, Type::Real
-);
-
-// COTERMINAL
-
-// SUPPLEMENT
-
 fn interpret_start_end_call(
     kind_2d: UnaryKind,
     kind_3d: UnaryKind,
@@ -1371,78 +1421,55 @@ pub static END: IntrinsicFunction = IntrinsicFunction {
 
 // ------ Transformations ------
 
+fn interpret_rotate_dilate_call(
+    kind: TernaryKind,
+    arguments: Box<[Value]>,
+) -> crate::Result<ValueKind> {
+    let mut arguments = arguments.into_iter();
+
+    let object = arguments.next().unwrap()
+        .coerce_to(&Type::transformable(), true)?;
+    let (object_list, object_type) = object.get_type().into_flatten_list();
+
+    let point = arguments.next().unwrap()
+        .coerce_to(&Type::real_point_2d(), true)?;
+
+    let factor_or_angle = arguments.next().unwrap()
+        .coerce_to(&Type::Real, true)?;
+
+    let list_state = ListState::merge_all([
+        object_list,
+        point.get_type().list_state(),
+        factor_or_angle.get_type().list_state(),
+    ]);
+
+    Ok(ValueKind::Ternary {
+        kind,
+        first: Box::new(object),
+        second: Box::new(point),
+        third: Box::new(factor_or_angle),
+        result_type: object_type.unflatten_list(list_state),
+    })
+}
+
 pub static DILATE: IntrinsicFunction = IntrinsicFunction {
     identifier: "dilate",
     min_arity: 3,
     max_arity: Some(3),
-    interpret_call: |_, _, _, arguments| {
-        let mut arguments = arguments.into_iter();
-
-        let object = arguments.next().unwrap()
-            .coerce_to(&Type::transformable(), true)?;
-        let (object_list, object_type) = object.get_type().into_flatten_list();
-
-        let point = arguments.next().unwrap()
-            .coerce_to(&Type::real_point_2d(), true)?;
-
-        let factor = arguments.next().unwrap()
-            .coerce_to(&Type::Real, true)?;
-
-        let list_state = ListState::merge_all([
-            object_list,
-            point.get_type().list_state(),
-            factor.get_type().list_state(),
-        ]);
-
-        Ok(ValueKind::Ternary {
-            kind: TernaryKind::Dilate,
-            first: Box::new(object),
-            second: Box::new(point),
-            third: Box::new(factor),
-            result_type: object_type.unflatten_list(list_state),
-        })
-    },
+    interpret_call: |_, _, _, arguments| interpret_rotate_dilate_call(
+        TernaryKind::Dilate2D,
+        arguments,
+    ),
 };
 
 pub static ROTATE: IntrinsicFunction = IntrinsicFunction {
     identifier: "rotate",
     min_arity: 3,
     max_arity: Some(3),
-    interpret_call: |_, _, _, arguments| {
-        let mut arguments = arguments.into_iter();
-
-        let object = arguments.next().unwrap()
-            .coerce_to(&Type::transformable(), true)?;
-        let (object_list, object_type) = object.get_type().into_flatten_list();
-
-        let point = arguments.next().unwrap()
-            .coerce_to(&Type::real_point_2d(), true)?;
-
-        let angle = arguments.next().unwrap()
-            .coerce_to(&Type::union([
-                Type::Real,
-                Type::Angle,
-                Type::DirectedAngle,
-            ]), true)?;
-
-        let list_state = ListState::merge_all([
-            object_list,
-            point.get_type().list_state(),
-            angle.get_type().list_state(),
-        ]);
-
-        Ok(ValueKind::Ternary {
-            kind: match angle.get_type() {
-                Type::Angle => TernaryKind::RotateByAngle,
-                Type::DirectedAngle => TernaryKind::RotateByDirectedAngle,
-                _ => TernaryKind::RotateByAmount,
-            },
-            first: Box::new(object),
-            second: Box::new(point),
-            third: Box::new(angle),
-            result_type: object_type.unflatten_list(list_state),
-        })
-    },
+    interpret_call: |_, _, _, arguments| interpret_rotate_dilate_call(
+        TernaryKind::Rotate2D,
+        arguments,
+    ),
 };
 
 pub static REFLECT: IntrinsicFunction = IntrinsicFunction {
@@ -1465,7 +1492,7 @@ pub static REFLECT: IntrinsicFunction = IntrinsicFunction {
         );
 
         Ok(ValueKind::Binary {
-            kind: BinaryKind::Reflect,
+            kind: BinaryKind::Reflect2D,
             lhs: Box::new(object),
             rhs: Box::new(line),
             result_type: object_type.unflatten_list(list_state),
@@ -1484,29 +1511,29 @@ pub static TRANSLATE: IntrinsicFunction = IntrinsicFunction {
             .coerce_to(&Type::transformable(), true)?;
         let (object_list, object_type) = object.get_type().into_flatten_list();
 
-        let point_1_or_vector = arguments.next().unwrap();
+        let first_argument = arguments.next().unwrap();
 
-        if let Some(point_2) = arguments.next() {
+        if let Some(end) = arguments.next() {
             let real_point2 = Type::real_point_2d();
-            let point_1 = point_1_or_vector.coerce_to(&real_point2, true)?;
-            let point_2 = point_2.coerce_to(&real_point2, true)?;
+            let start = first_argument.coerce_to(&real_point2, true)?;
+            let end = end.coerce_to(&real_point2, true)?;
 
             let list_state = ListState::merge_all([
                 object_list,
-                point_1.get_type().list_state(),
-                point_2.get_type().list_state(),
+                start.get_type().list_state(),
+                end.get_type().list_state(),
             ]);
 
             Ok(ValueKind::Ternary {
-                kind: TernaryKind::TranslateByPoints,
+                kind: TernaryKind::TranslateByPoints2D,
                 first: Box::new(object),
-                second: Box::new(point_1),
-                third: Box::new(point_2),
+                second: Box::new(start),
+                third: Box::new(end),
                 result_type: object_type.unflatten_list(list_state),
             })
         }
         else {
-            let vector = point_1_or_vector.coerce_to(&Type::Vector, true)?;
+            let vector = first_argument.coerce_to(&Type::Vector, true)?;
 
             let list_state = ListState::merge(
                 object_list,
@@ -1514,7 +1541,7 @@ pub static TRANSLATE: IntrinsicFunction = IntrinsicFunction {
             );
 
             Ok(ValueKind::Binary {
-                kind: BinaryKind::TranslateByVector,
+                kind: BinaryKind::TranslateByVector2D,
                 lhs: Box::new(object),
                 rhs: Box::new(vector),
                 result_type: object_type.unflatten_list(list_state),
@@ -1522,6 +1549,124 @@ pub static TRANSLATE: IntrinsicFunction = IntrinsicFunction {
         }
     },
 };
+
+fn interpret_rotation_dilation_call(
+    kind: BinaryKind,
+    arguments: Box<[Value]>,
+) -> crate::Result<ValueKind> {
+    let mut arguments = arguments.into_iter();
+
+    let point = arguments.next().unwrap()
+        .coerce_to(&Type::real_point_2d(), true)?;
+
+    let factor_or_angle = arguments.next().unwrap()
+        .coerce_to(&Type::Real, true)?;
+
+    let list_state = ListState::merge(
+        point.get_type().list_state(),
+        factor_or_angle.get_type().list_state(),
+    );
+
+    Ok(ValueKind::Binary {
+        kind,
+        lhs: Box::new(point),
+        rhs: Box::new(factor_or_angle),
+        result_type: Type::Transformation.unflatten_list(list_state),
+    })
+}
+
+pub static DILATION: IntrinsicFunction = IntrinsicFunction {
+    identifier: "dilation",
+    min_arity: 2,
+    max_arity: Some(2),
+    interpret_call: |_, _, _, arguments| interpret_rotation_dilation_call(
+        BinaryKind::Dilation2D,
+        arguments,
+    ),
+};
+
+pub static ROTATION: IntrinsicFunction = IntrinsicFunction {
+    identifier: "rotation",
+    min_arity: 2,
+    max_arity: Some(2),
+    interpret_call: |_, _, _, arguments| interpret_rotation_dilation_call(
+        BinaryKind::Rotation2D,
+        arguments,
+    ),
+};
+
+pub static REFLECTION: IntrinsicFunction = IntrinsicFunction {
+    identifier: "reflection",
+    min_arity: 1,
+    max_arity: Some(1),
+    interpret_call: |_, _, _, arguments| {
+        let mut arguments = arguments.into_iter();
+
+        let line = arguments.next().unwrap()
+            .coerce_to(&Type::Line, true)?;
+
+        Ok(ValueKind::Unary {
+            kind: UnaryKind::ReflectionByLine2D,
+            result_type: Type::Transformation.unflatten_list(line.get_type().list_state()),
+            operand: Box::new(line),
+        })
+    },
+};
+
+// TODO: allow 2-point and vector versions, and add this version to @translate
+pub static TRANSLATION: IntrinsicFunction = IntrinsicFunction {
+    identifier: "translation",
+    min_arity: 1,
+    max_arity: Some(1),
+    interpret_call: |_, _, _, arguments| {
+        let mut arguments = arguments.into_iter();
+
+        let displacement = arguments.next().unwrap()
+            .coerce_to(&Type::real_point_2d(), true)?;
+
+        Ok(ValueKind::Unary {
+            kind: UnaryKind::TranslationByPoint2D,
+            result_type: Type::Transformation.unflatten_list(displacement.get_type().list_state()),
+            operand: Box::new(displacement),
+        })
+    },
+};
+
+pub static APPLY: IntrinsicFunction = IntrinsicFunction {
+    identifier: "apply",
+    min_arity: 2,
+    max_arity: Some(2),
+    interpret_call: |_, _, _, arguments| {
+        let mut arguments = arguments.into_iter();
+
+        let transformation = arguments.next().unwrap()
+            .coerce_to(&Type::Transformation, true)?;
+
+        let object = arguments.next().unwrap()
+            .coerce_to(&Type::transformable(), true)?;
+        let (object_list, object_type) = object.get_type().into_flatten_list();
+
+        let list_state = ListState::merge(
+            transformation.get_type().list_state(),
+            object_list,
+        );
+
+        Ok(ValueKind::Binary {
+            kind: BinaryKind::ApplyTransform2D,
+            lhs: Box::new(transformation),
+            rhs: Box::new(object),
+            result_type: object_type.unflatten_list(list_state),
+        })
+    },
+};
+
+pub static COMPOSE: IntrinsicFunction = broadcastable_intrinsic!(
+    "compose", [Type::Transformation] => ComposeTransforms2D
+);
+
+pub static INVERSE: IntrinsicFunction = broadcastable_intrinsic!(
+    "inverse", (Type::Transformation) => InverseOfTransform2D
+);
 
 // ------ Color ------
 

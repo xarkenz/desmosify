@@ -90,6 +90,8 @@ pub enum UnaryKind {
     Shuffle,
     Unique,
     PrefixSum,
+    LineFromSegment2D,
+    LineFromRay2D,
     AreaOfPolygon,
     PerimeterOfPolygon,
     VerticesOfPolygon,
@@ -104,6 +106,9 @@ pub enum UnaryKind {
     StartOfVector3D,
     EndOfVector2D,
     EndOfVector3D,
+    ReflectionByLine2D,
+    TranslationByPoint2D,
+    InverseOfTransform2D,
     BoolToInternal,
     BoolFromInternal,
 }
@@ -137,31 +142,37 @@ pub enum BinaryKind {
     /// lhs = x, rhs = y
     Point2D,
     /// lhs = start, rhs = end
-    Segment2D,
+    SegmentFromPoints2D,
     /// lhs = start, rhs = end
-    Segment3D,
+    SegmentFromPoints3D,
     /// lhs = start, rhs = end
-    Line2D,
+    LineFromPoints2D,
     /// lhs = closed_end, rhs = open_end
-    Ray2D,
+    RayFromPoints2D,
     /// lhs = start, rhs = end
-    Vector2D,
+    VectorFromPoints2D,
     /// lhs = start, rhs = end
-    Vector3D,
+    VectorFromPoints3D,
     /// lhs = center, rhs = radius
-    Circle2DFromRadius,
+    CircleFromRadius2D,
     /// lhs = center, rhs = edge
-    Circle2DFromEdge,
+    CircleFromEdge2D,
     /// lhs = center, rhs = radius
-    Sphere3DFromRadius,
+    SphereFromRadius3D,
     /// lhs = corner_1, rhs = corner_2
-    Rectangle2D,
+    RectangleFromPoints2D,
     /// lhs = object, rhs = distance
-    Glider,
+    Glider2D,
     /// lhs = object, rhs = axis
-    Reflect,
+    Reflect2D,
     /// lhs = object, rhs = vector
-    TranslateByVector,
+    TranslateByVector2D,
+    /// lhs = point, rhs = factor
+    Dilation2D,
+    /// lhs = point, rhs = angle
+    Rotation2D,
+    /// lhs = transformation, rhs = object
+    ApplyTransform2D,
     /// lhs = start, rhs = end
     MidpointOfPoints2D,
     /// lhs = start, rhs = end
@@ -175,21 +186,17 @@ pub enum TernaryKind {
     /// first = start, second = thru, third = end
     Arc2D,
     /// first = leg_a, second = center, third = leg_b
-    UndirectedAngle,
+    UndirectedAngle2D,
     /// first = start_leg, second = center, third = end_leg
-    DirectedAngle,
+    DirectedAngle2D,
     /// first = a, second = b, third = c
     Triangle3D,
     /// first = object, second = point, third = factor
-    Dilate,
-    /// first = object, second = point, third = amount
-    RotateByAmount,
+    Dilate2D,
     /// first = object, second = point, third = angle
-    RotateByAngle,
-    /// first = object, second = point, third = directed_angle
-    RotateByDirectedAngle,
+    Rotate2D,
     /// first = object, second = start_point, third = end_point
-    TranslateByPoints,
+    TranslateByPoints2D,
     Rgb,
     Hsv,
     Okhsv,
@@ -220,7 +227,8 @@ pub enum ReducerKind {
     Mad,
     Count,
     Total,
-    Polygon,
+    Polygon2D,
+    ComposeTransforms2D,
 }
 
 #[derive(Copy, Clone, PartialEq, Debug)]

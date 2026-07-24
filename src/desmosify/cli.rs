@@ -2,6 +2,7 @@ use std::path::PathBuf;
 use std::process::ExitCode;
 use clap::Parser as ClapParser;
 use crate::ast::parse::Parser;
+use crate::desmos::builder::fragile::FragileStrategy;
 use crate::sema::context::GlobalContext;
 use crate::sema::interpret::interpret_program;
 use crate::token::scan::Scanner;
@@ -9,19 +10,22 @@ use crate::token::scan::Scanner;
 #[derive(ClapParser, Debug)]
 #[command(author, version, about)]
 pub struct DesmosifyArgs {
-    #[doc = "The paths of source code files to compile into a single program"]
+    /// The paths of source code files to compile into a single program.
     #[arg(value_name = "source_paths")]
     pub source_paths: Vec<PathBuf>,
-    #[doc = "The path where compilation output will be written to"]
+    /// The path where compilation output will be written to.
     #[arg(short = 'o', long = "out", value_name = "output_path")]
     pub output_path: PathBuf,
-    #[doc = "The name of the compilation target"]
+    /// The name of the compilation target.
     #[arg(short = 't', long = "target", value_name = "target_name")]
     pub target_name: String,
+    /// How to handle emitting fragile functions for Desmos.
+    #[arg(long = "fragile-strategy")]
+    pub fragile_strategy: FragileStrategy,
 }
 
 pub fn invoke(args: &DesmosifyArgs) -> crate::Result<()> {
-    let mut target = crate::target::create_target_by_name(&args.target_name)?;
+    let mut target = crate::target::create_target(args)?;
 
     let mut declarations = Vec::new();
 

@@ -217,6 +217,8 @@ Compute the angle from the origin to `(x, y)` in the range (-π, π].
 
 ```
 @exp(x: real+): real+
+
+// @exp(2) => @e ** 2.0
 ```
 
 {: #ln }
@@ -224,6 +226,8 @@ Compute the angle from the origin to `(x, y)` in the range (-π, π].
 
 ```
 @ln(x: real+): real+
+
+// @ln(@e) => 1.0
 ```
 
 {: #log }
@@ -231,6 +235,8 @@ Compute the angle from the origin to `(x, y)` in the range (-π, π].
 
 ```
 @log(base: real+, x: real+): real+
+
+// @log(@e, @e) => @ln(@e) => 1.0
 ```
 
 ## Number Theory
@@ -334,6 +340,8 @@ T: real | int
 
 ```
 @sqrt(x: real+): real+
+
+// @sqrt(4) => 2.0
 ```
 
 {: #cbrt }
@@ -341,6 +349,8 @@ T: real | int
 
 ```
 @cbrt(x: real+): real+
+
+// @cbrt(8) => 2.0
 ```
 
 {: #nth_root }
@@ -348,6 +358,8 @@ T: real | int
 
 ```
 @nth_root(x: real+, n: real+): real+
+
+// @nth_root(16, 4) => 2.0
 ```
 
 ## Complex
@@ -378,7 +390,7 @@ T: any
 // @sort([3, 1, 4, 2]) => [1, 2, 3, 4]
 // -@sort(-[3, 1, 4, 2]) => [4, 3, 2, 1]
 // @sort([a, b, c], [3, 1, 2]) => [b, c, a]
-// -@sort([a, b, c], -[3, 1, 2]) => [a, c, b]
+// @sort([a, b, c], -[3, 1, 2]) => [a, c, b]
 ```
 
 Sort `list` in ascending (increasing) order. If only `list` is provided, its values are used as the keys for sorting.
@@ -386,7 +398,7 @@ If `keys` is provided, `list` will be sorted according to the ordering of `keys`
 number of values.) The sort used is a *stable* sort—that is, items that use the same key will remain in the same order
 as they were in the original list.
 
-To sort in descending order, the idioms `-@sort(-list)` or `-@sort(list, -keys)` can be used.
+To sort in descending order, the idioms `-@sort(-list)` or `@sort(list, -keys)` can be used.
 
 {: #shuffle }
 ### `@shuffle` — Randomly shuffle a list
@@ -457,7 +469,6 @@ Compute the arithmetic mean/average value in `values`.
 @median(values: [real]): real
 
 // @median(3, 1, 5) => 3.0
-// @median([3, 1, 5]) => 3.0
 // @median(3, 1, 5, 2) => 2.5
 // @median([3, 1, 5, 2]) => 2.5
 // @median([]) => undefined
@@ -596,16 +607,6 @@ T: any
 
 ## Geometry
 
-{: #midpoint }
-### `@midpoint` — Midpoint
-
-```
-@midpoint(start: (real, real)+, end: (real, real)+): (real, real)+
-@midpoint(start: (real, real, real)+, end: (real, real, real)+): (real, real, real)+
-@midpoint(seg: segment+): (real, real)+
-@midpoint(seg: segment3d+): (real, real, real)+
-```
-
 {: #segment }
 ### `@segment` — Construct a 2D line segment
 
@@ -635,12 +636,15 @@ Construct a 3D line segment from `start` to `end`.
 
 ```
 @line(start: (real, real)+, end: (real, real)+): line+
+@line(s: segment+): line+
+@line(r: ray+): ray+
 ```
 
 {: .compatibility-note }
 This intrinsic is *only* available on `--target desmos-geometry`.
 
-Construct a 2D line passing through `start` and `end`.
+Construct a 2D line passing through `start` and `end`. For the versions accepting a `segment` or `ray`, the `start` and
+`end` points are derived from the given object.
 
 {: #ray }
 ### `@ray` — Construct a 2D line ray
@@ -879,6 +883,16 @@ This intrinsic is *only* available on `--target desmos-geometry`.
 
 {: .compatibility-note }
 This intrinsic is *only* available on `--target desmos-geometry`.
+
+{: #midpoint }
+### `@midpoint` — Midpoint
+
+```
+@midpoint(start: (real, real)+, end: (real, real)+): (real, real)+
+@midpoint(start: (real, real, real)+, end: (real, real, real)+): (real, real, real)+
+@midpoint(seg: segment+): (real, real)+
+@midpoint(seg: segment3d+): (real, real, real)+
+```
 
 {: #start }
 ### `@start` — Start point of a vector
@@ -1208,7 +1222,7 @@ The name of the compilation target; that is, the string given for `--target` on 
 @target_symbol(global: {global reference}): str
 @target_symbol(action: {action reference}): str
 
-// let my_global: i32 = 0;
+// let my_global: int = 0;
 // @target_symbol(my_global) => e.g. "G_{MyGlobal}"
 // action my_action() {}
 // @target_symbol(action my_action) => e.g. "A_{MyAction}"

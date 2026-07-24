@@ -79,6 +79,7 @@ pub enum Type {
     Triangle3D,
     Sphere3D,
     Vector3D,
+    Transformation,
     InternalBool,
     Str,
     Image,
@@ -195,6 +196,7 @@ impl Type {
             "triangle3d" => Some(Self::Triangle3D),
             "sphere3d" => Some(Self::Sphere3D),
             "vector3d" => Some(Self::Vector3D),
+            "transformation" => Some(Self::Transformation),
             "internal_bool" => Some(Self::InternalBool),
             "str" => Some(Self::Str),
             "image" => Some(Self::Image),
@@ -263,8 +265,9 @@ impl Type {
         match (self, target) {
             (self_, Self::Any) => self_.is_first_class().then_some(self_),
             (Self::Any, _) => target.is_first_class().then_some(target.clone()),
-            (Self::Int, Self::Real) => Some(Self::Real),
-            (Self::Bool, Self::Int | Self::Real) => Some(target.clone()),
+            (Self::Real, Self::Complex) => Some(target.clone()),
+            (Self::Int, Self::Real | Self::Complex) => Some(target.clone()),
+            (Self::Bool, Self::Int | Self::Real | Self::Complex) => Some(target.clone()),
             (
                 Self::Point2D { x_type: self_x, y_type: self_y },
                 Self::Point2D { x_type: target_x, y_type: target_y },
@@ -280,7 +283,9 @@ impl Type {
                 y_type: Box::new(self_y.coerce_to(target_y)?),
                 z_type: Box::new(self_z.coerce_to(target_z)?),
             }),
-            (Self::Enum { .. }, Self::Int | Self::Real) => Some(target.clone()),
+            (Self::Angle, Self::Real | Self::Complex) => Some(target.clone()),
+            (Self::DirectedAngle, Self::Real | Self::Complex) => Some(target.clone()),
+            (Self::Enum { .. }, Self::Int | Self::Real | Self::Complex) => Some(target.clone()),
             _ => None
         }
     }
@@ -290,6 +295,7 @@ impl Type {
     }
 
     pub fn is_first_class(&self) -> bool {
+        // TODO: use this more
         match self {
             Self::Meta { .. } => false,
             Self::Any => true,
@@ -313,6 +319,7 @@ impl Type {
             Self::Triangle3D => true,
             Self::Sphere3D => true,
             Self::Vector3D => true,
+            Self::Transformation => true,
             Self::InternalBool => true,
             Self::Str => false,
             Self::Image => false,
@@ -324,6 +331,37 @@ impl Type {
             Self::Action { .. } => false,
             Self::List { .. } => true,
             Self::Union { variants } => variants.iter().all(Self::is_first_class),
+        }
+    }
+
+    pub fn is_valid_var_type(&self) -> bool {
+        // TODO: actually use this
+        match self {
+            Self::Any => true,
+            Self::Complex => true,
+            Self::Real => true,
+            Self::Int => true,
+            Self::Bool => true,
+            Self::Color => true,
+            Self::Tone => true,
+            Self::Polygon => true,
+            Self::Segment => true,
+            Self::Circle => true,
+            Self::Arc => true,
+            Self::Line => true,
+            Self::Ray => true,
+            Self::Vector => true,
+            Self::Angle => true,
+            Self::DirectedAngle => true,
+            Self::Segment3D => true,
+            Self::Triangle3D => true,
+            Self::Sphere3D => true,
+            Self::Vector3D => true,
+            Self::Point2D { .. } => true,
+            Self::Point3D { .. } => true,
+            Self::Enum { .. } => true,
+            Self::List { item_type, .. } => item_type.is_valid_var_type(),
+            _ => false
         }
     }
 
@@ -554,6 +592,7 @@ impl std::fmt::Display for Type {
             Self::Triangle3D => write!(f, "triangle3d"),
             Self::Sphere3D => write!(f, "sphere3d"),
             Self::Vector3D => write!(f, "vector3d"),
+            Self::Transformation => write!(f, "transformation"),
             Self::InternalBool => write!(f, "internal_bool"),
             Self::Str => write!(f, "str"),
             Self::Image => write!(f, "image"),
