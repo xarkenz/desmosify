@@ -1,29 +1,16 @@
+use crate::util::LazyConst;
+use std::collections::HashMap;
+use std::num::NonZeroUsize;
 use std::rc::Rc;
-use crate::sema::intrinsic::IntrinsicFunction;
-use crate::sema::values::{Value, ValueKind};
+use crate::sema::values::ValueHandle;
 
-#[derive(Clone, PartialEq, Debug)]
+#[derive(Clone, PartialEq, Eq, Hash, Debug)]
 pub struct FunctionSignature {
-    pub parameter_types: Box<[Type]>,
-    pub return_type: Type,
+    pub parameter_types: Box<[TypeHandle]>,
+    pub return_type: TypeHandle,
 }
 
-impl std::fmt::Display for FunctionSignature {
-    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
-        match self.parameter_types.as_ref() {
-            [] => write!(f, "function(")?,
-            [first, rest @ ..] => {
-                write!(f, "function({first}")?;
-                for parameter_type in rest {
-                    write!(f, ", {parameter_type}")?;
-                }
-            }
-        }
-        write!(f, "): {}", self.return_type)
-    }
-}
-
-#[derive(Copy, Clone, PartialEq, Debug)]
+#[derive(Copy, Clone, PartialEq, Eq, Hash, Debug)]
 pub enum ListState {
     IsList,
     MaybeList,
@@ -55,9 +42,7 @@ impl ListState {
 
 #[derive(Clone, PartialEq, Debug)]
 pub enum Type {
-    Meta {
-        identifier: Rc<str>,
-    },
+    Meta,
     Any,
     Complex,
     Real,
@@ -84,130 +69,38 @@ pub enum Type {
     Str,
     Image,
     Point2D {
-        x_type: Box<Self>,
-        y_type: Box<Self>,
+        x_type: TypeHandle,
+        y_type: TypeHandle,
     },
     Point3D {
-        x_type: Box<Self>,
-        y_type: Box<Self>,
-        z_type: Box<Self>,
+        x_type: TypeHandle,
+        y_type: TypeHandle,
+        z_type: TypeHandle,
     },
     Enum {
-        type_identifier: Rc<str>,
-    },
-    UserFunction {
-        signature: Box<FunctionSignature>,
-    },
-    IntrinsicFunction(&'static IntrinsicFunction),
-    Action {
-        parameter_types: Box<[Self]>,
+        identifier: Rc<str>,
+        values: Box<[(Rc<str>, ValueHandle)]>
     },
     List {
         state: ListState,
-        item_type: Box<Self>,
+        item_type: TypeHandle,
+    },
+    Function {
+        signature: FunctionSignature,
+    },
+    IntrinsicFunction,
+    Action {
+        parameter_types: Box<[TypeHandle]>,
     },
     Union {
-        variants: Box<[Self]>,
+        variants: Box<[TypeHandle]>,
     },
 }
 
 impl Type {
-    pub fn point_2d(x_type: Self, y_type: Self) -> Self {
-        Self::Point2D {
-            x_type: Box::new(x_type),
-            y_type: Box::new(y_type),
-        }
-    }
-
-    pub fn real_point_2d() -> Self {
-        Self::point_2d(Self::Real, Self::Real)
-    }
-
-    pub fn point_3d(x_type: Self, y_type: Self, z_type: Self) -> Self {
-        Self::Point3D {
-            x_type: Box::new(x_type),
-            y_type: Box::new(y_type),
-            z_type: Box::new(z_type),
-        }
-    }
-
-    pub fn real_point_3d() -> Self {
-        Self::point_3d(Self::Real, Self::Real, Self::Real)
-    }
-
-    pub fn union(variants: impl IntoIterator<Item = Self>) -> Self {
+    pub fn union(variants: impl IntoIterator<Item = TypeHandle>) -> Self {
         Self::Union {
             variants: variants.into_iter().collect(),
-        }
-    }
-
-    pub fn real_or_real_point() -> Self {
-        Self::union([
-            Self::Real,
-            Self::real_point_2d(),
-            Self::real_point_3d(),
-        ])
-    }
-
-    pub fn transformable() -> Self {
-        Self::union([
-            Self::Polygon,
-            Self::Segment,
-            Self::Circle,
-            Self::Arc,
-            Self::Line,
-            Self::Ray,
-            Self::Vector,
-            Self::Angle,
-            Self::DirectedAngle,
-            Self::real_point_2d(),
-        ])
-    }
-
-    pub fn line_like() -> Self {
-        Self::union([
-            Self::Segment,
-            Self::Line,
-            Self::Ray,
-            Self::Vector,
-        ])
-    }
-
-    pub fn find_primitive(identifier: &str) -> Option<Self> {
-        match identifier {
-            "any" => Some(Self::Any),
-            "complex" => Some(Self::Complex),
-            "real" => Some(Self::Real),
-            "int" => Some(Self::Int),
-            "bool" => Some(Self::Bool),
-            "color" => Some(Self::Color),
-            "tone" => Some(Self::Tone),
-            "distribution" => Some(Self::Distribution),
-            "polygon" => Some(Self::Polygon),
-            "segment" => Some(Self::Segment),
-            "circle" => Some(Self::Circle),
-            "arc" => Some(Self::Arc),
-            "line" => Some(Self::Line),
-            "ray" => Some(Self::Ray),
-            "vector" => Some(Self::Vector),
-            "angle" => Some(Self::Angle),
-            "directed_angle" => Some(Self::DirectedAngle),
-            "segment3d" => Some(Self::Segment3D),
-            "triangle3d" => Some(Self::Triangle3D),
-            "sphere3d" => Some(Self::Sphere3D),
-            "vector3d" => Some(Self::Vector3D),
-            "transformation" => Some(Self::Transformation),
-            "internal_bool" => Some(Self::InternalBool),
-            "str" => Some(Self::Str),
-            "image" => Some(Self::Image),
-            _ => None,
-        }
-    }
-
-    pub fn into_list(self, state: ListState) -> Self {
-        Self::List {
-            state,
-            item_type: Box::new(self),
         }
     }
 
@@ -218,83 +111,7 @@ impl Type {
         }
     }
 
-    pub fn flatten_list(&self) -> (Option<ListState>, &Self) {
-        match self {
-            Self::List { state, item_type } => (Some(*state), item_type),
-            _ => (None, self)
-        }
-    }
-
-    pub fn into_flatten_list(self) -> (Option<ListState>, Self) {
-        match self {
-            Self::List { state, item_type } => (Some(state), *item_type),
-            _ => (None, self)
-        }
-    }
-
-    pub fn require_flatten_list(self) -> crate::Result<Self> {
-        match self {
-            // TODO: require state to be IsList?
-            Self::List { item_type, .. } => Ok(*item_type),
-            other_type => Err(Box::new(crate::Error {
-                kind: crate::ErrorKind::ExpectedListType {
-                    got_type: other_type.to_string(),
-                },
-                span: None,
-            }))
-        }
-    }
-
-    pub fn unflatten_list(self, state: Option<ListState>) -> Self {
-        match state {
-            Some(state) => self.into_list(state),
-            None => self,
-        }
-    }
-
-    pub fn coerce_to(self, target: &Self) -> Option<Self> {
-        if &self == target {
-            return Some(self)
-        }
-        else if let Self::Union { variants } = target {
-            return variants
-                .iter()
-                .find_map(|variant| self.clone().coerce_to(variant))
-        }
-
-        match (self, target) {
-            (self_, Self::Any) => self_.is_first_class().then_some(self_),
-            (Self::Any, _) => target.is_first_class().then_some(target.clone()),
-            (Self::Real, Self::Complex) => Some(target.clone()),
-            (Self::Int, Self::Real | Self::Complex) => Some(target.clone()),
-            (Self::Bool, Self::Int | Self::Real | Self::Complex) => Some(target.clone()),
-            (
-                Self::Point2D { x_type: self_x, y_type: self_y },
-                Self::Point2D { x_type: target_x, y_type: target_y },
-            ) => Some(Self::Point2D {
-                x_type: Box::new(self_x.coerce_to(target_x)?),
-                y_type: Box::new(self_y.coerce_to(target_y)?),
-            }),
-            (
-                Self::Point3D { x_type: self_x, y_type: self_y, z_type: self_z },
-                Self::Point3D { x_type: target_x, y_type: target_y, z_type: target_z },
-            ) => Some(Self::Point3D {
-                x_type: Box::new(self_x.coerce_to(target_x)?),
-                y_type: Box::new(self_y.coerce_to(target_y)?),
-                z_type: Box::new(self_z.coerce_to(target_z)?),
-            }),
-            (Self::Angle, Self::Real | Self::Complex) => Some(target.clone()),
-            (Self::DirectedAngle, Self::Real | Self::Complex) => Some(target.clone()),
-            (Self::Enum { .. }, Self::Int | Self::Real | Self::Complex) => Some(target.clone()),
-            _ => None
-        }
-    }
-
-    pub fn can_coerce_to(&self, target: &Self) -> bool {
-        self.clone().coerce_to(target).is_some()
-    }
-
-    pub fn is_first_class(&self) -> bool {
+    pub fn is_first_class(&self, registry: &TypeRegistry) -> bool {
         // TODO: use this more
         match self {
             Self::Meta { .. } => false,
@@ -326,17 +143,19 @@ impl Type {
             Self::Point2D { .. } => true,
             Self::Point3D { .. } => true,
             Self::Enum { .. } => true,
-            Self::UserFunction { .. } => false,
-            Self::IntrinsicFunction(..) => false,
+            Self::Function { .. } => false,
+            Self::IntrinsicFunction => false,
             Self::Action { .. } => false,
             Self::List { .. } => true,
-            Self::Union { variants } => variants.iter().all(Self::is_first_class),
+            Self::Union { variants } => {
+                variants.iter().all(|&variant| registry.is_first_class_type(variant))
+            }
         }
     }
 
-    pub fn is_valid_var_type(&self) -> bool {
+    pub fn is_valid_var(&self, registry: &TypeRegistry) -> bool {
         // TODO: actually use this
-        match self {
+        match *self {
             Self::Any => true,
             Self::Complex => true,
             Self::Real => true,
@@ -360,96 +179,445 @@ impl Type {
             Self::Point2D { .. } => true,
             Self::Point3D { .. } => true,
             Self::Enum { .. } => true,
-            Self::List { item_type, .. } => item_type.is_valid_var_type(),
+            Self::List { item_type, .. } => {
+                registry.is_valid_var_type(item_type)
+            }
             _ => false
         }
     }
 
-    pub fn is_numeric(&self) -> bool {
-        self.can_coerce_to(&Type::Real)
+    pub fn value_range(&self) -> Option<(Option<ValueHandle>, Option<ValueHandle>, Option<ValueHandle>)> {
+        match self {
+            Self::Real => Some((None, None, None)),
+            Self::Int | Self::Enum { .. } => Some((
+                None,
+                None,
+                Some(ValueHandle::ONE_INT),
+            )),
+            Self::Bool => Some((
+                Some(ValueHandle::FALSE),
+                Some(ValueHandle::TRUE),
+                Some(ValueHandle::TRUE),
+            )),
+            _ => None
+        }
+    }
+}
+
+#[repr(transparent)]
+#[derive(Copy, Clone, PartialEq, Eq, Hash, Debug)]
+pub struct TypeHandle(NonZeroUsize);
+
+impl TypeHandle {
+    const fn new(index: usize) -> Self {
+        // This may overflow if index == usize::MAX, but memory will run out before that happens.
+        Self(NonZeroUsize::new(index + 1).unwrap())
     }
 
-    pub fn require_numeric(&self) -> crate::Result<()> {
-        if self.is_numeric() {
-            Ok(())
+    const fn index(self) -> usize {
+        // This is trivially guaranteed to never underflow.
+        self.0.get() - 1
+    }
+
+    pub fn display(self, registry: &TypeRegistry) -> TypeHandleDisplay<'_> {
+        TypeHandleDisplay {
+            handle: self,
+            registry,
+        }
+    }
+
+    pub fn into_list(self, registry: &mut TypeRegistry, state: ListState) -> crate::Result<Self> {
+        registry.list_type(state, self)
+    }
+}
+
+impl Default for TypeHandle {
+    fn default() -> Self {
+        Self::ANY
+    }
+}
+
+#[derive(Copy, Clone, Debug)]
+pub struct TypeHandleDisplay<'a> {
+    handle: TypeHandle,
+    registry: &'a TypeRegistry,
+}
+
+impl std::fmt::Display for TypeHandleDisplay<'_> {
+    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+        f.write_str(&self.registry.repr(self.handle))
+    }
+}
+
+#[derive(Debug)]
+pub struct TypeRegistry {
+    entries: Vec<TypeEntry>,
+    point_2d_handles: HashMap<[TypeHandle; 2], TypeHandle>,
+    point_3d_handles: HashMap<[TypeHandle; 3], TypeHandle>,
+    list_handles: HashMap<(ListState, TypeHandle), TypeHandle>,
+    function_handles: HashMap<FunctionSignature, TypeHandle>,
+    action_handles: HashMap<Box<[TypeHandle]>, TypeHandle>,
+    union_handles: HashMap<Box<[TypeHandle]>, TypeHandle>,
+}
+
+#[derive(Clone, Debug)]
+pub struct TypeEntry {
+    pub definition: Type,
+    pub repr: Rc<str>,
+}
+
+impl TypeRegistry {
+    pub fn new() -> Self {
+        let mut registry = Self {
+            entries: Vec::new(),
+            point_2d_handles: HashMap::new(),
+            point_3d_handles: HashMap::new(),
+            list_handles: HashMap::new(),
+            function_handles: HashMap::new(),
+            action_handles: HashMap::new(),
+            union_handles: HashMap::new(),
+        };
+
+        for known_type in &KNOWN_TYPES {
+            registry.register(known_type.get());
+        }
+
+        registry
+    }
+
+    pub fn register(&mut self, definition: Type) -> TypeHandle {
+        let handle = TypeHandle::new(self.entries.len());
+
+        match definition {
+            Type::Point2D { x_type, y_type } => {
+                self.point_2d_handles.insert([x_type, y_type], handle);
+            }
+            Type::Point3D { x_type, y_type, z_type } => {
+                self.point_3d_handles.insert([x_type, y_type, z_type], handle);
+            }
+            Type::List { state, item_type } => {
+                self.list_handles.insert((state, item_type), handle);
+            }
+            Type::Function { ref signature } => {
+                self.function_handles.insert(signature.clone(), handle);
+            }
+            Type::Action { ref parameter_types } => {
+                self.action_handles.insert(parameter_types.clone(), handle);
+            }
+            Type::Union { ref variants } => {
+                self.union_handles.insert(variants.clone(), handle);
+            }
+            _ => {}
+        }
+
+        self.entries.push(TypeEntry {
+            repr: self.compute_repr(&definition),
+            definition,
+        });
+
+        handle
+    }
+
+    pub fn reregister(&mut self, handle: TypeHandle, definition: Type) {
+        self.entries[handle.index()] = TypeEntry {
+            repr: self.compute_repr(&definition),
+            definition,
+        };
+    }
+
+    pub fn entry(&self, handle: TypeHandle) -> &TypeEntry {
+        &self.entries[handle.index()]
+    }
+
+    pub fn get(&self, handle: TypeHandle) -> &Type {
+        &self.entries[handle.index()].definition
+    }
+
+    pub fn repr(&self, handle: TypeHandle) -> Rc<str> {
+        self.entries[handle.index()].repr.clone()
+    }
+
+    pub fn point_2d_type(&mut self, x_type: TypeHandle, y_type: TypeHandle) -> crate::Result<TypeHandle> {
+        if let Some(&handle) = self.point_2d_handles.get(&[x_type, y_type]) {
+            return Ok(handle)
+        }
+
+        for component_type in [x_type, y_type] {
+            if !self.can_coerce(component_type, TypeHandle::REAL) {
+                return Err(Box::new(crate::Error {
+                    kind: crate::ErrorKind::InvalidPointComponentType {
+                        component_type: self.repr(component_type),
+                    },
+                    span: None,
+                }))
+            }
+        }
+
+        Ok(self.register(Type::Point2D {
+            x_type,
+            y_type,
+        }))
+    }
+
+    pub fn point_3d_type(&mut self, x_type: TypeHandle, y_type: TypeHandle, z_type: TypeHandle) -> crate::Result<TypeHandle> {
+        if let Some(&handle) = self.point_3d_handles.get(&[x_type, y_type, z_type]) {
+            return Ok(handle)
+        }
+
+        for component_type in [x_type, y_type, z_type] {
+            if !self.can_coerce(component_type, TypeHandle::REAL) {
+                return Err(Box::new(crate::Error {
+                    kind: crate::ErrorKind::InvalidPointComponentType {
+                        component_type: self.repr(component_type),
+                    },
+                    span: None,
+                }))
+            }
+        }
+
+        Ok(self.register(Type::Point3D {
+            x_type,
+            y_type,
+            z_type,
+        }))
+    }
+
+    pub fn list_type(&mut self, state: ListState, item_type: TypeHandle) -> crate::Result<TypeHandle> {
+        if let Some(&handle) = self.list_handles.get(&(state, item_type)) {
+            Ok(handle)
+        }
+        else if self.flatten_list(item_type).0.is_some() {
+            Err(Box::new(crate::Error {
+                kind: crate::ErrorKind::InvalidListItemType {
+                    item_type: self.repr(item_type),
+                },
+                span: None,
+            }))
         }
         else {
-            Err(Box::new(crate::Error {
-                kind: crate::ErrorKind::ExpectedNumericType {
-                    got_type: self.to_string(),
+            Ok(self.register(Type::List {
+                state,
+                item_type,
+            }))
+        }
+    }
+
+    pub fn function_type(&mut self, signature: FunctionSignature) -> TypeHandle {
+        if let Some(&handle) = self.function_handles.get(&signature) {
+            handle
+        }
+        else {
+            self.register(Type::Function {
+                signature,
+            })
+        }
+    }
+
+    pub fn action_type(&mut self, parameter_types: Box<[TypeHandle]>) -> TypeHandle {
+        if let Some(&handle) = self.action_handles.get(&parameter_types) {
+            handle
+        }
+        else {
+            self.register(Type::Action {
+                parameter_types,
+            })
+        }
+    }
+
+    pub fn union_type(&mut self, variants: Box<[TypeHandle]>) -> TypeHandle {
+        if let Some(&handle) = self.union_handles.get(&variants) {
+            handle
+        }
+        else {
+            self.register(Type::Union {
+                variants,
+            })
+        }
+    }
+
+    pub fn flatten_list(&self, handle: TypeHandle) -> (Option<ListState>, TypeHandle) {
+        match self.get(handle) {
+            &Type::List { state, item_type } => (Some(state), item_type),
+            _ => (None, handle)
+        }
+    }
+
+    pub fn unflatten_list(&mut self, state: Option<ListState>, item_type: TypeHandle) -> crate::Result<TypeHandle> {
+        match state {
+            Some(state) => self.list_type(state, item_type),
+            None => Ok(item_type),
+        }
+    }
+
+    pub fn expect_list_type(&self, handle: TypeHandle) -> crate::Result<TypeHandle> {
+        match self.get(handle) {
+            // TODO: require state to be IsList?
+            &Type::List { item_type, .. } => Ok(item_type),
+            _ => Err(Box::new(crate::Error {
+                kind: crate::ErrorKind::ExpectedListType {
+                    got_type: self.repr(handle),
                 },
                 span: None,
             }))
         }
     }
 
-    pub fn is_numeric_point_2d(&self) -> bool {
-        self.can_coerce_to(&Type::Point2D {
-            x_type: Box::new(Type::Real),
-            y_type: Box::new(Type::Real),
-        })
+    pub fn is_first_class_type(&self, handle: TypeHandle) -> bool {
+        self.get(handle).is_first_class(self)
     }
 
-    pub fn require_numeric_point_2d(&self) -> crate::Result<()> {
-        if self.is_numeric_point_2d() {
-            Ok(())
-        }
-        else {
-            Err(Box::new(crate::Error {
-                kind: crate::ErrorKind::ExpectedNumericPoint2Type {
-                    got_type: self.to_string(),
-                },
-                span: None,
-            }))
-        }
+    pub fn is_valid_var_type(&self, handle: TypeHandle) -> bool {
+        self.get(handle).is_valid_var(self)
     }
 
-    pub fn is_numeric_point_3d(&self) -> bool {
-        self.can_coerce_to(&Type::Point3D {
-            x_type: Box::new(Type::Real),
-            y_type: Box::new(Type::Real),
-            z_type: Box::new(Type::Real),
-        })
-    }
-
-    pub fn require_numeric_point_3d(&self) -> crate::Result<()> {
-        if self.is_numeric_point_3d() {
-            Ok(())
+    pub fn coerce(&mut self, from_type: TypeHandle, to_type: TypeHandle) -> Option<TypeHandle> {
+        if from_type == to_type {
+            return Some(from_type)
         }
-        else {
-            Err(Box::new(crate::Error {
-                kind: crate::ErrorKind::ExpectedNumericPoint3Type {
-                    got_type: self.to_string(),
-                },
-                span: None,
-            }))
-        }
-    }
 
-    pub fn is_numeric_or_point(&self) -> bool {
-        self.is_numeric() || self.is_numeric_point_2d() || self.is_numeric_point_3d()
-    }
+        let from_def = self.get(from_type);
+        let to_def = self.get(to_type);
 
-    pub fn require_numeric_or_point(&self) -> crate::Result<()> {
-        if self.is_numeric_or_point() {
-            Ok(())
+        if let Type::Union { variants } = to_def {
+            return variants
+                .clone()
+                .into_iter()
+                .find_map(|variant| self.coerce(from_type, variant))
         }
-        else {
-            Err(Box::new(crate::Error {
-                kind: crate::ErrorKind::ExpectedNumericOrPointType {
-                    got_type: self.to_string(),
-                },
-                span: None,
-            }))
+
+        match (from_def, to_def) {
+            (_, Type::Any) if from_def.is_first_class(self) => Some(from_type),
+            (Type::Any, _) if to_def.is_first_class(self) => Some(to_type),
+            (Type::Real, Type::Complex) => Some(to_type),
+            (Type::Int, Type::Real | Type::Complex) => Some(to_type),
+            (Type::Bool, Type::Int | Type::Real | Type::Complex) => Some(to_type),
+            (
+                &Type::Point2D { x_type: from_x, y_type: from_y },
+                &Type::Point2D { x_type: to_x, y_type: to_y },
+            ) => {
+                let x_type = self.coerce(from_x, to_x)?;
+                let y_type = self.coerce(from_y, to_y)?;
+                Some(self.point_2d_type(x_type, y_type).unwrap())
+            }
+            (
+                &Type::Point3D { x_type: from_x, y_type: from_y, z_type: from_z },
+                &Type::Point3D { x_type: to_x, y_type: to_y, z_type: to_z },
+            ) => {
+                let x_type = self.coerce(from_x, to_x)?;
+                let y_type = self.coerce(from_y, to_y)?;
+                let z_type = self.coerce(from_z, to_z)?;
+                Some(self.point_3d_type(x_type, y_type, z_type).unwrap())
+            }
+            (Type::Angle, Type::Real | Type::Complex) => Some(to_type),
+            (Type::DirectedAngle, Type::Real | Type::Complex) => Some(to_type),
+            (Type::Enum { .. }, Type::Int | Type::Real | Type::Complex) => Some(to_type),
+            _ => None
         }
     }
 
-    pub fn require_action(&self, min_arity: usize, argument_types: &[Self]) -> crate::Result<&[Self]> {
-        if let Self::Action { parameter_types } = self {
+    pub fn can_coerce(&self, from_type: TypeHandle, to_type: TypeHandle) -> bool {
+        if from_type == to_type {
+            return true
+        }
+
+        let from_def = self.get(from_type);
+        let to_def = self.get(to_type);
+
+        if let Type::Union { variants } = to_def {
+            return variants
+                .iter()
+                .any(|&variant| self.can_coerce(from_type, variant))
+        }
+
+        match (from_def, to_def) {
+            (_, Type::Any) => from_def.is_first_class(self),
+            (Type::Any, _) => to_def.is_first_class(self),
+            (Type::Real, Type::Complex) => true,
+            (Type::Int, Type::Real | Type::Complex) => true,
+            (Type::Bool, Type::Int | Type::Real | Type::Complex) => true,
+            (
+                &Type::Point2D { x_type: from_x, y_type: from_y },
+                &Type::Point2D { x_type: to_x, y_type: to_y },
+            ) => self.can_coerce(from_x, to_x) && self.can_coerce(from_y, to_y),
+            (
+                &Type::Point3D { x_type: from_x, y_type: from_y, z_type: from_z },
+                &Type::Point3D { x_type: to_x, y_type: to_y, z_type: to_z },
+            ) => self.can_coerce(from_x, to_x) && self.can_coerce(from_y, to_y) && self.can_coerce(from_z, to_z),
+            (Type::Angle, Type::Real | Type::Complex) => true,
+            (Type::DirectedAngle, Type::Real | Type::Complex) => true,
+            (Type::Enum { .. }, Type::Int | Type::Real | Type::Complex) => true,
+            _ => false
+        }
+    }
+
+    pub fn merge(&mut self, lhs_type: TypeHandle, rhs_type: TypeHandle) -> Option<TypeHandle> {
+        let (lhs_list, lhs_inner) = self.flatten_list(lhs_type);
+        let (rhs_list, rhs_inner) = self.flatten_list(rhs_type);
+
+        let merged_list = ListState::merge(lhs_list, rhs_list);
+        let merged_inner = self.merge_inner(lhs_inner, rhs_inner)?;
+
+        self.unflatten_list(merged_list, merged_inner).ok()
+    }
+
+    pub fn merge_inner(&mut self, lhs_type: TypeHandle, rhs_type: TypeHandle) -> Option<TypeHandle> {
+        if lhs_type == rhs_type {
+            return Some(lhs_type)
+        }
+
+        let lhs_def = self.get(lhs_type);
+        let rhs_def = self.get(rhs_type);
+
+        match (lhs_def, rhs_def) {
+            (Type::Any, _) if rhs_def.is_first_class(self) => Some(rhs_type),
+            (_, Type::Any) if lhs_def.is_first_class(self) => Some(lhs_type),
+            (
+                &Type::Point2D { x_type: lhs_x, y_type: lhs_y },
+                &Type::Point2D { x_type: rhs_x, y_type: rhs_y },
+            ) => {
+                let merged_x = self.merge(lhs_x, rhs_x)?;
+                let merged_y = self.merge(lhs_y, rhs_y)?;
+                self.point_2d_type(merged_x, merged_y).ok()
+            }
+            (
+                &Type::Point3D { x_type: lhs_x, y_type: lhs_y, z_type: lhs_z },
+                &Type::Point3D { x_type: rhs_x, y_type: rhs_y, z_type: rhs_z },
+            ) => {
+                let merged_x = self.merge(lhs_x, rhs_x)?;
+                let merged_y = self.merge(lhs_y, rhs_y)?;
+                let merged_z = self.merge(lhs_z, rhs_z)?;
+                self.point_3d_type(merged_x, merged_y, merged_z).ok()
+            }
+            _ => {
+                for numeric_type in [
+                    TypeHandle::BOOL,
+                    TypeHandle::INT,
+                    TypeHandle::REAL,
+                    TypeHandle::COMPLEX,
+                ] {
+                    if self.can_coerce(lhs_type, numeric_type) && self.can_coerce(rhs_type, numeric_type) {
+                        return Some(numeric_type)
+                    }
+                }
+                if self.can_coerce(lhs_type, rhs_type) {
+                    Some(rhs_type)
+                }
+                else if self.can_coerce(rhs_type, lhs_type) {
+                    Some(lhs_type)
+                }
+                else {
+                    None
+                }
+            }
+        }
+    }
+
+    pub fn expect_action_type(&self, handle: TypeHandle, min_arity: usize, argument_types: &[TypeHandle]) -> crate::Result<&[TypeHandle]> {
+        if let Type::Action { parameter_types } = self.get(handle) {
             if (min_arity ..= argument_types.len()).contains(&parameter_types.len())
                 && std::iter::zip(argument_types, parameter_types)
-                .all(|(argument_type, parameter_type)| {
-                    argument_type.can_coerce_to(parameter_type)
+                .all(|(&argument_type, &parameter_type)| {
+                    self.can_coerce(argument_type, parameter_type)
                 })
             {
                 return Ok(parameter_types)
@@ -460,177 +628,195 @@ impl Type {
                 expected_parameter_lists: (min_arity ..= argument_types.len())
                     .map(|arity| argument_types[..arity]
                         .iter()
-                        .map(ToString::to_string)
+                        .map(|&argument_type| self.repr(argument_type))
                         .collect())
                     .collect(),
-                got_type: self.to_string(),
+                got_type: self.repr(handle),
             },
             span: None,
         }))
     }
 
-    pub fn merge(&self, other: &Self) -> crate::Result<Self> {
-        let (self_list, self_inner) = self.flatten_list();
-        let (other_list, other_inner) = other.flatten_list();
-
-        let merged_inner = Self::merge_inner(self_inner, other_inner)?;
-
-        Ok(merged_inner.unflatten_list(ListState::merge(self_list, other_list)))
-    }
-
-    pub fn merge_inner(&self, other: &Self) -> crate::Result<Self> {
-        if self == other {
-            return Ok(self.clone());
-        }
-
-        match (self, other) {
-            (Self::Any, _) => Ok(other.clone()),
-            (_, Self::Any) => Ok(self.clone()),
-            (
-                Self::Point2D { x_type: self_x, y_type: self_y },
-                Self::Point2D { x_type: other_x, y_type: other_y },
-            ) => Ok(Self::Point2D {
-                x_type: Box::new(Self::merge(self_x, other_x)?),
-                y_type: Box::new(Self::merge(self_y, other_y)?),
-            }),
-            (
-                Self::Point3D { x_type: self_x, y_type: self_y, z_type: self_z },
-                Self::Point3D { x_type: other_x, y_type: other_y, z_type: other_z },
-            ) => Ok(Self::Point3D {
-                x_type: Box::new(Self::merge(self_x, other_x)?),
-                y_type: Box::new(Self::merge(self_y, other_y)?),
-                z_type: Box::new(Self::merge(self_z, other_z)?),
-            }),
-            _ => {
-                if self.can_coerce_to(&Self::Int) && other.can_coerce_to(&Self::Int) {
-                    Ok(Self::Int)
+    fn compute_repr(&self, definition: &Type) -> Rc<str> {
+        match *definition {
+            Type::Meta => "type".into(),
+            Type::Any => "any".into(),
+            Type::Complex => "complex".into(),
+            Type::Real => "real".into(),
+            Type::Int => "int".into(),
+            Type::Bool => "bool".into(),
+            Type::Color => "color".into(),
+            Type::Tone => "tone".into(),
+            Type::Distribution => "distribution".into(),
+            Type::Polygon => "polygon".into(),
+            Type::Segment => "segment".into(),
+            Type::Circle => "circle".into(),
+            Type::Arc => "arc".into(),
+            Type::Line => "line".into(),
+            Type::Ray => "ray".into(),
+            Type::Vector => "vector".into(),
+            Type::Angle => "angle".into(),
+            Type::DirectedAngle => "directed_angle".into(),
+            Type::Segment3D => "segment3d".into(),
+            Type::Triangle3D => "triangle3d".into(),
+            Type::Sphere3D => "sphere3d".into(),
+            Type::Vector3D => "vector3d".into(),
+            Type::Transformation => "transformation".into(),
+            Type::InternalBool => "internal_bool".into(),
+            Type::Str => "str".into(),
+            Type::Image => "image".into(),
+            Type::Point2D { x_type, y_type } => {
+                format!("({}, {})", self.repr(x_type), self.repr(y_type)).into()
+            }
+            Type::Point3D { x_type, y_type, z_type } => {
+                format!("({}, {}, {})", self.repr(x_type), self.repr(y_type), self.repr(z_type)).into()
+            }
+            Type::Enum { ref identifier, .. } => identifier.clone(),
+            Type::Function { ref signature } => {
+                let mut repr = String::from("function(");
+                match *signature.parameter_types {
+                    [] => {}
+                    [first, ref rest @ ..] => {
+                        repr.push_str(&self.repr(first));
+                        for &parameter_type in rest {
+                            repr.push_str(", ");
+                            repr.push_str(&self.repr(parameter_type));
+                        }
+                    }
                 }
-                else if self.can_coerce_to(&Self::Real) && other.can_coerce_to(&Self::Real) {
-                    Ok(Self::Real)
-                }
-                else if self.can_coerce_to(other) {
-                    Ok(other.clone())
-                }
-                else if other.can_coerce_to(self) {
-                    Ok(self.clone())
-                }
-                else {
-                    Err(Box::new(crate::Error {
-                        kind: crate::ErrorKind::CannotMergeTypes {
-                            type_1: self.to_string(),
-                            type_2: other.to_string(),
-                        },
-                        span: None,
-                    }))
+                repr.push_str("): ");
+                repr.push_str(&self.repr(signature.return_type));
+                repr.into()
+            }
+            Type::IntrinsicFunction => "intrinsic_function".into(),
+            Type::Action { ref parameter_types } => match **parameter_types {
+                [] => "action()".into(),
+                [first, ref rest @ ..] => {
+                    let mut repr = String::from("action(");
+                    repr.push_str(&self.repr(first));
+                    for &parameter_type in rest {
+                        repr.push_str(", ");
+                        repr.push_str(&self.repr(parameter_type));
+                    }
+                    repr.push_str(")");
+                    repr.into()
                 }
             }
-        }
-    }
-
-    pub fn broadcast(
-        result_override: Option<Self>,
-        arguments: impl IntoIterator<Item = (Self, Option<crate::Span>)>,
-    ) -> crate::Result<Self> {
-        let mut arguments = arguments.into_iter();
-        let first_argument = arguments.next().unwrap().0;
-
-        let mut result_type = arguments.try_fold(
-            first_argument,
-            |current_type, (next_type, span)| {
-                current_type.merge(&next_type)
-                    .map_err(|error| error.with_span(span))
-            },
-        )?;
-
-        if let Some(result_override) = result_override {
-            result_type = result_override.unflatten_list(result_type.list_state());
-        }
-
-        Ok(result_type)
-    }
-
-    pub fn value_range(&self) -> Option<(Option<Value>, Option<Value>, Option<Value>)> {
-        match self {
-            Self::Real => Some((None, None, None)),
-            Self::Int | Self::Enum { .. } => Some((
-                None,
-                None,
-                Some(ValueKind::Int(1).into()),
-            )),
-            Self::Bool => Some((
-                Some(ValueKind::Bool(false).into()),
-                Some(ValueKind::Bool(true).into()),
-                Some(ValueKind::Bool(true).into()),
-            )),
-            _ => None
+            Type::List { state, item_type } => match state {
+                ListState::IsList => format!("[{}]", self.repr(item_type)).into(),
+                ListState::MaybeList => format!("{}+", self.repr(item_type)).into(),
+            }
+            Type::Union { ref variants } => match **variants {
+                [] => "empty_union".into(),
+                [first, ref rest @ ..] => {
+                    let mut repr = String::from("(");
+                    repr.push_str(&self.repr(first));
+                    for &variant in rest {
+                        repr.push_str(" | ");
+                        repr.push_str(&self.repr(variant));
+                    }
+                    repr.push_str(")");
+                    repr.into()
+                }
+            }
         }
     }
 }
 
-impl std::fmt::Display for Type {
-    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
-        match self {
-            Self::Meta { .. } => write!(f, "type"),
-            Self::Any => write!(f, "any"),
-            Self::Complex => write!(f, "complex"),
-            Self::Real => write!(f, "real"),
-            Self::Int => write!(f, "int"),
-            Self::Bool => write!(f, "bool"),
-            Self::Color => write!(f, "color"),
-            Self::Tone => write!(f, "tone"),
-            Self::Distribution => write!(f, "distribution"),
-            Self::Polygon => write!(f, "polygon"),
-            Self::Segment => write!(f, "segment"),
-            Self::Circle => write!(f, "circle"),
-            Self::Arc => write!(f, "arc"),
-            Self::Line => write!(f, "line"),
-            Self::Ray => write!(f, "ray"),
-            Self::Vector => write!(f, "vector"),
-            Self::Angle => write!(f, "angle"),
-            Self::DirectedAngle => write!(f, "directed_angle"),
-            Self::Segment3D => write!(f, "segment3d"),
-            Self::Triangle3D => write!(f, "triangle3d"),
-            Self::Sphere3D => write!(f, "sphere3d"),
-            Self::Vector3D => write!(f, "vector3d"),
-            Self::Transformation => write!(f, "transformation"),
-            Self::InternalBool => write!(f, "internal_bool"),
-            Self::Str => write!(f, "str"),
-            Self::Image => write!(f, "image"),
-            Self::Point2D { x_type, y_type } => {
-                write!(f, "({x_type}, {y_type})")
-            }
-            Self::Point3D { x_type, y_type, z_type } => {
-                write!(f, "({x_type}, {y_type}, {z_type})")
-            }
-            Self::Enum { type_identifier } => {
-                write!(f, "{type_identifier}")
-            }
-            Self::UserFunction { signature } => signature.fmt(f),
-            Self::IntrinsicFunction { .. } => write!(f, "intrinsic_function"),
-            Self::Action { parameter_types } => match parameter_types.as_ref() {
-                [] => write!(f, "action()"),
-                [first, rest @ ..] => {
-                    write!(f, "action({first}")?;
-                    for parameter_type in rest {
-                        write!(f, ", {parameter_type}")?;
-                    }
-                    Ok(())
-                }
-            }
-            Self::List { state, item_type } => match state {
-                ListState::IsList => write!(f, "[{item_type}]"),
-                ListState::MaybeList => write!(f, "{item_type}+"),
-            }
-            Self::Union { variants } => match variants.as_ref() {
-                [] => write!(f, "empty_union"),
-                [first, rest @ ..] => {
-                    write!(f, "({first}")?;
-                    for variant in rest {
-                        write!(f, " | {variant}")?;
-                    }
-                    write!(f, ")")
+macro_rules! known_type_handles {
+    ($($handle:ident $(@ $identifier:literal)? => ($($rest:tt)+)),* $(,)?) => {
+        known_type_handles!(@handle_consts 0usize, $($handle)*);
+
+        impl TypeHandle {
+            pub fn find_primitive(identifier: &str) -> Option<Self> {
+                match identifier {
+                    $($($identifier => Some(Self::$handle),)?)*
+                    _ => None
                 }
             }
         }
-    }
+
+        pub const KNOWN_TYPES: [LazyConst<Type>; KNOWN_TYPE_COUNT] = [
+            $(known_type_handles!(@lazy_const $($rest)+),)*
+        ];
+    };
+    // I wish I could use ${index(0)} and ${count(0)} and have it be stable.
+    (@handle_consts $index:expr, $handle:ident $($rest:ident)*) => {
+        impl TypeHandle {
+            pub const $handle: Self = Self::new($index);
+        }
+        known_type_handles!(@handle_consts $index + 1usize, $($rest)*);
+    };
+    (@handle_consts $count:expr,) => {
+        const KNOWN_TYPE_COUNT: usize = $count;
+    };
+    // I wish I could use into() in a const context and have it be stable.
+    (@lazy_const || $definition:expr) => {
+        LazyConst::Deferred(|| $definition)
+    };
+    (@lazy_const $definition:expr) => {
+        LazyConst::Immediate($definition)
+    };
+}
+
+known_type_handles! {
+    META => (Type::Meta),
+    ANY @ "any" => (Type::Any),
+    COMPLEX @ "complex" => (Type::Complex),
+    REAL @ "real" => (Type::Real),
+    INT @ "int" => (Type::Int),
+    BOOL @ "bool" => (Type::Bool),
+    COLOR @ "color" => (Type::Color),
+    TONE @ "tone" => (Type::Tone),
+    DISTRIBUTION @ "distribution" => (Type::Distribution),
+    POLYGON @ "polygon" => (Type::Polygon),
+    SEGMENT @ "segment" => (Type::Segment),
+    CIRCLE @ "circle" => (Type::Circle),
+    ARC @ "arc" => (Type::Arc),
+    LINE @ "line" => (Type::Line),
+    RAY @ "ray" => (Type::Ray),
+    VECTOR @ "vector" => (Type::Vector),
+    ANGLE @ "angle" => (Type::Angle),
+    DIRECTED_ANGLE @ "directed_angle" => (Type::DirectedAngle),
+    SEGMENT_3D @ "segment3d" => (Type::Segment3D),
+    TRIANGLE_3D @ "triangle3d" => (Type::Triangle3D),
+    SPHERE_3D @ "sphere3d" => (Type::Sphere3D),
+    VECTOR_3D @ "vector3d" => (Type::Vector3D),
+    TRANSFORMATION @ "transformation" => (Type::Transformation),
+    INTERNAL_BOOL @ "internal_bool" => (Type::InternalBool),
+    STR @ "str" => (Type::Str),
+    IMAGE @ "image" => (Type::Image),
+    INTRINSIC_FUNCTION => (Type::IntrinsicFunction),
+    REAL_POINT_2D => (Type::Point2D {
+        x_type: TypeHandle::REAL,
+        y_type: TypeHandle::REAL,
+    }),
+    REAL_POINT_3D => (Type::Point3D {
+        x_type: TypeHandle::REAL,
+        y_type: TypeHandle::REAL,
+        z_type: TypeHandle::REAL,
+    }),
+    REAL_OR_REAL_POINT => (|| Type::union([
+        TypeHandle::REAL,
+        TypeHandle::REAL_POINT_2D,
+        TypeHandle::REAL_POINT_3D,
+    ])),
+    ANY_TRANSFORMABLE => (|| Type::union([
+        TypeHandle::POLYGON,
+        TypeHandle::SEGMENT,
+        TypeHandle::CIRCLE,
+        TypeHandle::ARC,
+        TypeHandle::LINE,
+        TypeHandle::RAY,
+        TypeHandle::VECTOR,
+        TypeHandle::ANGLE,
+        TypeHandle::DIRECTED_ANGLE,
+        TypeHandle::REAL_POINT_2D,
+    ])),
+    ANY_LINE_LIKE => (|| Type::union([
+        TypeHandle::SEGMENT,
+        TypeHandle::LINE,
+        TypeHandle::RAY,
+        TypeHandle::VECTOR,
+    ])),
 }

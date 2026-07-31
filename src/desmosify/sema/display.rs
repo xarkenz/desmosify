@@ -1,15 +1,15 @@
 use std::rc::Rc;
-use crate::sema::values::{ActionValue, Value};
+use crate::sema::values::{ActionValue, ValueRegistryEntry};
 
 #[derive(Clone, PartialEq, Debug)]
 pub struct ImageValue {
     pub url: Rc<str>,
     pub name: Rc<str>,
-    pub center: Value,
-    pub width: Value,
-    pub height: Value,
-    pub opacity: Value,
-    pub angle: Value,
+    pub center: ValueRegistryEntry,
+    pub width: ValueRegistryEntry,
+    pub height: ValueRegistryEntry,
+    pub opacity: ValueRegistryEntry,
+    pub angle: ValueRegistryEntry,
     pub background: bool,
 }
 
@@ -228,11 +228,11 @@ impl LineStyle {
 #[derive(Clone, Debug)]
 pub enum ProgramDisplayAttributeKind {
     Color {
-        value: Value,
+        value: ValueRegistryEntry,
     },
     Point {
-        opacity: Option<Value>,
-        size: Option<Value>,
+        opacity: Option<ValueRegistryEntry>,
+        size: Option<ValueRegistryEntry>,
         style: PointStyle,
         outline: bool,
     },
@@ -241,19 +241,19 @@ pub enum ProgramDisplayAttributeKind {
     },
     Label {
         text: Rc<str>,
-        opacity: Option<Value>,
-        size: Option<Value>,
-        angle: Option<Value>,
+        opacity: Option<ValueRegistryEntry>,
+        size: Option<ValueRegistryEntry>,
+        angle: Option<ValueRegistryEntry>,
         orientation: LabelOrientation,
         outline: bool,
     },
     Line {
-        opacity: Option<Value>,
-        width: Option<Value>,
+        opacity: Option<ValueRegistryEntry>,
+        width: Option<ValueRegistryEntry>,
         style: LineStyle,
     },
     Fill {
-        opacity: Option<Value>,
+        opacity: Option<ValueRegistryEntry>,
     },
     Click {
         action: ActionValue,
@@ -277,7 +277,7 @@ pub struct ProgramDisplayAttribute {
 
 #[derive(Clone, Debug)]
 pub struct ProgramDisplayElement {
-    pub value: Value,
+    pub value: ValueRegistryEntry,
     pub span: Option<crate::Span>,
     pub attributes: Box<[ProgramDisplayAttribute]>,
 }

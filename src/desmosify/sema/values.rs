@@ -1,55 +1,34 @@
+use std::collections::HashMap;
+use std::num::NonZeroUsize;
 use std::rc::Rc;
 use crate::ast::RangeKind;
 use crate::sema::display::ImageValue;
 use crate::sema::intrinsic::IntrinsicFunction;
-use crate::sema::types::{ListState, Type};
+use crate::sema::types::{ListState, Type, TypeHandle, TypeRegistry};
+use crate::util::LazyConst;
 
-#[derive(Copy, Clone, PartialEq, Debug)]
+#[derive(Copy, Clone, PartialEq, Eq, Debug)]
 pub enum MathematicalConstant {
     Pi,
     Tau,
     E,
 }
 
-#[derive(Clone, PartialEq)]
-pub struct GlobalReference {
-    pub identifier: Rc<str>,
-    pub value_type: Type,
-}
-
-impl std::fmt::Debug for GlobalReference {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "GlobalReference<{}>({})", self.value_type, self.identifier)
-    }
-}
-
-#[derive(Clone, PartialEq)]
+#[derive(Clone, Debug)]
 pub struct ActionReference {
     pub identifier: Rc<str>,
-    pub action_type: Type,
+    pub action_type: TypeHandle,
 }
 
-impl std::fmt::Debug for ActionReference {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "ActionReference({})", self.identifier)
-    }
-}
-
-#[derive(Clone, PartialEq)]
+#[derive(Clone, Debug)]
 pub struct LocalReference {
     pub id: u64,
-    pub value_type: Type,
+    pub value: Option<ValueHandle>,
 }
 
-impl std::fmt::Debug for LocalReference {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "LocalReference<{}>({})", self.value_type, self.id)
-    }
-}
-
-#[derive(Copy, Clone, PartialEq, Debug)]
+#[derive(Copy, Clone, PartialEq, Eq, Debug)]
 pub enum UnaryKind {
-    AssumeType,
+    Alias,
     Positive,
     Negative,
     LogicalNot,
@@ -113,7 +92,7 @@ pub enum UnaryKind {
     BoolFromInternal,
 }
 
-#[derive(Copy, Clone, PartialEq, Debug)]
+#[derive(Copy, Clone, PartialEq, Eq, Debug)]
 pub enum BinaryKind {
     Exponent,
     Multiply,
@@ -179,7 +158,7 @@ pub enum BinaryKind {
     MidpointOfPoints3D,
 }
 
-#[derive(Copy, Clone, PartialEq, Debug)]
+#[derive(Copy, Clone, PartialEq, Eq, Debug)]
 pub enum TernaryKind {
     /// first = x, second = y, third = z
     Point3D,
@@ -204,7 +183,7 @@ pub enum TernaryKind {
     Oklch,
 }
 
-#[derive(Copy, Clone, PartialEq, Debug)]
+#[derive(Copy, Clone, PartialEq, Eq, Debug)]
 pub enum InequalityKind {
     LessThan,
     LessEqual,
@@ -212,7 +191,7 @@ pub enum InequalityKind {
     GreaterEqual,
 }
 
-#[derive(Copy, Clone, PartialEq, Debug)]
+#[derive(Copy, Clone, PartialEq, Eq, Debug)]
 pub enum ReducerKind {
     Lcm,
     Gcd,
@@ -231,7 +210,7 @@ pub enum ReducerKind {
     ComposeTransforms2D,
 }
 
-#[derive(Copy, Clone, PartialEq, Debug)]
+#[derive(Copy, Clone, PartialEq, Eq, Debug)]
 pub enum DoubleReducerKind {
     Cov,
     Covp,
@@ -239,98 +218,61 @@ pub enum DoubleReducerKind {
     Spearman,
 }
 
-#[derive(Copy, Clone, PartialEq, Debug)]
+#[derive(Copy, Clone, PartialEq, Eq, Debug)]
 pub enum ParameterizedReducerKind {
     Quartile,
     Quantile,
     Tscore,
 }
 
-#[derive(Clone, PartialEq)]
+#[derive(Clone, Debug)]
 pub enum IndexKind {
     Single {
-        index: Box<Value>,
+        index: ValueHandle,
     },
     Range {
         kind: RangeKind,
-        from_index: Box<Value>,
-        to_index: Box<Value>,
-        step: Box<Value>,
+        from_index: ValueHandle,
+        to_index: ValueHandle,
+        step: ValueHandle,
     },
     RangeFrom {
-        from_index: Box<Value>,
-        step: Box<Value>,
+        from_index: ValueHandle,
+        step: ValueHandle,
     },
     RangeTo {
         kind: RangeKind,
-        to_index: Box<Value>,
+        to_index: ValueHandle,
     },
 }
 
-impl IndexKind {
-    pub fn list_state(&self) -> Option<ListState> {
-        match self {
-            Self::Single { index } => index.get_type().list_state(),
-            Self::Range { .. } |
-            Self::RangeFrom { .. } |
-            Self::RangeTo { .. } => Some(ListState::IsList),
-        }
-    }
-}
-
-impl std::fmt::Debug for IndexKind {
-    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
-        match self {
-            IndexKind::Single { index } => {
-                f.debug_tuple("Single").field(index).finish()
-            }
-            IndexKind::Range { kind, from_index, to_index, step } => {
-                write!(f, "Range{kind:?}")?;
-                f.debug_tuple("").field(from_index).field(to_index).field(step).finish()
-            }
-            IndexKind::RangeFrom { from_index, step } => {
-                f.debug_tuple("RangeFrom").field(from_index).field(step).finish()
-            }
-            IndexKind::RangeTo { kind, to_index } => {
-                write!(f, "RangeTo{kind:?}")?;
-                f.debug_tuple("").field(to_index).finish()
-            }
-        }
-    }
-}
-
-#[derive(Clone, PartialEq)]
+#[derive(Clone, Debug)]
 pub struct ListMapLoop {
     pub local: LocalReference,
     pub local_span: Option<crate::Span>,
-    pub list: Value,
+    pub list: ValueHandle,
 }
 
-impl std::fmt::Debug for ListMapLoop {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_tuple("ListMapLoop").field(&self.local).field(&self.list).finish()
-    }
-}
-
-#[derive(Clone, PartialEq)]
-pub enum ValueKind {
-    Type {
-        identifier: Rc<str>,
-    },
-    Undefined(Type),
-    Infinity(Type),
+#[derive(Clone, Default, Debug)]
+pub enum Value {
+    /// Indicates a value that is currently unknown. This is distinct from `Undefined`, which is a
+    /// known value. This is used as a placeholder for the value of a global variable before it is
+    /// fully interpreted.
+    #[default]
+    Opaque,
+    Type(TypeHandle),
+    Undefined,
+    Infinity,
     Real(f64),
     Mathematical(MathematicalConstant),
     Int(i64),
     Bool(bool),
     EnumVariant {
-        type_identifier: Rc<str>,
-        variant_ordinal: i64,
+        ordinal: i64,
     },
     Str(Rc<str>),
-    Image(Box<ImageValue>, Option<ListState>),
+    Image(Box<ImageValue>),
     IntrinsicFunction(&'static IntrinsicFunction),
-    Global(GlobalReference),
     Action(ActionReference),
     Local(LocalReference),
     ViewportWidth,
@@ -339,102 +281,86 @@ pub enum ValueKind {
     ClickIndex,
     Unary {
         kind: UnaryKind,
-        operand: Box<Value>,
-        result_type: Type,
+        operand: ValueHandle,
     },
     Binary {
         kind: BinaryKind,
-        lhs: Box<Value>,
-        rhs: Box<Value>,
-        result_type: Type,
+        lhs: ValueHandle,
+        rhs: ValueHandle,
     },
     Ternary {
         kind: TernaryKind,
-        first: Box<Value>,
-        second: Box<Value>,
-        third: Box<Value>,
-        result_type: Type,
+        first: ValueHandle,
+        second: ValueHandle,
+        third: ValueHandle,
     },
     InequalityChain {
-        lhs: Box<Value>,
-        chain: Box<[(InequalityKind, Value)]>,
-        result_type: Type,
+        lhs: ValueHandle,
+        chain: Box<[(InequalityKind, ValueHandle)]>,
     },
     Reducer {
         kind: ReducerKind,
-        list: Box<Value>,
-        result_type: Type,
+        list: ValueHandle,
     },
     ArgumentsReducer {
         kind: ReducerKind,
-        arguments: Box<[Value]>,
-        result_type: Type,
+        arguments: Box<[ValueHandle]>,
     },
     DoubleReducer {
         kind: DoubleReducerKind,
-        list_1: Box<Value>,
-        list_2: Box<Value>,
-        result_type: Type,
+        lhs_list: ValueHandle,
+        rhs_list: ValueHandle,
     },
     ParameterizedReducer {
         kind: ParameterizedReducerKind,
-        list: Box<Value>,
-        parameter: Box<Value>,
-        result_type: Type,
+        list: ValueHandle,
+        parameter: ValueHandle,
     },
     Random {
-        source: Option<Box<Value>>,
-        sample_count: Option<Box<Value>>,
-        result_type: Type,
+        source: Option<ValueHandle>,
+        sample_count: Option<ValueHandle>,
     },
     RandomSeeded {
-        source: Option<Box<Value>>,
-        sample_count: Box<Value>,
-        seed: Box<Value>,
-        result_type: Type,
+        source: Option<ValueHandle>,
+        sample_count: ValueHandle,
+        seed: ValueHandle,
     },
     Join {
-        values: Box<[Value]>,
-        result_type: Type,
+        values: Box<[ValueHandle]>,
     },
     List {
-        items: Box<[Value]>,
-        item_type: Type,
+        items: Box<[ValueHandle]>,
     },
     ListRange {
         kind: RangeKind,
-        start: Box<Value>,
-        end: Box<Value>,
-        step: Box<Value>,
+        start: ValueHandle,
+        end: ValueHandle,
+        step: ValueHandle,
         item_type: Type,
     },
     ListFill {
-        value: Box<Value>,
-        count: Box<Value>,
+        value: ValueHandle,
+        count: ValueHandle,
     },
     ListMap {
         loops: Box<[ListMapLoop]>,
-        value: Box<Value>,
+        value: ValueHandle,
     },
     ListFilter {
-        list: Box<Value>,
-        condition: Box<Value>,
-        item_type: Type,
+        list: ValueHandle,
+        condition: ValueHandle,
     },
     Index {
-        list: Box<Value>,
+        list: ValueHandle,
         kind: IndexKind,
-        item_type: Type,
     },
     Conditional {
-        condition_consequents: Box<[(Value, Value)]>,
-        alternative: Box<Value>,
-        result_type: Type,
+        condition_consequents: Box<[(ValueHandle, ValueHandle)]>,
+        alternative: ValueHandle,
     },
     UserFunctionCall {
-        function: Box<Value>,
-        arguments: Box<[Value]>,
-        return_type: Type,
+        function: ValueHandle,
+        arguments: Box<[ValueHandle]>,
     },
     InlineAction {
         parameters: Box<[LocalReference]>,
@@ -442,14 +368,7 @@ pub enum ValueKind {
     },
 }
 
-impl ValueKind {
-    pub fn with_span(self, span: Option<crate::Span>) -> Value {
-        Value {
-            kind: self,
-            span,
-        }
-    }
-
+impl Value {
     pub fn as_const_bool(&self) -> Option<bool> {
         match self {
             Self::Bool(value) => Some(*value),
@@ -464,124 +383,6 @@ impl ValueKind {
         }
     }
 
-    pub fn get_type(&self) -> Type {
-        match self {
-            Self::Type { identifier } => {
-                Type::Meta {
-                    identifier: identifier.clone(),
-                }
-            }
-            Self::Undefined(value_type) => {
-                value_type.clone()
-            }
-            Self::Infinity(value_type) => {
-                value_type.clone()
-            }
-            Self::Real(..) |
-            Self::Mathematical { .. } |
-            Self::ViewportWidth |
-            Self::ViewportHeight |
-            Self::TickerDt => {
-                Type::Real
-            }
-            Self::Int(..) |
-            Self::ClickIndex => {
-                Type::Int
-            }
-            Self::Bool(..) => {
-                Type::Bool
-            }
-            Self::EnumVariant { type_identifier, .. } => {
-                Type::Enum {
-                    type_identifier: type_identifier.clone(),
-                }
-            }
-            Self::Str(..) => {
-                Type::Str
-            }
-            Self::Image(_, list_state) => {
-                Type::Image.unflatten_list(*list_state)
-            }
-            Self::IntrinsicFunction(function) => {
-                Type::IntrinsicFunction(*function)
-            }
-            Self::Global(reference) => {
-                reference.value_type.clone()
-            }
-            Self::Action(reference) => {
-                reference.action_type.clone()
-            }
-            Self::Local(reference) => {
-                reference.value_type.clone()
-            }
-            Self::Unary { result_type, .. } => {
-                result_type.clone()
-            }
-            Self::Binary { result_type, .. } => {
-                result_type.clone()
-            }
-            Self::Ternary { result_type, .. } => {
-                result_type.clone()
-            }
-            Self::InequalityChain { result_type, .. } => {
-                result_type.clone()
-            }
-            Self::Reducer { result_type, .. } => {
-                result_type.clone()
-            }
-            Self::ArgumentsReducer { result_type, .. } => {
-                result_type.clone()
-            }
-            Self::DoubleReducer { result_type, .. } => {
-                result_type.clone()
-            }
-            Self::ParameterizedReducer { result_type, .. } => {
-                result_type.clone()
-            }
-            Self::Join { result_type, .. } => {
-                result_type.clone()
-            }
-            Self::Random { result_type, .. } => {
-                result_type.clone()
-            }
-            Self::RandomSeeded { result_type, .. } => {
-                result_type.clone()
-            }
-            Self::List { item_type, .. } => {
-                item_type.clone().into_list(ListState::IsList)
-            }
-            Self::ListRange { item_type, .. } => {
-                item_type.clone().into_list(ListState::IsList)
-            }
-            Self::ListFill { value, .. } => {
-                value.get_type().into_list(ListState::IsList)
-            }
-            Self::ListMap { value, .. } => {
-                value.get_type().into_list(ListState::IsList)
-            }
-            Self::ListFilter { item_type, .. } => {
-                item_type.clone().into_list(ListState::IsList)
-            }
-            Self::Index { kind: operation, item_type, .. } => {
-                item_type.clone().unflatten_list(operation.list_state())
-            }
-            Self::Conditional { result_type, .. } => {
-                result_type.clone()
-            }
-            Self::UserFunctionCall { return_type, .. } => {
-                return_type.clone()
-            }
-            Self::InlineAction { parameters, .. } => {
-                Type::Action {
-                    parameter_types: parameters
-                        .iter()
-                        .map(|local| local.value_type.clone())
-                        .collect(),
-                }
-            }
-        }
-    }
-
     pub fn is_zero(&self) -> bool {
         match *self {
             Self::Real(value) => value == 0.0,
@@ -593,7 +394,7 @@ impl ValueKind {
 
     pub fn is_one(&self) -> bool {
         match *self {
-            Self::Real(value) => value == 1.0,
+            Self::Real(value) => value.signum() == 1.0,
             Self::Int(value) => value == 1,
             Self::Bool(value) => value,
             _ => false
@@ -602,397 +403,101 @@ impl ValueKind {
 
     pub fn is_undefined(&self) -> bool {
         match *self {
-            Self::Undefined(..) => true,
+            Self::Undefined => true,
             Self::Real(value) => value.is_nan(),
             _ => false
         }
     }
-
-    pub fn assume_type(self, value_type: Type, span: Option<crate::Span>) -> Self {
-        if let Self::Unary { kind: UnaryKind::AssumeType, operand, .. } = self {
-            Self::Unary {
-                kind: UnaryKind::AssumeType,
-                operand,
-                result_type: value_type,
-            }
-        }
-        else if value_type == self.get_type() || value_type == Type::Any {
-            self
-        }
-        else {
-            Self::Unary {
-                kind: UnaryKind::AssumeType,
-                operand: Box::new(self.with_span(span)),
-                result_type: value_type,
-            }
-        }
-    }
-
-    pub fn coerce_to(self, target_type: &Type, allow_list: bool, span: Option<crate::Span>) -> crate::Result<Self> {
-        let self_type = self.get_type();
-        let (self_list, self_type) = self_type.flatten_list();
-        let (target_list, target_type) = target_type.flatten_list();
-
-        let mismatched_types_error = || Box::new(crate::Error {
-            kind: crate::ErrorKind::MismatchedTypes {
-                expected: target_type.clone().unflatten_list(target_list).to_string(),
-                got: self_type.clone().unflatten_list(self_list).to_string(),
-            },
-            span,
-        });
-
-        if let Type::Union { variants } = target_type {
-            return variants
-                .iter()
-                .find_map(|variant_type| {
-                    self.clone().coerce_to(variant_type, allow_list, span).ok()
-                })
-                .ok_or_else(mismatched_types_error)
-        }
-
-        if !ListState::can_coerce(self_list, target_list, allow_list) {
-            Err(mismatched_types_error())
-        }
-        else if let Some(coerced_type) = self_type.clone().coerce_to(target_type) {
-            let result_type = coerced_type.clone().unflatten_list(self_list);
-            let coerced = match (self, &coerced_type) {
-                (Self::Undefined(..), _) => {
-                    Self::Undefined(result_type.clone())
-                }
-                (Self::Infinity(..), _) => {
-                    Self::Infinity(result_type.clone())
-                }
-                (Self::Int(value), Type::Real) => {
-                    Self::Real(value as f64)
-                }
-                (Self::Bool(value), Type::Int) => {
-                    Self::Int(value as i64)
-                }
-                (Self::Bool(value), Type::Real) => {
-                    Self::Real(value as i32 as f64)
-                }
-                (Self::EnumVariant { variant_ordinal, .. }, Type::Int) => {
-                    Self::Int(variant_ordinal)
-                }
-                (Self::EnumVariant { variant_ordinal, .. }, Type::Real) => {
-                    Self::Real(variant_ordinal as f64)
-                }
-                (
-                    Self::Binary { kind: BinaryKind::Point2D, lhs, rhs, .. },
-                    Type::Point2D { x_type, y_type },
-                ) => {
-                    Self::Binary {
-                        kind: BinaryKind::Point2D,
-                        lhs: Box::new(lhs.coerce_to(x_type, allow_list)?),
-                        rhs: Box::new(rhs.coerce_to(y_type, allow_list)?),
-                        result_type: coerced_type.clone(),
-                    }
-                }
-                (
-                    Self::Ternary { kind: TernaryKind::Point3D, first, second, third, .. },
-                    Type::Point3D { x_type, y_type, z_type },
-                ) => {
-                    Self::Ternary {
-                        kind: TernaryKind::Point3D,
-                        first: Box::new(first.coerce_to(x_type, allow_list)?),
-                        second: Box::new(second.coerce_to(y_type, allow_list)?),
-                        third: Box::new(third.coerce_to(z_type, allow_list)?),
-                        result_type: coerced_type.clone(),
-                    }
-                }
-                (other, _) => other
-            };
-
-            Ok(coerced.assume_type(result_type, span))
-        }
-        else {
-            Err(mismatched_types_error())
-        }
-    }
-
-    pub fn coerce_to_arithmetic(mut self, constraint: fn(&Type) -> crate::Result<()>, span: Option<crate::Span>) -> crate::Result<Self> {
-        let (self_list, self_type) = self.get_type().into_flatten_list();
-
-        constraint(&self_type).map_err(|error| error.with_span(span))?;
-
-        let result_type = match &self_type {
-            Type::Bool => {
-                self = self.coerce_to(&Type::Int, true, span)?;
-                Type::Int
-            }
-            _ => self_type
-        };
-
-        Ok(self.assume_type(result_type.unflatten_list(self_list), span))
-    }
 }
 
-impl std::fmt::Debug for ValueKind {
-    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
-        let self_type = self.get_type();
-        match self {
-            Self::Type { identifier } => {
-                write!(f, "Type<{identifier}>")
-            }
-            Self::Undefined(..) => {
-                write!(f, "Undefined<{self_type}>")
-            }
-            Self::Infinity(..) => {
-                write!(f, "Infinity<{self_type}>")
-            }
-            Self::Real(value) => {
-                f.debug_tuple("Real").field(value).finish()
-            }
-            Self::Mathematical(kind) => {
-                kind.fmt(f)
-            }
-            Self::Int(value) => {
-                f.debug_tuple("Int").field(value).finish()
-            }
-            Self::Bool(value) => {
-                f.debug_tuple("Bool").field(value).finish()
-            }
-            Self::EnumVariant { variant_ordinal, .. } => {
-                write!(f, "EnumVariant<{self_type}>")?;
-                f.debug_tuple("").field(variant_ordinal).finish()
-            }
-            Self::Str(value) => {
-                f.debug_tuple("Str").field(value).finish()
-            }
-            Self::Image(image, _) => {
-                image.fmt(f)
-            }
-            Self::IntrinsicFunction(function) => {
-                function.fmt(f)
-            }
-            Self::Global(reference) => {
-                reference.fmt(f)
-            }
-            Self::Action(reference) => {
-                reference.fmt(f)
-            }
-            Self::Local(reference) => {
-                reference.fmt(f)
-            }
-            Self::ViewportWidth => {
-                write!(f, "ViewportWidth")
-            }
-            Self::ViewportHeight => {
-                write!(f, "ViewportHeight")
-            }
-            Self::TickerDt => {
-                write!(f, "TickerDt")
-            }
-            Self::ClickIndex => {
-                write!(f, "ClickIndex")
-            }
-            Self::Unary { kind, operand, .. } => {
-                write!(f, "{kind:?}<{self_type}>")?;
-                f.debug_tuple("").field(operand).finish()
-            }
-            Self::Binary { kind, lhs, rhs, .. } => {
-                write!(f, "{kind:?}<{self_type}>")?;
-                f.debug_tuple("").field(lhs).field(rhs).finish()
-            }
-            Self::InequalityChain { lhs, chain, .. } => {
-                write!(f, "InequalityChain<{self_type}>")?;
-                let mut tuple = f.debug_tuple("");
-                tuple.field(lhs);
-                for (kind, rhs) in chain {
-                    tuple.field(kind).field(rhs);
-                }
-                tuple.finish()
-            }
-            Self::Reducer { kind, list, .. } => {
-                write!(f, "{kind:?}<{self_type}>")?;
-                f.debug_tuple("").field(list).finish()
-            }
-            Self::ArgumentsReducer { kind, arguments, .. } => {
-                write!(f, "{kind:?}<{self_type}>")?;
-                f.debug_tuple("").field(arguments).finish()
-            }
-            Self::DoubleReducer { kind, list_1, list_2, .. } => {
-                write!(f, "{kind:?}<{self_type}>")?;
-                f.debug_tuple("").field(list_1).field(list_2).finish()
-            }
-            Self::ParameterizedReducer { kind, list, parameter, .. } => {
-                write!(f, "{kind:?}<{self_type}>")?;
-                f.debug_tuple("").field(list).field(parameter).finish()
-            }
-            Self::Ternary { kind, first: value_1, second: value_2, third: value_3, .. } => {
-                write!(f, "{kind:?}<{self_type}>")?;
-                f.debug_tuple("").field(value_1).field(value_2).field(value_3).finish()
-            }
-            Self::Join { values, .. } => {
-                write!(f, "Join<{self_type}>")?;
-                values
-                    .iter()
-                    .fold(
-                        &mut f.debug_tuple(""),
-                        |tuple, argument| tuple.field(argument),
-                    )
-                    .finish()
-            }
-            Self::Random { source, sample_count, .. } => {
-                write!(f, "Random<{self_type}>")?;
-                let mut tuple = f.debug_tuple("");
-                if let Some(source) = source {
-                    tuple.field(source);
-                }
-                if let Some(sample_count) = sample_count {
-                    tuple.field(sample_count);
-                }
-                tuple.finish()
-            }
-            Self::RandomSeeded { source, sample_count, seed, .. } => {
-                write!(f, "Random<{self_type}>")?;
-                let mut tuple = f.debug_tuple("");
-                if let Some(source) = source {
-                    tuple.field(source);
-                }
-                tuple.field(sample_count).field(seed).finish()
-            }
-            Self::List { items, .. } => {
-                write!(f, "List<{self_type}>")?;
-                items
-                    .iter()
-                    .fold(
-                        &mut f.debug_tuple(""),
-                        |tuple, item| tuple.field(item),
-                    )
-                    .finish()
-            }
-            Self::ListRange { kind, start, end, step, .. } => {
-                write!(f, "ListRange{kind:?}<{self_type}>")?;
-                f.debug_tuple("").field(start).field(end).field(step).finish()
-            }
-            Self::ListFill { value, count } => {
-                write!(f, "ListFill<{self_type}>")?;
-                f.debug_tuple("").field(value).field(count).finish()
-            }
-            Self::ListMap { loops, value } => {
-                write!(f, "ListMap<{self_type}>")?;
-                f.debug_tuple("").field(loops).field(value).finish()
-            }
-            Self::ListFilter { list, condition, .. } => {
-                write!(f, "ListFilter<{self_type}>")?;
-                f.debug_tuple("").field(list).field(condition).finish()
-            }
-            Self::Index { list, kind: operation, .. } => {
-                write!(f, "Index<{self_type}>")?;
-                f.debug_tuple("").field(list).field(operation).finish()
-            }
-            Self::Conditional { condition_consequents, alternative, .. } => {
-                write!(f, "Conditional<{self_type}>")?;
-                condition_consequents
-                    .iter()
-                    .fold(
-                        &mut f.debug_tuple(""),
-                        |tuple, pair| tuple.field(pair),
-                    )
-                    .field(alternative)
-                    .finish()
-            }
-            Self::UserFunctionCall { function, arguments, .. } => {
-                write!(f, "UserFunctionCall<{self_type}>")?;
-                f.debug_tuple("").field(function).field(arguments).finish()
-            }
-            Self::InlineAction { parameters, action } => {
-                write!(f, "InlineAction<{self_type}>")?;
-                f.debug_tuple("").field(parameters).field(action).finish()
-            }
-        }
-    }
+#[derive(Clone, Debug)]
+pub enum ValueTagKind {
+    EnumOrdinal,
+    GlobalImmutable,
+    GlobalVariable,
 }
 
-#[derive(Clone)]
-pub struct Value {
-    pub kind: ValueKind,
+#[derive(Clone, Debug)]
+pub struct ValueTag {
+    pub identifier: Rc<str>,
+    pub kind: ValueTagKind,
+}
+
+#[derive(Clone, Default, Debug)]
+pub struct ValueEntry {
+    pub value: Value,
+    pub type_handle: TypeHandle,
+    pub tag: Option<ValueTag>,
     pub span: Option<crate::Span>,
 }
 
-impl Value {
-    pub fn get_type(&self) -> Type {
-        self.kind.get_type()
-    }
-
-    pub fn is_zero(&self) -> bool {
-        self.kind.is_zero()
-    }
-
-    pub fn is_one(&self) -> bool {
-        self.kind.is_one()
-    }
-
-    pub fn is_undefined(&self) -> bool {
-        self.kind.is_undefined()
-    }
-
-    pub fn assume_type(mut self, value_type: Type) -> Self {
-        self.kind = self.kind.assume_type(value_type, self.span);
-        self
-    }
-
-    pub fn coerce_to(mut self, target_type: &Type, allow_list: bool) -> crate::Result<Self> {
-        self.kind = self.kind.coerce_to(target_type, allow_list, self.span)?;
-        Ok(self)
-    }
-
-    pub fn coerce_to_arithmetic(mut self, constraint: fn(&Type) -> crate::Result<()>) -> crate::Result<Self> {
-        self.kind = self.kind.coerce_to_arithmetic(constraint, self.span)?;
-        Ok(self)
-    }
-
-    pub fn get_const_str(&self) -> crate::Result<Rc<str>> {
-        self.kind
-            .as_const_str()
-            .ok_or_else(|| Box::new(crate::Error {
-                kind: crate::ErrorKind::ExpectedConstant {
-                    type_identifier: Type::Str.to_string(),
-                },
-                span: self.span,
-            }))
-    }
-}
-
-impl PartialEq for Value {
-    fn eq(&self, other: &Self) -> bool {
-        self.kind == other.kind
-    }
-}
-
-impl From<ValueKind> for Value {
-    fn from(kind: ValueKind) -> Self {
+impl ValueEntry {
+    pub const fn undefined(type_handle: TypeHandle) -> Self {
         Self {
-            kind,
+            value: Value::Undefined,
+            type_handle,
+            tag: None,
+            span: None,
+        }
+    }
+
+    pub const fn infinity(type_handle: TypeHandle) -> Self {
+        Self {
+            value: Value::Infinity,
+            type_handle,
+            tag: None,
+            span: None,
+        }
+    }
+
+    pub const fn real(value: f64) -> Self {
+        Self {
+            value: Value::Real(value),
+            type_handle: TypeHandle::REAL,
+            tag: None,
+            span: None,
+        }
+    }
+
+    pub const fn int(value: i64) -> Self {
+        Self {
+            value: Value::Int(value),
+            type_handle: TypeHandle::INT,
+            tag: None,
+            span: None,
+        }
+    }
+
+    pub const fn bool(value: bool) -> Self {
+        Self {
+            value: Value::Bool(value),
+            type_handle: TypeHandle::BOOL,
+            tag: None,
             span: None,
         }
     }
 }
 
-impl std::fmt::Debug for Value {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        self.kind.fmt(f)
-    }
-}
-
-#[derive(Clone, PartialEq)]
+#[derive(Clone, Debug)]
 pub enum ActionValueKind {
+    /// Indicates an action value that is not yet known. This is used as a placeholder for the value
+    /// of an action definition before it is fully interpreted.
+    Opaque,
     Disable,
     Compound {
         actions: Box<[ActionValue]>,
     },
     Update {
-        variable: GlobalReference,
+        variable_identifier: Rc<str>,
         variable_span: Option<crate::Span>,
-        value: Box<Value>,
+        value: ValueHandle,
     },
     ActionCall {
-        action: Box<Value>,
-        arguments: Box<[Value]>,
+        action: ValueHandle,
+        arguments: Box<[ValueHandle]>,
     },
     Conditional {
-        condition_consequents: Box<[(Value, ActionValue)]>,
+        condition_consequents: Box<[(ValueHandle, ActionValue)]>,
         alternative: Box<ActionValue>,
     },
 }
@@ -1019,46 +524,7 @@ impl ActionValueKind {
     }
 }
 
-impl std::fmt::Debug for ActionValueKind {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Self::Disable => {
-                write!(f, "Disable")
-            }
-            Self::Compound { actions } => {
-                let mut tuple = f.debug_tuple("Compound");
-                for action in actions {
-                    tuple.field(action);
-                }
-                tuple.finish()
-            }
-            Self::Update { variable, value, .. } => {
-                f.debug_tuple("Update")
-                    .field(variable)
-                    .field(value)
-                    .finish()
-            }
-            Self::ActionCall { action, arguments } => {
-                f.debug_tuple("ActionCall")
-                    .field(action)
-                    .field(arguments)
-                    .finish()
-            }
-            Self::Conditional { condition_consequents, alternative } => {
-                condition_consequents
-                    .iter()
-                    .fold(
-                        &mut f.debug_tuple("Conditional"),
-                        |tuple, pair| tuple.field(pair),
-                    )
-                    .field(alternative)
-                    .finish()
-            }
-        }
-    }
-}
-
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct ActionValue {
     pub kind: ActionValueKind,
     pub span: Option<crate::Span>,
@@ -1079,12 +545,6 @@ impl ActionValue {
     }
 }
 
-impl PartialEq for ActionValue {
-    fn eq(&self, other: &Self) -> bool {
-        self.kind == other.kind
-    }
-}
-
 impl From<ActionValueKind> for ActionValue {
     fn from(kind: ActionValueKind) -> Self {
         Self {
@@ -1094,8 +554,270 @@ impl From<ActionValueKind> for ActionValue {
     }
 }
 
-impl std::fmt::Debug for ActionValue {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        self.kind.fmt(f)
+#[repr(transparent)]
+#[derive(Copy, Clone, PartialEq, Eq, Hash, Debug)]
+pub struct ValueHandle(NonZeroUsize);
+
+impl ValueHandle {
+    const fn new(index: usize) -> Self {
+        // This may overflow if index == usize::MAX, but memory will run out before that happens.
+        Self(NonZeroUsize::new(index + 1).unwrap())
     }
+
+    const fn index(self) -> usize {
+        // This is trivially guaranteed to never underflow.
+        self.0.get() - 1
+    }
+}
+
+#[derive(Debug)]
+pub struct ValueRegistry {
+    entries: Vec<ValueEntry>,
+    type_values: HashMap<TypeHandle, ValueHandle>,
+}
+
+impl ValueRegistry {
+    pub fn new() -> Self {
+        let mut registry = Self {
+            entries: Vec::new(),
+            type_values: HashMap::new(),
+        };
+
+        for known_type in &KNOWN_VALUES {
+            registry.register(known_type.get());
+        }
+
+        registry
+    }
+
+    pub fn register(&mut self, entry: ValueEntry) -> ValueHandle {
+        let handle = ValueHandle::new(self.entries.len());
+        self.entries.push(entry);
+        handle
+    }
+
+    pub fn entry(&self, handle: ValueHandle) -> &ValueEntry {
+        &self.entries[handle.index()]
+    }
+
+    pub fn entry_mut(&mut self, handle: ValueHandle) -> &mut ValueEntry {
+        &mut self.entries[handle.index()]
+    }
+
+    pub fn replace_entry(&mut self, handle: ValueHandle, entry: ValueEntry) -> ValueEntry {
+        std::mem::replace(&mut self.entries[handle.index()], entry)
+    }
+
+    pub fn get(&self, handle: ValueHandle) -> &Value {
+        &self.entries[handle.index()].value
+    }
+
+    pub fn get_mut(&mut self, handle: ValueHandle) -> &mut Value {
+        &mut self.entries[handle.index()].value
+    }
+
+    pub fn get_type(&self, handle: ValueHandle) -> TypeHandle {
+        self.entries[handle.index()].type_handle
+    }
+
+    pub fn set_type(&mut self, handle: ValueHandle, type_handle: TypeHandle) {
+        self.entries[handle.index()].type_handle = type_handle;
+    }
+
+    pub fn get_span(&self, handle: ValueHandle) -> Option<crate::Span> {
+        self.entries[handle.index()].span
+    }
+
+    pub fn set_span(&mut self, handle: ValueHandle, span: Option<crate::Span>) {
+        self.entries[handle.index()].span = span;
+    }
+
+    pub fn type_value(&mut self, type_handle: TypeHandle) -> ValueHandle {
+        if let Some(&handle) = self.type_values.get(&type_handle) {
+            handle
+        }
+        else {
+            self.register(ValueEntry {
+                value: Value::Type(type_handle),
+                type_handle: TypeHandle::META,
+                ..Default::default()
+            })
+        }
+    }
+
+    pub fn assume_type(&mut self, handle: ValueHandle, type_handle: TypeHandle, span: Option<crate::Span>) -> ValueHandle {
+        if self.get_type(handle) == type_handle {
+            handle
+        }
+        else {
+            self.register(ValueEntry {
+                value: Value::Unary {
+                    kind: UnaryKind::Alias,
+                    operand: handle,
+                },
+                type_handle,
+                span,
+                ..Default::default()
+            })
+        }
+    }
+
+    pub fn coerce(&mut self, types: &mut TypeRegistry, handle: ValueHandle, to_type: TypeHandle, allow_list: bool) -> Option<ValueHandle> {
+        let from_type = self.get_type(handle);
+        let (from_list, from_inner) = types.flatten_list(from_type);
+        let (to_list, to_inner) = types.flatten_list(to_type);
+
+        if !ListState::can_coerce(from_list, to_list, allow_list) {
+            return None
+        }
+        let Some(coerced_type) = types.coerce(from_inner, to_inner) else {
+            return None
+        };
+        let result_type = types.unflatten_list(from_list, coerced_type).ok()?;
+        let span = self.get_span(handle);
+
+        let coerced = match (self.get(handle), types.get(coerced_type)) {
+            (Value::Undefined, _) => {
+                Some(Value::Undefined)
+            }
+            (Value::Infinity, _) => {
+                Some(Value::Infinity)
+            }
+            (&Value::Int(value), Type::Real) => {
+                Some(Value::Real(value as f64))
+            }
+            (&Value::Bool(value), Type::Int) => {
+                Some(Value::Int(value as i64))
+            }
+            (&Value::Bool(value), Type::Real) => {
+                Some(Value::Real(value as i32 as f64))
+            }
+            (&Value::EnumVariant { ordinal, .. }, Type::Int) => {
+                Some(Value::Int(ordinal))
+            }
+            (&Value::EnumVariant { ordinal, .. }, Type::Real) => {
+                Some(Value::Real(ordinal as f64))
+            }
+            _ => None
+        };
+
+        Some(match coerced {
+            Some(value) => self.register(ValueEntry {
+                value,
+                type_handle: result_type,
+                tag: None,
+                span,
+            }),
+            None => self.assume_type(handle, result_type, span),
+        })
+    }
+}
+
+macro_rules! known_value_handles {
+    ($($handle:ident => ($($rest:tt)+)),* $(,)?) => {
+        known_value_handles!(@handle_consts 0usize, $($handle)*);
+
+        pub const KNOWN_VALUES: [LazyConst<ValueEntry>; KNOWN_VALUE_COUNT] = [
+            $(known_value_handles!(@lazy_const $($rest)+),)*
+        ];
+    };
+    // I wish I could use ${index(0)} and ${count(0)} and have it be stable.
+    (@handle_consts $index:expr, $handle:ident $($rest:ident)*) => {
+        impl ValueHandle {
+            pub const $handle: Self = Self::new($index);
+        }
+        known_value_handles!(@handle_consts $index + 1usize, $($rest)*);
+    };
+    (@handle_consts $count:expr,) => {
+        const KNOWN_VALUE_COUNT: usize = $count;
+    };
+    // I wish I could use into() in a const context and have it be stable.
+    (@lazy_const || $definition:expr) => {
+        LazyConst::Deferred(|| $definition)
+    };
+    (@lazy_const $definition:expr) => {
+        LazyConst::Immediate($definition)
+    };
+}
+
+known_value_handles! {
+    UNDEFINED => (ValueEntry::undefined(TypeHandle::ANY)),
+    ZERO_REAL => (ValueEntry::real(0.0)),
+    ONE_REAL => (ValueEntry::real(1.0)),
+    TWO_REAL => (ValueEntry::real(2.0)),
+    ZERO_INT => (ValueEntry::int(0)),
+    ONE_INT => (ValueEntry::int(1)),
+    TWO_INT => (ValueEntry::int(2)),
+    FALSE => (ValueEntry::bool(false)),
+    TRUE => (ValueEntry::bool(true)),
+    PI => (ValueEntry {
+        value: Value::Mathematical(MathematicalConstant::Pi),
+        type_handle: TypeHandle::REAL,
+        tag: None,
+        span: None,
+    }),
+    TAU => (ValueEntry {
+        value: Value::Mathematical(MathematicalConstant::Tau),
+        type_handle: TypeHandle::REAL,
+        tag: None,
+        span: None,
+    }),
+    E => (ValueEntry {
+        value: Value::Mathematical(MathematicalConstant::E),
+        type_handle: TypeHandle::REAL,
+        tag: None,
+        span: None,
+    }),
+    WIDTH_PIXELS => (ValueEntry {
+        value: Value::ViewportWidth,
+        type_handle: TypeHandle::REAL,
+        tag: None,
+        span: None,
+    }),
+    HEIGHT_PIXELS => (ValueEntry {
+        value: Value::ViewportHeight,
+        type_handle: TypeHandle::REAL,
+        tag: None,
+        span: None,
+    }),
+    TICKER_DT => (ValueEntry {
+        value: Value::TickerDt,
+        type_handle: TypeHandle::REAL,
+        tag: None,
+        span: None,
+    }),
+    CLICK_INDEX => (ValueEntry {
+        value: Value::ClickIndex,
+        type_handle: TypeHandle::INT,
+        tag: None,
+        span: None,
+    }),
+    BLACK => (ValueEntry {
+        value: Value::Ternary {
+            kind: TernaryKind::Hsv,
+            first: ValueHandle::ZERO_REAL,
+            second: ValueHandle::ZERO_REAL,
+            third: ValueHandle::ZERO_REAL,
+        },
+        type_handle: TypeHandle::COLOR,
+        tag: None,
+        span: None,
+    }),
+    WHITE => (ValueEntry {
+        value: Value::Ternary {
+            kind: TernaryKind::Hsv,
+            first: ValueHandle::ZERO_REAL,
+            second: ValueHandle::ZERO_REAL,
+            third: ValueHandle::ONE_REAL,
+        },
+        type_handle: TypeHandle::COLOR,
+        tag: None,
+        span: None,
+    }),
+    TRANSPARENT_IMAGE_DATA => (|| ValueEntry {
+        value: Value::Str("data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAAAXNSR0IArs4c6QAAAAtJREFUGFdjYAACAAAFAAGq1chRAAAAAElFTkSuQmCC".into()),
+        type_handle: TypeHandle::STR,
+        tag: None,
+        span: None,
+    }),
 }

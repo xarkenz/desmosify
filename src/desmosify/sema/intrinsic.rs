@@ -2,38 +2,52 @@ use std::path::PathBuf;
 use crate::ast::{DefinitionKind, RangeKind, TypeDefinition};
 use crate::sema::context::{GlobalContext, LocalContext};
 use crate::sema::display::ImageValue;
-use crate::sema::types::{ListState, Type};
-use crate::sema::values::{BinaryKind, InequalityKind, MathematicalConstant, ReducerKind, TernaryKind, UnaryKind, Value, ValueKind};
+use crate::sema::types::{ListState, Type, TypeHandle};
+use crate::sema::values::{BinaryKind, InequalityKind, ReducerKind, TernaryKind, UnaryKind, Value, ValueEntry, ValueHandle};
 use crate::target::Target;
 
-pub fn get_core_intrinsics(target: &dyn Target) -> impl Iterator<Item = (&'static str, ValueKind)> {
+#[derive(Debug)]
+pub enum Intrinsic {
+    Entry(ValueEntry),
+    Handle(ValueHandle),
+}
+
+impl From<ValueEntry> for Intrinsic {
+    fn from(entry: ValueEntry) -> Self {
+        Self::Entry(entry)
+    }
+}
+
+impl From<ValueHandle> for Intrinsic {
+    fn from(handle: ValueHandle) -> Self {
+        Self::Handle(handle)
+    }
+}
+
+pub fn get_core_intrinsics(target: &dyn Target) -> impl Iterator<Item = (&'static str, Intrinsic)> {
     CORE_INTRINSIC_FUNCTIONS
         .iter()
         .map(|&function| {
-            (function.identifier, ValueKind::IntrinsicFunction(function))
+            (function.identifier, Intrinsic::Entry(ValueEntry {
+                value: Value::IntrinsicFunction(function),
+                type_handle: TypeHandle::INTRINSIC_FUNCTION,
+                ..Default::default()
+            }))
         })
         .chain([
-            ("pi", ValueKind::Mathematical(MathematicalConstant::Pi)),
-            ("tau", ValueKind::Mathematical(MathematicalConstant::Tau)),
-            ("e", ValueKind::Mathematical(MathematicalConstant::E)),
-            ("black", ValueKind::Ternary {
-                kind: TernaryKind::Hsv,
-                first: Box::new(ValueKind::Int(0).into()),
-                second: Box::new(ValueKind::Int(0).into()),
-                third: Box::new(ValueKind::Int(0).into()),
-                result_type: Type::Color,
-            }),
-            ("white", ValueKind::Ternary {
-                kind: TernaryKind::Hsv,
-                first: Box::new(ValueKind::Int(0).into()),
-                second: Box::new(ValueKind::Int(0).into()),
-                third: Box::new(ValueKind::Int(1).into()),
-                result_type: Type::Color,
-            }),
-            ("width_pixels", ValueKind::ViewportWidth),
-            ("height_pixels", ValueKind::ViewportHeight),
-            ("target", ValueKind::Str(target.name().into())),
-            ("transparent_image_data", ValueKind::Str("data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAAAXNSR0IArs4c6QAAAAtJREFUGFdjYAACAAAFAAGq1chRAAAAAElFTkSuQmCC".into())),
+            ("pi", ValueHandle::PI.into()),
+            ("tau", ValueHandle::TAU.into()),
+            ("e", ValueHandle::E.into()),
+            ("width_pixels", ValueHandle::WIDTH_PIXELS.into()),
+            ("height_pixels", ValueHandle::WIDTH_PIXELS.into()),
+            ("black", ValueHandle::BLACK.into()),
+            ("white", ValueHandle::WHITE.into()),
+            ("transparent_image_data", ValueHandle::TRANSPARENT_IMAGE_DATA.into()),
+            ("target", ValueEntry {
+                value: Value::Str(target.name().into()),
+                type_handle: TypeHandle::STR,
+                ..Default::default()
+            }.into()),
         ])
 }
 
@@ -44,21 +58,21 @@ pub struct IntrinsicFunction {
     pub max_arity: Option<usize>,
     pub interpret_call: fn(
         target: &mut dyn Target,
-        context: &GlobalContext,
+        context: &mut GlobalContext,
         local_context: &LocalContext,
-        arguments: Box<[Value]>,
-    ) -> crate::Result<ValueKind>,
+        arguments: Box<[ValueHandle]>,
+    ) -> crate::Result<Value>,
 }
 
 impl IntrinsicFunction {
     pub fn interpret_call(
         &self,
         target: &mut dyn Target,
-        context: &GlobalContext,
+        context: &mut GlobalContext,
         local_context: &LocalContext,
         span: Option<crate::Span>,
-        arguments: Box<[Value]>,
-    ) -> crate::Result<ValueKind> {
+        arguments: Box<[ValueHandle]>,
+    ) -> crate::Result<Value> {
         self.check_arity(arguments.len(), span)?;
 
         (self.interpret_call)(target, context, local_context, arguments)
@@ -280,12 +294,12 @@ pub fn interpret_strict_unary_call(
     kind: UnaryKind,
     argument_type: Type,
     result_type: Option<Type>,
-    arguments: Box<[Value]>,
-) -> crate::Result<ValueKind> {
+    arguments: Box<[ValueRegistryEntry]>,
+) -> crate::Result<Value> {
     let argument = arguments.into_iter().next().unwrap()
         .coerce_to(&argument_type, false)?;
 
-    Ok(ValueKind::Unary {
+    Ok(Value::Unary {
         kind,
         result_type: result_type.unwrap_or(argument_type),
         operand: Box::new(argument),
@@ -296,12 +310,12 @@ pub fn interpret_broadcastable_unary_call(
     kind: UnaryKind,
     argument_type: Type,
     result_type: Option<Type>,
-    arguments: Box<[Value]>,
-) -> crate::Result<ValueKind> {
+    arguments: Box<[ValueRegistryEntry]>,
+) -> crate::Result<Value> {
     let argument = arguments.into_iter().next().unwrap()
         .coerce_to(&argument_type, true)?;
 
-    Ok(ValueKind::Unary {
+    Ok(Value::Unary {
         kind,
         result_type: match result_type {
             Some(result_type) => result_type.unflatten_list(argument.get_type().list_state()),
@@ -316,8 +330,8 @@ pub fn interpret_broadcastable_binary_call(
     lhs_type: Type,
     rhs_type: Type,
     result_type: Type,
-    arguments: Box<[Value]>,
-) -> crate::Result<ValueKind> {
+    arguments: Box<[ValueRegistryEntry]>,
+) -> crate::Result<Value> {
     let mut arguments = arguments.into_iter();
 
     let lhs = arguments.next().unwrap()
@@ -330,7 +344,7 @@ pub fn interpret_broadcastable_binary_call(
         rhs.get_type().list_state(),
     );
 
-    Ok(ValueKind::Binary {
+    Ok(Value::Binary {
         kind,
         lhs: Box::new(lhs),
         rhs: Box::new(rhs),
@@ -344,8 +358,8 @@ pub fn interpret_broadcastable_ternary_call(
     second_type: Type,
     third_type: Type,
     result_type: Type,
-    arguments: Box<[Value]>,
-) -> crate::Result<ValueKind> {
+    arguments: Box<[ValueRegistryEntry]>,
+) -> crate::Result<Value> {
     let mut arguments = arguments.into_iter();
 
     let first = arguments.next().unwrap()
@@ -361,7 +375,7 @@ pub fn interpret_broadcastable_ternary_call(
         third.get_type().list_state(),
     ]);
 
-    Ok(ValueKind::Ternary {
+    Ok(Value::Ternary {
         kind,
         first: Box::new(first),
         second: Box::new(second),
@@ -374,8 +388,8 @@ pub fn interpret_broadcastable_reducer_call(
     kind: ReducerKind,
     element_type: Option<Type>,
     result_type: Option<Type>,
-    arguments: Box<[Value]>,
-) -> crate::Result<ValueKind> {
+    arguments: Box<[ValueRegistryEntry]>,
+) -> crate::Result<Value> {
     if let [argument] = arguments.as_ref() {
         let (list_state, argument_type) = argument.get_type().into_flatten_list();
         if list_state.is_some() {
@@ -386,7 +400,7 @@ pub fn interpret_broadcastable_reducer_call(
                 None => list,
             };
 
-            return Ok(ValueKind::Reducer {
+            return Ok(Value::Reducer {
                 kind,
                 list: Box::new(list),
                 result_type: result_type.unwrap_or(argument_type),
@@ -407,8 +421,8 @@ pub fn interpret_broadcastable_reducer_call(
         Some(element_type) => merged_type.flatten_list().1.clone().coerce_to(&element_type)
             .ok_or_else(|| Box::new(crate::Error {
                 kind: crate::ErrorKind::MismatchedTypes {
-                    expected: element_type.to_string(),
-                    got: merged_type.to_string(),
+                    expected_type: element_type.to_string(),
+                    got_type: merged_type.to_string(),
                 },
                 span: match (arguments[0].span, arguments.last().unwrap().span) {
                     (Some(start), Some(end)) => Some(start.expand_to(end)),
@@ -419,7 +433,7 @@ pub fn interpret_broadcastable_reducer_call(
     };
 
     let mut list_state = None;
-    Ok(ValueKind::ArgumentsReducer {
+    Ok(Value::ArgumentsReducer {
         kind,
         arguments: arguments
             .into_iter()
@@ -576,7 +590,7 @@ macro_rules! broadcastable_intrinsic {
     };
 }
 
-pub fn read_file_bytes(local_context: &LocalContext, path_value: &Value) -> crate::Result<(PathBuf, Vec<u8>)> {
+pub fn read_file_bytes(local_context: &LocalContext, path_value: &ValueRegistryEntry) -> crate::Result<(PathBuf, Vec<u8>)> {
     let relative_path = path_value.kind
         .as_const_str()
         .ok_or_else(|| Box::new(crate::Error {
@@ -776,7 +790,7 @@ pub static JOIN: IntrinsicFunction = IntrinsicFunction {
             },
         )?;
 
-        Ok(ValueKind::Join {
+        Ok(Value::Join {
             values: arguments,
             result_type: item_type.into_list(ListState::IsList),
         })
@@ -809,7 +823,7 @@ pub static SORT: IntrinsicFunction = IntrinsicFunction {
 
             let key_list = key_list.coerce_to(&key_type, true)?;
 
-            Ok(ValueKind::Binary {
+            Ok(Value::Binary {
                 kind: BinaryKind::SortKeyed,
                 result_type: list.get_type(),
                 lhs: Box::new(list),
@@ -819,7 +833,7 @@ pub static SORT: IntrinsicFunction = IntrinsicFunction {
         else {
             let list = list.coerce_to(&key_type, true)?;
 
-            Ok(ValueKind::Unary {
+            Ok(Value::Unary {
                 kind: UnaryKind::Sort,
                 result_type: list.get_type(),
                 operand: Box::new(list),
@@ -843,7 +857,7 @@ pub static SHUFFLE: IntrinsicFunction = IntrinsicFunction {
         if let Some(seed) = arguments.next() {
             let seed = seed.coerce_to(&Type::Real, false)?;
 
-            Ok(ValueKind::Binary {
+            Ok(Value::Binary {
                 kind: BinaryKind::ShuffleSeeded,
                 result_type: list.get_type(),
                 lhs: Box::new(list),
@@ -851,7 +865,7 @@ pub static SHUFFLE: IntrinsicFunction = IntrinsicFunction {
             })
         }
         else {
-            Ok(ValueKind::Unary {
+            Ok(Value::Unary {
                 kind: UnaryKind::Shuffle,
                 result_type: list.get_type(),
                 operand: Box::new(list),
@@ -872,7 +886,7 @@ pub static UNIQUE: IntrinsicFunction = IntrinsicFunction {
             .require_flatten_list()
             .map_err(|error| error.with_span(list.span))?;
 
-        Ok(ValueKind::Unary {
+        Ok(Value::Unary {
             kind: UnaryKind::Unique,
             result_type: list.get_type(),
             operand: Box::new(list),
@@ -891,7 +905,7 @@ pub static PREFIX_SUM: IntrinsicFunction = IntrinsicFunction {
             .and_then(|item_type| item_type.require_numeric_or_point().map(|()| item_type))
             .map_err(|error| error.with_span(list.span))?;
 
-        Ok(ValueKind::Unary {
+        Ok(Value::Unary {
             kind: UnaryKind::PrefixSum,
             result_type: list.get_type(),
             operand: Box::new(list),
@@ -974,11 +988,11 @@ pub static ANY: IntrinsicFunction = IntrinsicFunction {
         let total = (TOTAL.interpret_call)(target, context, local_context, arguments)?;
         let list_state = total.get_type().list_state();
 
-        Ok(ValueKind::InequalityChain {
+        Ok(Value::InequalityChain {
             lhs: Box::new(total.into()),
             chain: Box::new([(
                 InequalityKind::GreaterThan,
-                ValueKind::Int(0).into(),
+                Value::Int(0).into(),
             )]),
             result_type: Type::Bool.unflatten_list(list_state),
         })
@@ -996,7 +1010,7 @@ pub static ALL: IntrinsicFunction = IntrinsicFunction {
             .map(|argument| {
                 let list_state = argument.get_type().list_state();
 
-                Ok(ValueKind::Unary {
+                Ok(Value::Unary {
                     kind: UnaryKind::LogicalNot,
                     operand: Box::new(argument.coerce_to(&Type::Bool, true)?),
                     result_type: Type::Bool.unflatten_list(list_state),
@@ -1007,10 +1021,10 @@ pub static ALL: IntrinsicFunction = IntrinsicFunction {
 
         let list_state = total.get_type().list_state();
 
-        Ok(ValueKind::Binary {
+        Ok(Value::Binary {
             kind: BinaryKind::Equal,
             lhs: Box::new(total.into()),
-            rhs: Box::new(ValueKind::Int(0).into()),
+            rhs: Box::new(Value::Int(0).into()),
             result_type: Type::Bool.unflatten_list(list_state),
         })
     },
@@ -1047,10 +1061,10 @@ pub static ALL: IntrinsicFunction = IntrinsicFunction {
 // INVERSE_CDF
 
 fn interpret_random_call_end(
-    arguments: impl IntoIterator<Item = Value>,
-    source: Option<Box<Value>>,
+    arguments: impl IntoIterator<Item = ValueRegistryEntry>,
+    source: Option<Box<ValueRegistryEntry>>,
     source_type: Type,
-) -> crate::Result<ValueKind> {
+) -> crate::Result<Value> {
     let mut arguments = arguments.into_iter();
 
     if let Some(sample_count) = arguments.next() {
@@ -1059,7 +1073,7 @@ fn interpret_random_call_end(
         if let Some(seed) = arguments.next() {
             let seed = seed.coerce_to(&Type::Real, false)?;
 
-            Ok(ValueKind::RandomSeeded {
+            Ok(Value::RandomSeeded {
                 source,
                 sample_count: Box::new(sample_count),
                 seed: Box::new(seed),
@@ -1067,7 +1081,7 @@ fn interpret_random_call_end(
             })
         }
         else {
-            Ok(ValueKind::Random {
+            Ok(Value::Random {
                 source,
                 sample_count: Some(Box::new(sample_count)),
                 result_type: source_type.into_list(ListState::IsList),
@@ -1075,7 +1089,7 @@ fn interpret_random_call_end(
         }
     }
     else {
-        Ok(ValueKind::Random {
+        Ok(Value::Random {
             source,
             sample_count: None,
             result_type: source_type,
@@ -1156,7 +1170,7 @@ pub static LINE: IntrinsicFunction = IntrinsicFunction {
                 end.get_type().list_state(),
             );
 
-            Ok(ValueKind::Binary {
+            Ok(Value::Binary {
                 kind: BinaryKind::LineFromPoints2D,
                 lhs: Box::new(start),
                 rhs: Box::new(end),
@@ -1171,7 +1185,7 @@ pub static LINE: IntrinsicFunction = IntrinsicFunction {
 
             let (list_state, argument_type) = segment_or_ray.get_type().into_flatten_list();
 
-            Ok(ValueKind::Unary {
+            Ok(Value::Unary {
                 kind: match argument_type {
                     Type::Segment => UnaryKind::LineFromSegment2D,
                     Type::Ray => UnaryKind::LineFromRay2D,
@@ -1220,7 +1234,7 @@ pub static CIRCLE: IntrinsicFunction = IntrinsicFunction {
             rhs.get_type().list_state(),
         );
 
-        Ok(ValueKind::Binary {
+        Ok(Value::Binary {
             kind: match rhs.get_type() {
                 Type::Point2D { .. } => BinaryKind::CircleFromEdge2D,
                 _ => BinaryKind::CircleFromRadius2D,
@@ -1346,7 +1360,7 @@ pub static MIDPOINT: IntrinsicFunction = IntrinsicFunction {
                 point_2.get_type().list_state(),
             );
 
-            Ok(ValueKind::Binary {
+            Ok(Value::Binary {
                 kind,
                 lhs: Box::new(point_1),
                 rhs: Box::new(point_2),
@@ -1366,7 +1380,7 @@ pub static MIDPOINT: IntrinsicFunction = IntrinsicFunction {
                 _ => unreachable!()
             };
 
-            Ok(ValueKind::Unary {
+            Ok(Value::Unary {
                 kind,
                 operand: Box::new(segment),
                 result_type: point_type.unflatten_list(list_state),
@@ -1378,8 +1392,8 @@ pub static MIDPOINT: IntrinsicFunction = IntrinsicFunction {
 fn interpret_start_end_call(
     kind_2d: UnaryKind,
     kind_3d: UnaryKind,
-    arguments: Box<[Value]>,
-) -> crate::Result<ValueKind> {
+    arguments: Box<[ValueRegistryEntry]>,
+) -> crate::Result<Value> {
     let vector = arguments.into_iter().next().unwrap()
         .coerce_to(&Type::union([Type::Vector, Type::Vector3D]), true)?;
     let (list_state, vector_type) = vector.get_type().into_flatten_list();
@@ -1390,7 +1404,7 @@ fn interpret_start_end_call(
         _ => unreachable!()
     };
 
-    Ok(ValueKind::Unary {
+    Ok(Value::Unary {
         kind,
         operand: Box::new(vector),
         result_type: point_type.unflatten_list(list_state),
@@ -1423,8 +1437,8 @@ pub static END: IntrinsicFunction = IntrinsicFunction {
 
 fn interpret_rotate_dilate_call(
     kind: TernaryKind,
-    arguments: Box<[Value]>,
-) -> crate::Result<ValueKind> {
+    arguments: Box<[ValueRegistryEntry]>,
+) -> crate::Result<Value> {
     let mut arguments = arguments.into_iter();
 
     let object = arguments.next().unwrap()
@@ -1443,7 +1457,7 @@ fn interpret_rotate_dilate_call(
         factor_or_angle.get_type().list_state(),
     ]);
 
-    Ok(ValueKind::Ternary {
+    Ok(Value::Ternary {
         kind,
         first: Box::new(object),
         second: Box::new(point),
@@ -1491,7 +1505,7 @@ pub static REFLECT: IntrinsicFunction = IntrinsicFunction {
             line.get_type().list_state(),
         );
 
-        Ok(ValueKind::Binary {
+        Ok(Value::Binary {
             kind: BinaryKind::Reflect2D,
             lhs: Box::new(object),
             rhs: Box::new(line),
@@ -1524,7 +1538,7 @@ pub static TRANSLATE: IntrinsicFunction = IntrinsicFunction {
                 end.get_type().list_state(),
             ]);
 
-            Ok(ValueKind::Ternary {
+            Ok(Value::Ternary {
                 kind: TernaryKind::TranslateByPoints2D,
                 first: Box::new(object),
                 second: Box::new(start),
@@ -1540,7 +1554,7 @@ pub static TRANSLATE: IntrinsicFunction = IntrinsicFunction {
                 vector.get_type().list_state(),
             );
 
-            Ok(ValueKind::Binary {
+            Ok(Value::Binary {
                 kind: BinaryKind::TranslateByVector2D,
                 lhs: Box::new(object),
                 rhs: Box::new(vector),
@@ -1552,8 +1566,8 @@ pub static TRANSLATE: IntrinsicFunction = IntrinsicFunction {
 
 fn interpret_rotation_dilation_call(
     kind: BinaryKind,
-    arguments: Box<[Value]>,
-) -> crate::Result<ValueKind> {
+    arguments: Box<[ValueRegistryEntry]>,
+) -> crate::Result<Value> {
     let mut arguments = arguments.into_iter();
 
     let point = arguments.next().unwrap()
@@ -1567,7 +1581,7 @@ fn interpret_rotation_dilation_call(
         factor_or_angle.get_type().list_state(),
     );
 
-    Ok(ValueKind::Binary {
+    Ok(Value::Binary {
         kind,
         lhs: Box::new(point),
         rhs: Box::new(factor_or_angle),
@@ -1605,7 +1619,7 @@ pub static REFLECTION: IntrinsicFunction = IntrinsicFunction {
         let line = arguments.next().unwrap()
             .coerce_to(&Type::Line, true)?;
 
-        Ok(ValueKind::Unary {
+        Ok(Value::Unary {
             kind: UnaryKind::ReflectionByLine2D,
             result_type: Type::Transformation.unflatten_list(line.get_type().list_state()),
             operand: Box::new(line),
@@ -1624,7 +1638,7 @@ pub static TRANSLATION: IntrinsicFunction = IntrinsicFunction {
         let displacement = arguments.next().unwrap()
             .coerce_to(&Type::real_point_2d(), true)?;
 
-        Ok(ValueKind::Unary {
+        Ok(Value::Unary {
             kind: UnaryKind::TranslationByPoint2D,
             result_type: Type::Transformation.unflatten_list(displacement.get_type().list_state()),
             operand: Box::new(displacement),
@@ -1651,7 +1665,7 @@ pub static APPLY: IntrinsicFunction = IntrinsicFunction {
             object_list,
         );
 
-        Ok(ValueKind::Binary {
+        Ok(Value::Binary {
             kind: BinaryKind::ApplyTransform2D,
             lhs: Box::new(transformation),
             rhs: Box::new(object),
@@ -1719,7 +1733,7 @@ pub static ENUM_VALUES: IntrinsicFunction = IntrinsicFunction {
             }));
         };
 
-        let definition = context.find_definition(&identifier).unwrap();
+        let definition = context.find_global(&identifier).unwrap();
         let DefinitionKind::Type(TypeDefinition::Enumeration { variants }) = &definition.definition.kind else {
             return Err(Box::new(crate::Error {
                 kind: crate::ErrorKind::ExpectedEnumTypeValue,
@@ -1727,17 +1741,17 @@ pub static ENUM_VALUES: IntrinsicFunction = IntrinsicFunction {
             }));
         };
 
-        Ok(ValueKind::ListRange {
+        Ok(Value::ListRange {
             kind: RangeKind::Exclusive,
-            start: Box::new(ValueKind::EnumVariant {
+            start: Box::new(Value::EnumVariant {
                 type_identifier: identifier.clone(),
-                variant_ordinal: 0,
+                ordinal: 0,
             }.into()),
-            end: Box::new(ValueKind::EnumVariant {
+            end: Box::new(Value::EnumVariant {
                 type_identifier: identifier.clone(),
-                variant_ordinal: variants.len() as i64,
+                ordinal: variants.len() as i64,
             }.into()),
-            step: Box::new(ValueKind::Int(1).into()),
+            step: Box::new(Value::Int(1).into()),
             item_type: Type::Enum {
                 type_identifier: identifier,
             },
@@ -1760,7 +1774,7 @@ pub static ENUM_VALUE: IntrinsicFunction = IntrinsicFunction {
             }));
         };
 
-        let definition = context.find_definition(&identifier).unwrap();
+        let definition = context.find_global(&identifier).unwrap();
         let DefinitionKind::Type(TypeDefinition::Enumeration { .. }) = &definition.definition.kind else {
             return Err(Box::new(crate::Error {
                 kind: crate::ErrorKind::ExpectedEnumTypeValue,
@@ -1798,7 +1812,7 @@ pub static INCLUDE_TEXT: IntrinsicFunction = IntrinsicFunction {
                 span: path_value.span,
             }))?;
 
-        Ok(ValueKind::Str(text.into()))
+        Ok(Value::Str(text.into()))
     },
 };
 
@@ -1830,7 +1844,7 @@ pub static INCLUDE_DATA: IntrinsicFunction = IntrinsicFunction {
             data_url.set_media_type(Some(mime.essence_str().to_string()));
         }
 
-        Ok(ValueKind::Str(data_url.to_string().into()))
+        Ok(Value::Str(data_url.to_string().into()))
     },
 };
 
@@ -1855,10 +1869,10 @@ pub static IMAGE: IntrinsicFunction = IntrinsicFunction {
         let height = arguments.next().unwrap()
             .coerce_to(&Type::Real, true)?;
         let opacity = arguments.next()
-            .unwrap_or(ValueKind::Real(1.0).into())
+            .unwrap_or(Value::Real(1.0).into())
             .coerce_to(&Type::Real, true)?;
         let angle = arguments.next()
-            .unwrap_or(ValueKind::Real(0.0).into())
+            .unwrap_or(Value::Real(0.0).into())
             .coerce_to(&Type::Real, true)?;
         let background = arguments.next()
             .map_or(Ok(false), |background_value| {
@@ -1878,7 +1892,7 @@ pub static IMAGE: IntrinsicFunction = IntrinsicFunction {
         let list_state = ListState::merge(list_state, opacity.get_type().list_state());
         let list_state = ListState::merge(list_state, angle.get_type().list_state());
 
-        Ok(ValueKind::Image(
+        Ok(Value::Image(
             Box::new(ImageValue {
                 url,
                 name,
@@ -1905,7 +1919,7 @@ pub static CONCAT: IntrinsicFunction = IntrinsicFunction {
             result.push_str(argument.get_const_str()?.as_ref());
         }
 
-        Ok(ValueKind::Str(result.into()))
+        Ok(Value::Str(result.into()))
     },
 };
 
@@ -1917,10 +1931,10 @@ pub static TARGET_SYMBOL: IntrinsicFunction = IntrinsicFunction {
         let argument = arguments.into_iter().next().unwrap();
 
         let symbol_name = match &argument.kind {
-            ValueKind::Global(reference) => {
+            Value::Global(reference) => {
                 target.get_global_symbol_name(&reference.identifier)
             }
-            ValueKind::Action(reference) => {
+            Value::Action(reference) => {
                 target.get_action_symbol_name(&reference.identifier)
             }
             _ => return Err(Box::new(crate::Error {
@@ -1929,6 +1943,6 @@ pub static TARGET_SYMBOL: IntrinsicFunction = IntrinsicFunction {
             }))
         };
 
-        Ok(ValueKind::Str(symbol_name.into()))
+        Ok(Value::Str(symbol_name.into()))
     },
 };

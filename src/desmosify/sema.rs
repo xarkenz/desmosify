@@ -1,6 +1,7 @@
 use std::rc::Rc;
 use crate::sema::display::ProgramDisplay;
-use crate::sema::values::{ActionValue, LocalReference, Value};
+use crate::sema::types::TypeHandle;
+use crate::sema::values::{ActionValue, LocalReference, ValueHandle};
 
 pub mod context;
 pub mod display;
@@ -12,14 +13,14 @@ pub mod values;
 #[derive(Clone, Debug)]
 pub struct ProgramEnumeration {
     pub identifier: Rc<str>,
-    pub values: Box<[(Rc<str>, Value)]>,
+    pub type_handle: TypeHandle,
 }
 
 #[derive(Clone, Debug)]
 pub struct ProgramImmutable {
     pub identifier: Rc<str>,
     pub parameters: Option<Box<[LocalReference]>>,
-    pub value: Value,
+    pub value: ValueHandle,
 }
 
 #[derive(Clone, Debug)]
@@ -27,9 +28,9 @@ pub enum ProgramVariableKind {
     Default,
     Timer,
     Slider {
-        min: Option<Box<Value>>,
-        max: Option<Box<Value>>,
-        step: Option<Box<Value>>,
+        min: Option<ValueHandle>,
+        max: Option<ValueHandle>,
+        step: Option<ValueHandle>,
     },
 }
 
@@ -37,7 +38,7 @@ pub enum ProgramVariableKind {
 pub struct ProgramVariable {
     pub identifier: Rc<str>,
     pub kind: ProgramVariableKind,
-    pub value: Value,
+    pub value: ValueHandle,
 }
 
 #[derive(Clone, Debug)]
@@ -49,13 +50,13 @@ pub struct ProgramAction {
 
 #[derive(Clone, Debug)]
 pub struct ProgramTicker {
-    pub interval_ms: Option<Value>,
+    pub interval_ms: Option<ValueHandle>,
     pub tick_action: ActionValue,
 }
 
 #[derive(Clone, Debug)]
 pub enum ProgramPublicLine {
-    Expression(Value),
+    Expression(ValueHandle),
     Action(ActionValue),
     Variable(ProgramVariable),
 }

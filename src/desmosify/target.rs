@@ -21,7 +21,7 @@ pub fn create_target(args: &DesmosifyArgs) -> crate::Result<Box<dyn Target>> {
     else {
         Err(Box::new(crate::Error {
             kind: crate::ErrorKind::UnsupportedTarget {
-                name: args.target_name.as_str().into(),
+                name: args.target_name.clone(),
             },
             span: None,
         }))

@@ -5,7 +5,7 @@ use crate::sema::{Program, ProgramAction, ProgramEnumeration, ProgramImmutable, 
 use crate::sema::context::{GlobalContext, LocalContext};
 use crate::sema::display::{DragMode, LabelOrientation, LineStyle, PointStyle, ProgramDisplay, ProgramDisplayAttribute, ProgramDisplayAttributeKind, ProgramDisplayElement};
 use crate::sema::types::{ListState, Type};
-use crate::sema::values::{ActionValue, ActionValueKind, GlobalReference, LocalReference, Value, IndexKind, ValueKind, ListMapLoop, BinaryKind, UnaryKind, ActionReference, InequalityKind, TernaryKind};
+use crate::sema::values::{ActionValue, ActionValueKind, GlobalReference, LocalReference, IndexKind, Value, ListMapLoop, BinaryKind, UnaryKind, ActionReference, InequalityKind, TernaryKind};
 use crate::target::Target;
 
 pub fn interpret_program(source_paths: &[PathBuf], target: &mut dyn Target, context: &GlobalContext) -> crate::Result<Program> {
@@ -14,7 +14,7 @@ pub fn interpret_program(source_paths: &[PathBuf], target: &mut dyn Target, cont
     let mut variables = Vec::new();
     let mut actions = Vec::new();
 
-    for (identifier, definition) in context.definitions().chain(context.action_definitions()) {
+    for (identifier, definition) in context.globals().chain(context.actions()) {
         let local_context = LocalContext::new(&source_paths[definition.definition.span.source_id]);
 
         match &definition.definition.kind {
@@ -85,7 +85,7 @@ pub fn interpret_enumeration_definition(
     identifier: Rc<str>,
     variants: &[EnumerationVariant],
 ) -> crate::Result<ProgramEnumeration> {
-    let mut values: Vec<(Rc<str>, Value)> = Vec::with_capacity(variants.len());
+    let mut values: Vec<(Rc<str>, ValueRegistryEntry)> = Vec::with_capacity(variants.len());
 
     for variant in variants {
         let value = if let Some(value) = &variant.value {
@@ -94,21 +94,21 @@ pub fn interpret_enumeration_definition(
         }
         else if let Some((_, previous_value)) = values.last() {
             // TODO: eliminate this once constant folding is implemented?
-            if let ValueKind::Int(previous_int) = previous_value.kind {
+            if let Value::Int(previous_int) = previous_value.kind {
                 // TODO: should raise error if this would be too big
-                ValueKind::Int(previous_int + 1).into()
+                Value::Int(previous_int + 1).into()
             }
             else {
-                ValueKind::Binary {
+                Value::Binary {
                     kind: BinaryKind::Add,
                     lhs: Box::new(previous_value.clone()),
-                    rhs: Box::new(ValueKind::Int(1).into()),
+                    rhs: Box::new(Value::Int(1).into()),
                     result_type: Type::Int,
                 }.into()
             }
         }
         else {
-            ValueKind::Int(0).into()
+            Value::Int(0).into()
         };
 
         values.push((variant.identifier.clone(), value));
@@ -130,7 +130,7 @@ pub fn interpret_let_definition(
     value: &Expression,
 ) -> crate::Result<ProgramImmutable> {
     let (typed_parameters, expected_type) = if let Some(parameters) = parameters {
-        let Type::UserFunction { signature } = value_type else {
+        let Type::Function { signature } = value_type else {
             panic!("parameter list is present but value type is not a function")
         };
 
@@ -259,7 +259,7 @@ pub fn interpret_ticker_declarations(
                 let tick_arguments: Box<[_]> = match tick_type.require_action(0, &[Type::Real])? {
                     [] => Box::new([]),
                     [dt_type] => Box::new([
-                        ValueKind::TickerDt.with_span(None).coerce_to(dt_type, false)?
+                        Value::TickerDt.with_span(None).coerce_to(dt_type, false)?
                     ]),
                     _ => unreachable!()
                 };
@@ -337,7 +337,7 @@ fn interpret_public_line(
                 .position(|variable| &variable.identifier == var_identifier)
                 .ok_or_else(|| {
                     // We can provide some pretty good diagnostics for this error.
-                    let Some(definition) = context.find_definition(var_identifier) else {
+                    let Some(definition) = context.find_global(var_identifier) else {
                         return Box::new(crate::Error {
                             kind: crate::ErrorKind::UndefinedIdentifier {
                                 identifier: var_identifier.as_ref().into(),
@@ -561,7 +561,7 @@ pub fn interpret_display_declarations(
                         let on_click_arguments: Box<[_]> = match on_click_type.require_action(0, &[Type::Int])? {
                             [] => Box::new([]),
                             [index_type] => Box::new([
-                                ValueKind::ClickIndex.with_span(None).coerce_to(index_type, false)?
+                                Value::ClickIndex.with_span(None).coerce_to(index_type, false)?
                             ]),
                             _ => unreachable!()
                         };
@@ -661,10 +661,10 @@ pub fn interpret_action_expression(
 
             let variable = interpret_expression(target, context, &local_context, variable)?;
             let variable_span = variable.span;
-            let ValueKind::Global(variable) = variable.kind else {
+            let Value::Global(variable) = variable.kind else {
                 return Err(invalid_update_lhs_error())
             };
-            let DefinitionKind::Value(ValueDefinition::Variable { .. }) = context.find_definition(&variable.identifier).unwrap().definition.kind else {
+            let DefinitionKind::Value(ValueDefinition::Variable { .. }) = context.find_global(&variable.identifier).unwrap().definition.kind else {
                 return Err(invalid_update_lhs_error())
             };
 
@@ -742,20 +742,20 @@ pub fn interpret_expression(
     context: &GlobalContext,
     local_context: &LocalContext,
     expression: &Expression,
-) -> crate::Result<Value> {
+) -> crate::Result<ValueRegistryEntry> {
     let kind = match &expression.kind {
         ExpressionKind::Undefined => {
-            ValueKind::Undefined(Type::Any)
+            Value::Undefined(Type::Any)
         }
         ExpressionKind::Infinity => {
-            ValueKind::Infinity(Type::Int)
+            Value::Infinity(Type::Int)
         }
         ExpressionKind::Identifier(identifier) => {
             if let Some(local) = local_context.find_local(identifier) {
                 local.clone()
             }
-            else if let Some(definition) = context.find_definition(identifier) {
-                ValueKind::Global(GlobalReference {
+            else if let Some(definition) = context.find_global(identifier) {
+                Value::Global(GlobalReference {
                     identifier: identifier.clone(),
                     value_type: definition.value_type.clone(),
                 })
@@ -770,7 +770,7 @@ pub fn interpret_expression(
             }
         }
         ExpressionKind::Real(value) => {
-            ValueKind::Real(*value)
+            Value::Real(*value)
         }
         ExpressionKind::Integer(value) => {
             let value = i64::try_from(*value).map_err(|_| Box::new(crate::Error {
@@ -778,17 +778,17 @@ pub fn interpret_expression(
                 span: Some(expression.span),
             }))?;
 
-            ValueKind::Int(value)
+            Value::Int(value)
         }
         ExpressionKind::Boolean(value) => {
-            ValueKind::Bool(*value)
+            Value::Bool(*value)
         }
         ExpressionKind::String(value) => {
-            ValueKind::Str(value.clone())
+            Value::Str(value.clone())
         }
         ExpressionKind::ActionIdentifier(identifier) => {
-            if let Some(definition) = context.find_action_definition(identifier) {
-                ValueKind::Action(ActionReference {
+            if let Some(definition) = context.find_action(identifier) {
+                Value::Action(ActionReference {
                     identifier: identifier.clone(),
                     action_type: definition.value_type.clone(),
                 })
@@ -831,7 +831,7 @@ pub fn interpret_expression(
             let (x_list, x_type) = x.get_type().into_flatten_list();
             let (y_list, y_type) = y.get_type().into_flatten_list();
 
-            ValueKind::Binary {
+            Value::Binary {
                 kind: BinaryKind::Point2D,
                 lhs: Box::new(x),
                 rhs: Box::new(y),
@@ -850,7 +850,7 @@ pub fn interpret_expression(
             let (y_list, y_type) = y.get_type().into_flatten_list();
             let (z_list, z_type) = z.get_type().into_flatten_list();
 
-            ValueKind::Ternary {
+            Value::Ternary {
                 kind: TernaryKind::Point3D,
                 first: Box::new(x),
                 second: Box::new(y),
@@ -875,7 +875,7 @@ pub fn interpret_expression(
                         .map_err(|error| error.with_span(item.span))
                 })?;
 
-            ValueKind::List {
+            Value::List {
                 items: items
                     .into_iter()
                     .map(|item| item.coerce_to(&item_type, false))
@@ -888,7 +888,7 @@ pub fn interpret_expression(
             let end = interpret_expression(target, context, local_context, end)?;
             let step = match step {
                 Some(step) => interpret_expression(target, context, local_context, step)?,
-                None => ValueKind::Int(1).into(),
+                None => Value::Int(1).into(),
             };
 
             let item_type = start.get_type()
@@ -897,7 +897,7 @@ pub fn interpret_expression(
                 .merge(&step.get_type())
                 .map_err(|error| error.with_span(step.span))?;
 
-            ValueKind::ListRange {
+            Value::ListRange {
                 kind: *kind,
                 start: Box::new(start.coerce_to(&item_type, false)?),
                 end: Box::new(end.coerce_to(&item_type, false)?),
@@ -910,7 +910,7 @@ pub fn interpret_expression(
             let count = interpret_expression(target, context, local_context, count)?
                 .coerce_to(&Type::Int, false)?;
 
-            ValueKind::ListFill {
+            Value::ListFill {
                 value: Box::new(value),
                 count: Box::new(count),
             }
@@ -935,7 +935,7 @@ pub fn interpret_expression(
 
             let value = interpret_expression(target, context, &map_context, map_expression)?;
 
-            ValueKind::ListMap {
+            Value::ListMap {
                 loops,
                 value: Box::new(value),
             }
@@ -948,7 +948,7 @@ pub fn interpret_expression(
             let condition = interpret_expression(target, context, local_context, condition)?
                 .coerce_to(&Type::Bool, true)?;
 
-            ValueKind::ListFilter {
+            Value::ListFilter {
                 list: Box::new(list),
                 condition: Box::new(condition),
                 item_type,
@@ -961,7 +961,7 @@ pub fn interpret_expression(
 
             let operation = interpret_index_operation(target, context, local_context, operation)?;
 
-            ValueKind::Index {
+            Value::Index {
                 list: Box::new(list),
                 kind: operation,
                 item_type,
@@ -978,7 +978,7 @@ pub fn interpret_expression(
                 Type::IntrinsicFunction(intrinsic_function) => {
                     intrinsic_function.interpret_call(target, context, local_context, function.span, arguments)?
                 }
-                Type::UserFunction { signature } => {
+                Type::Function { signature } => {
                     if arguments.len() != signature.parameter_types.len() {
                         return Err(Box::new(crate::Error {
                             kind: crate::ErrorKind::InvalidArity {
@@ -1006,7 +1006,7 @@ pub fn interpret_expression(
                         other => other
                     };
 
-                    ValueKind::UserFunctionCall {
+                    Value::UserFunctionCall {
                         function: Box::new(function),
                         arguments,
                         return_type,
@@ -1044,7 +1044,7 @@ pub fn interpret_expression(
 
             let alternative = alternative
                 .as_ref()
-                .map_or(Ok(ValueKind::Undefined(result_type.clone()).into()), |alternative| {
+                .map_or(Ok(Value::Undefined(result_type.clone()).into()), |alternative| {
                     let alternative = interpret_expression(target, context, local_context, alternative)?;
                     result_type = result_type.merge(&alternative.get_type())
                         .map_err(|error| error.with_span(alternative.span))?;
@@ -1060,7 +1060,7 @@ pub fn interpret_expression(
                 })
                 .collect::<crate::Result<_>>()?;
 
-            ValueKind::Conditional {
+            Value::Conditional {
                 condition_consequents,
                 alternative: Box::new(alternative),
                 result_type,
@@ -1090,7 +1090,7 @@ pub fn interpret_expression(
 
             let action = interpret_action_expression(target, context, &action_context, action)?;
 
-            ValueKind::InlineAction {
+            Value::InlineAction {
                 parameters: typed_parameters,
                 action: Box::new(action),
             }
@@ -1103,7 +1103,7 @@ pub fn interpret_expression(
         }
     };
 
-    Ok(Value {
+    Ok(ValueRegistryEntry {
         kind,
         span: Some(expression.span),
     })
@@ -1115,7 +1115,7 @@ pub fn interpret_unary_operation(
     local_context: &LocalContext,
     operation: UnaryOperation,
     operand: &Expression,
-) -> crate::Result<ValueKind> {
+) -> crate::Result<Value> {
     let kind = match operation {
         UnaryOperation::Positive => UnaryKind::Positive,
         UnaryOperation::Negative => UnaryKind::Negative,
@@ -1139,7 +1139,7 @@ pub fn interpret_unary_operation(
         _ => unreachable!("all cases from the previous match should be covered")
     };
 
-    Ok(ValueKind::Unary {
+    Ok(Value::Unary {
         kind,
         operand: Box::new(operand),
         result_type,
@@ -1154,7 +1154,7 @@ pub fn interpret_binary_operation(
     lhs: &Expression,
     rhs: &Expression,
     span: Option<crate::Span>,
-) -> crate::Result<ValueKind> {
+) -> crate::Result<Value> {
     let kind = match operation {
         BinaryOperation::MemberAccess => {
             // Handle this operation separately since its right hand side is not a value
@@ -1290,7 +1290,7 @@ pub fn interpret_binary_operation(
         _ => unreachable!("all cases from the previous match should be covered")
     };
 
-    Ok(ValueKind::Binary {
+    Ok(Value::Binary {
         kind,
         lhs: Box::new(lhs),
         rhs: Box::new(rhs),
@@ -1304,7 +1304,7 @@ fn interpret_access_operation(
     local_context: &LocalContext,
     lhs: &Expression,
     rhs: &Expression,
-) -> crate::Result<ValueKind> {
+) -> crate::Result<Value> {
     let lhs = interpret_expression(target, context, local_context, lhs)?;
     let (lhs_list, lhs_type) = lhs.get_type().into_flatten_list();
 
@@ -1325,7 +1325,7 @@ fn interpret_access_operation(
 
     match &lhs_type {
         Type::Meta { identifier } => {
-            let definition = context.find_definition(&identifier).unwrap();
+            let definition = context.find_global(&identifier).unwrap();
             let DefinitionKind::Type(definition) = &definition.definition.kind else {
                 panic!("known type does not have a type definition")
             };
@@ -1346,21 +1346,21 @@ fn interpret_access_operation(
                             span: Some(rhs.span),
                         }))?;
 
-                    Ok(ValueKind::EnumVariant {
+                    Ok(Value::EnumVariant {
                         type_identifier: identifier.clone(),
-                        variant_ordinal: ordinal as i64,
+                        ordinal: ordinal as i64,
                     })
                 }
             }
         }
         Type::Point2D { x_type, y_type } => {
             match member_identifier.as_ref() {
-                "x" => Ok(ValueKind::Unary {
+                "x" => Ok(Value::Unary {
                     kind: UnaryKind::XOfPoint2D,
                     operand: Box::new(lhs),
                     result_type: x_type.as_ref().clone().unflatten_list(lhs_list),
                 }),
-                "y" => Ok(ValueKind::Unary {
+                "y" => Ok(Value::Unary {
                     kind: UnaryKind::YOfPoint2D,
                     operand: Box::new(lhs),
                     result_type: y_type.as_ref().clone().unflatten_list(lhs_list),
@@ -1370,17 +1370,17 @@ fn interpret_access_operation(
         }
         Type::Point3D { x_type, y_type, z_type } => {
             match member_identifier.as_ref() {
-                "x" => Ok(ValueKind::Unary {
+                "x" => Ok(Value::Unary {
                     kind: UnaryKind::XOfPoint3D,
                     operand: Box::new(lhs),
                     result_type: x_type.as_ref().clone().unflatten_list(lhs_list),
                 }),
-                "y" => Ok(ValueKind::Unary {
+                "y" => Ok(Value::Unary {
                     kind: UnaryKind::YOfPoint3D,
                     operand: Box::new(lhs),
                     result_type: y_type.as_ref().clone().unflatten_list(lhs_list),
                 }),
-                "z" => Ok(ValueKind::Unary {
+                "z" => Ok(Value::Unary {
                     kind: UnaryKind::ZOfPoint3D,
                     operand: Box::new(lhs),
                     result_type: z_type.as_ref().clone().unflatten_list(lhs_list),
@@ -1400,7 +1400,7 @@ fn interpret_inequality_chain(
     lhs: &Expression,
     rhs: &Expression,
     span: Option<crate::Span>,
-) -> crate::Result<ValueKind> {
+) -> crate::Result<Value> {
     let rhs_value = interpret_expression(target, context, local_context, rhs)?;
     let (mut list_state, mut compared_type) = rhs_value.get_type().into_flatten_list();
 
@@ -1443,7 +1443,7 @@ fn interpret_inequality_chain(
         .require_numeric()
         .map_err(|error| error.with_span(span))?;
 
-    Ok(ValueKind::InequalityChain {
+    Ok(Value::InequalityChain {
         lhs: Box::new(lhs_value),
         chain: chain_rev.into_iter().rev().collect(),
         result_type: Type::Bool.unflatten_list(list_state),
@@ -1473,7 +1473,7 @@ pub fn interpret_index_operation(
             let step = match step {
                 Some(step) => interpret_expression(target, context, local_context, step)?
                     .coerce_to(&Type::Int, false)?,
-                None => ValueKind::Int(1).into(),
+                None => Value::Int(1).into(),
             };
 
             Ok(IndexKind::Range {
@@ -1489,7 +1489,7 @@ pub fn interpret_index_operation(
             let step = match step {
                 Some(step) => interpret_expression(target, context, local_context, step)?
                     .coerce_to(&Type::Int, false)?,
-                None => ValueKind::Int(1).into(),
+                None => Value::Int(1).into(),
             };
 
             Ok(IndexKind::RangeFrom {

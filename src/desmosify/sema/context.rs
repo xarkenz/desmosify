@@ -1,123 +1,167 @@
 use std::collections::HashMap;
 use std::path::Path;
 use std::rc::Rc;
-use crate::ast::{Declaration, Definition, DefinitionKind, DisplayDeclaration, PublicDeclaration, TickerDeclaration, TypeExpression, TypeExpressionKind, ValueDefinition};
-use crate::sema::intrinsic::get_core_intrinsics;
-use crate::sema::types::{Type, FunctionSignature, ListState};
-use crate::sema::values::{LocalReference, ValueKind};
+use crate::ast::{Declaration, Definition, DefinitionKind, TypeDefinition, TypeExpression, TypeExpressionKind, ValueDefinition};
+use crate::sema::intrinsic::{get_core_intrinsics, Intrinsic};
+use crate::sema::ProgramAction;
+use crate::sema::types::{Type, FunctionSignature, ListState, TypeRegistry, TypeHandle};
+use crate::sema::values::{BinaryKind, Value, ValueEntry, ValueHandle, ValueRegistry, ValueTag, ValueTagKind};
 use crate::target::Target;
-
-#[derive(Clone, Debug)]
-pub struct TypedDefinition {
-    pub definition: Definition,
-    pub value_type: Type,
-}
 
 #[derive(Debug)]
 pub struct GlobalContext {
-    definitions: HashMap<Rc<str>, TypedDefinition>,
-    definitions_order: Vec<Rc<str>>,
-    action_definitions: HashMap<Rc<str>, TypedDefinition>,
+    types: TypeRegistry,
+    values: ValueRegistry,
+    globals: HashMap<Rc<str>, ValueHandle>,
+    globals_order: Vec<Rc<str>>,
+    actions: HashMap<Rc<str>, ProgramAction>,
     action_definitions_order: Vec<Rc<str>>,
-    intrinsics: HashMap<&'static str, ValueKind>,
-    ticker_declarations: Vec<TickerDeclaration>,
-    public_declarations: Vec<PublicDeclaration>,
-    display_declarations: Vec<DisplayDeclaration>,
+    intrinsics: HashMap<&'static str, ValueHandle>,
 }
 
 impl GlobalContext {
-    pub fn from_declarations(mut declarations: Vec<Declaration>, target: &dyn Target) -> crate::Result<Self> {
+    pub fn from_declarations(declarations: &[Declaration], target: &dyn Target) -> crate::Result<Self> {
         let mut context = Self {
-            definitions: HashMap::new(),
-            definitions_order: Vec::new(),
-            action_definitions: HashMap::new(),
+            types: TypeRegistry::new(),
+            values: ValueRegistry::new(),
+            globals: HashMap::new(),
+            globals_order: Vec::new(),
+            actions: HashMap::new(),
             action_definitions_order: Vec::new(),
-            intrinsics: get_core_intrinsics(target).collect(),
-            ticker_declarations: Vec::new(),
-            public_declarations: Vec::new(),
-            display_declarations: Vec::new(),
+            intrinsics: HashMap::new(),
         };
 
-        // Process type definitions first so they can be used to deduce the data types of values.
-        let type_declarations = declarations
-            .extract_if(.., |declaration| {
-                matches!(declaration, Declaration::Definition(Definition {
-                    kind: DefinitionKind::Type(..),
-                    ..
-                }))
-            });
-        for type_declaration in type_declarations {
-            let Declaration::Definition(type_definition) = type_declaration else {
-                // It would not have been extracted otherwise...
-                unreachable!()
+        // Load the core set of intrinsics.
+        context.intrinsics = get_core_intrinsics(target)
+            .map(|(identifier, intrinsic)| (identifier, match intrinsic {
+                Intrinsic::Entry(entry) => {
+                    context.values.register(entry)
+                }
+                Intrinsic::Handle(handle) => handle,
+            }))
+            .collect();
+
+        // Process type definitions first so they can be used to deduce the types of values.
+        for declaration in declarations {
+            let Declaration::Definition(Definition {
+                identifier,
+                kind: DefinitionKind::Type(definition),
+                span,
+            }) = declaration else {
+                continue
             };
 
-            context.add_definition(TypedDefinition {
-                value_type: Type::Meta {
-                    identifier: type_definition.identifier.clone(),
-                },
-                definition: type_definition,
-            })?;
+            let type_handle = match definition {
+                TypeDefinition::Enumeration { variants } => {
+                    let type_handle = context.types.register(Type::Any);
+
+                    let mut previous_ordinal = None;
+                    let type_definition = Type::Enum {
+                        identifier: identifier.clone(),
+                        values: variants
+                            .iter()
+                            .map(|variant| {
+                                let tag = Some(ValueTag {
+                                    identifier: variant.identifier.clone(),
+                                    kind: ValueTagKind::EnumOrdinal,
+                                });
+                                let ordinal = if let Some(value) = &variant.value {
+                                    // Insert a placeholder for the explicit value.
+                                    context.values.register(ValueEntry {
+                                        value: Value::Opaque,
+                                        type_handle,
+                                        tag,
+                                        span: Some(value.span),
+                                    })
+                                }
+                                else if let Some(previous_ordinal) = previous_ordinal {
+                                    // Use the ordinal of the previous value plus one.
+                                    context.values.register(ValueEntry {
+                                        value: Value::Binary {
+                                            kind: BinaryKind::Add,
+                                            lhs: previous_ordinal,
+                                            rhs: ValueHandle::ONE_INT,
+                                        },
+                                        type_handle,
+                                        tag,
+                                        span: Some(variant.identifier_span.tail_point()),
+                                    })
+                                }
+                                else {
+                                    // No previous value, so start at zero.
+                                    context.values.register(ValueEntry {
+                                        value: Value::Int(0),
+                                        type_handle,
+                                        tag,
+                                        span: Some(variant.identifier_span.tail_point()),
+                                    })
+                                };
+
+                                (variant.identifier.clone(), ordinal)
+                            })
+                            .collect(),
+                    };
+
+                    context.types.reregister(type_handle, type_definition);
+                    type_handle
+                }
+            };
+
+            let value_handle = context.values.register(ValueEntry {
+                value: Value::Type(type_handle),
+                type_handle: TypeHandle::META,
+                span: None,
+            });
+
+            context.declare_global(identifier.clone(), Some(*span), value_handle)?;
         }
 
-        // Process the remaining declarations, including value definitions.
+        // Register placeholder values for all value definitions.
         for declaration in declarations {
-            match declaration {
-                Declaration::Definition(definition) => match &definition.kind {
-                    DefinitionKind::Type(..) => {
-                        // We already processed type definitions.
-                        unreachable!()
-                    },
-                    DefinitionKind::Value(ValueDefinition::Let { parameters, value_type, .. }) => {
-                        let mut value_type = context.resolve_type(value_type, parameters.is_some())?;
+            let Declaration::Definition(Definition {
+                identifier,
+                kind: DefinitionKind::Value(definition),
+                span,
+            }) = declaration else {
+                continue
+            };
 
-                        if let Some(parameters) = parameters {
-                            value_type = Type::UserFunction {
-                                signature: Box::new(FunctionSignature {
-                                    parameter_types: parameters.0
-                                        .iter()
-                                        .map(|parameter| context.resolve_type(&parameter.parameter_type, true))
-                                        .collect::<crate::Result<_>>()?,
-                                    return_type: value_type,
-                                }),
-                            };
-                        }
+            match definition {
+                ValueDefinition::Let { parameters, value_type, .. } => {
+                    let mut value_type = context.resolve_type(value_type, parameters.is_some())?;
 
-                        context.add_definition(TypedDefinition {
-                            definition,
-                            value_type,
-                        })?;
-                    }
-                    DefinitionKind::Value(ValueDefinition::Variable { value_type, .. }) => {
-                        let value_type = context.resolve_type(value_type, false)?;
-
-                        context.add_definition(TypedDefinition {
-                            definition,
-                            value_type,
-                        })?;
-                    }
-                    DefinitionKind::Value(ValueDefinition::Action { parameters, .. }) => {
-                        let value_type = Type::Action {
+                    if let Some(parameters) = parameters {
+                        value_type = context.types.function_type(FunctionSignature {
                             parameter_types: parameters.0
                                 .iter()
-                                .map(|parameter| context.resolve_type(&parameter.parameter_type, false))
+                                .map(|parameter| context.resolve_type(&parameter.parameter_type, true))
                                 .collect::<crate::Result<_>>()?,
-                        };
-
-                        context.add_action_definition(TypedDefinition {
-                            definition,
-                            value_type,
-                        })?;
+                            return_type: value_type,
+                        });
                     }
+
+                    context.declare_global(identifier.clone(), )?;
                 }
-                Declaration::Ticker(ticker_declaration) => {
-                    context.add_ticker_declaration(ticker_declaration);
+                ValueDefinition::Variable { value_type, .. } => {
+                    let value_type = context.resolve_type(value_type, false)?;
+
+                    context.declare_global(TypedDefinition {
+                        definition,
+                        value_type,
+                    })?;
                 }
-                Declaration::Public(public_declaration) => {
-                    context.add_public_declaration(public_declaration);
-                }
-                Declaration::Display(display_declaration) => {
-                    context.add_display_declaration(display_declaration);
+                ValueDefinition::Action { parameters, .. } => {
+                    let value_type = Type::Action {
+                        parameter_types: parameters.0
+                            .iter()
+                            .map(|parameter| context.resolve_type(&parameter.parameter_type, false))
+                            .collect::<crate::Result<_>>()?,
+                    };
+
+                    context.declare_action(TypedDefinition {
+                        definition,
+                        value_type,
+                    })?;
                 }
             }
         }
@@ -125,30 +169,38 @@ impl GlobalContext {
         Ok(context)
     }
 
-    pub fn add_definition(&mut self, definition: TypedDefinition) -> crate::Result<()> {
-        let identifier = definition.definition.identifier.clone();
-        if let Some(old_definition) = self.definitions.insert(identifier.clone(), definition) {
+    pub fn declare_global(&mut self, identifier: Rc<str>, span: Option<crate::Span>, value: ValueHandle) -> crate::Result<()> {
+        if TypeHandle::find_primitive(&identifier).is_some() {
+            Err(Box::new(crate::Error {
+                kind: crate::ErrorKind::ReservedIdentifier {
+                    identifier,
+                },
+                span,
+            }))
+        }
+        else if self.globals.insert(identifier.clone(), value).is_some() {
             Err(Box::new(crate::Error {
                 kind: crate::ErrorKind::ConflictingGlobalIdentifiers {
-                    identifier: old_definition.definition.identifier.as_ref().into(),
+                    identifier,
                 },
-                span: Some(old_definition.definition.span),
+                span,
             }))
         }
         else {
-            self.definitions_order.push(identifier);
+            self.globals_order.push(identifier);
             Ok(())
         }
     }
 
-    pub fn add_action_definition(&mut self, definition: TypedDefinition) -> crate::Result<()> {
-        let identifier = definition.definition.identifier.clone();
-        if let Some(old_definition) = self.action_definitions.insert(identifier.clone(), definition) {
+    pub fn declare_action(&mut self, action: ProgramAction, span: Option<crate::Span>) -> crate::Result<()> {
+        let identifier = action.identifier.clone();
+        let action_span = action.action.span;
+        if self.actions.insert(identifier.clone(), action).is_some() {
             Err(Box::new(crate::Error {
                 kind: crate::ErrorKind::ConflictingActionIdentifiers {
-                    identifier: old_definition.definition.identifier.as_ref().into(),
+                    identifier,
                 },
-                span: Some(old_definition.definition.span),
+                span: span.or(action_span),
             }))
         }
         else {
@@ -157,90 +209,49 @@ impl GlobalContext {
         }
     }
 
-    pub fn add_ticker_declaration(&mut self, ticker_declaration: TickerDeclaration) {
-        self.ticker_declarations.push(ticker_declaration);
-    }
-
-    pub fn add_public_declaration(&mut self, public_declaration: PublicDeclaration) {
-        self.public_declarations.push(public_declaration);
-    }
-
-    pub fn add_display_declaration(&mut self, display_declaration: DisplayDeclaration) {
-        self.display_declarations.push(display_declaration);
-    }
-
-    pub fn definitions(&self) -> impl Iterator<Item = (&Rc<str>, &TypedDefinition)> {
-        self.definitions_order
+    pub fn globals(&self) -> impl Iterator<Item = (Rc<str>, ValueHandle)> {
+        self.globals_order
             .iter()
-            .map(|identifier| (identifier, &self.definitions[identifier]))
+            .map(|identifier| (identifier.clone(), self.globals[identifier]))
     }
 
-    pub fn find_definition(&self, identifier: &str) -> Option<&TypedDefinition> {
-        self.definitions.get(identifier)
+    pub fn find_global(&self, identifier: &str) -> Option<ValueHandle> {
+        self.globals.get(identifier).copied()
     }
 
-    pub fn action_definitions(&self) -> impl Iterator<Item = (&Rc<str>, &TypedDefinition)> {
+    pub fn actions(&self) -> impl Iterator<Item = (Rc<str>, &ProgramAction)> {
         self.action_definitions_order
             .iter()
-            .map(|identifier| (identifier, &self.action_definitions[identifier]))
+            .map(|identifier| (identifier.clone(), &self.actions[identifier]))
     }
 
-    pub fn find_action_definition(&self, identifier: &str) -> Option<&TypedDefinition> {
-        self.action_definitions.get(identifier)
+    pub fn find_action(&self, identifier: &str) -> Option<&ProgramAction> {
+        self.actions.get(identifier)
     }
 
-    pub fn intrinsics(&self) -> impl Iterator<Item = &ValueKind> {
-        self.intrinsics.values()
+    pub fn intrinsics(&self) -> impl Iterator<Item = ValueHandle> {
+        self.intrinsics.values().copied()
     }
 
-    pub fn find_intrinsic(&self, identifier: &str) -> Option<&ValueKind> {
-        self.intrinsics.get(identifier)
+    pub fn find_intrinsic(&self, identifier: &str) -> Option<ValueHandle> {
+        self.intrinsics.get(identifier).copied()
     }
 
-    pub fn ticker_declarations(&self) -> &[TickerDeclaration] {
-        &self.ticker_declarations
-    }
-
-    pub fn public_declarations(&self) -> &[PublicDeclaration] {
-        &self.public_declarations
-    }
-
-    pub fn display_declarations(&self) -> &[DisplayDeclaration] {
-        &self.display_declarations
-    }
-
-    pub fn resolve_type(&self, type_expression: &TypeExpression, allow_broadcastable: bool) -> crate::Result<Type> {
-        let check_point_component = |component_type: Type| {
-            if !component_type.is_numeric() {
-                Err(Box::new(crate::Error {
-                    kind: crate::ErrorKind::InvalidPointComponentType {
-                        component_type: component_type.to_string(),
-                    },
-                    span: Some(type_expression.span),
-                }))
-            }
-            else {
-                Ok(component_type)
-            }
-        };
-
+    pub fn resolve_type(&mut self, type_expression: &TypeExpression, allow_broadcastable: bool) -> crate::Result<TypeHandle> {
         match &type_expression.kind {
             TypeExpressionKind::Identifier(identifier) => {
-                if let Some(primitive) = Type::find_primitive(identifier) {
+                if let Some(primitive) = TypeHandle::find_primitive(identifier) {
                     Ok(primitive)
                 }
-                else if let Some(TypedDefinition {
-                                     value_type: Type::Meta { identifier },
-                                     ..
-                                 }) = self.find_definition(identifier) {
-                    Ok(Type::Enum {
-                        type_identifier: identifier.clone(),
-                    })
+                else if let Some(&Value::Type(type_handle)) = self.find_global(identifier)
+                    .map(|value| self.values.get(value))
+                {
+                    Ok(type_handle)
                 }
                 else {
                     Err(Box::new(crate::Error {
                         kind: crate::ErrorKind::UnrecognizedType {
-                            identifier: identifier.as_ref().into(),
+                            identifier: identifier.clone(),
                         },
                         span: Some(type_expression.span),
                     }))
@@ -253,17 +264,7 @@ impl GlobalContext {
                 // Allow broadcastable for the purposes of giving a nicer error message
                 let item_type = self.resolve_type(item_type, true)?;
 
-                if item_type.list_state().is_some() {
-                    Err(Box::new(crate::Error {
-                        kind: crate::ErrorKind::InvalidListItemType {
-                            item_type: item_type.to_string(),
-                        },
-                        span: Some(type_expression.span),
-                    }))
-                }
-                else {
-                    Ok(item_type.into_list(ListState::IsList))
-                }
+                self.types.list_type(ListState::IsList, item_type)
             }
             TypeExpressionKind::Broadcastable { item_type } => {
                 if !allow_broadcastable {
@@ -276,32 +277,22 @@ impl GlobalContext {
                 // Allow broadcastable for the purposes of giving a nicer error message
                 let item_type = self.resolve_type(item_type, true)?;
 
-                if item_type.list_state().is_some() {
-                    Err(Box::new(crate::Error {
-                        kind: crate::ErrorKind::InvalidBroadcastableItemType {
-                            item_type: item_type.to_string(),
-                        },
-                        span: Some(type_expression.span),
-                    }))
-                }
-                else {
-                    Ok(item_type.into_list(ListState::MaybeList))
-                }
+                self.types.list_type(ListState::MaybeList, item_type)
             }
             TypeExpressionKind::Point2 { x_type, y_type } => {
                 // Allow broadcastable components for the purposes of giving a nicer error message
-                Ok(Type::Point2D {
-                    x_type: Box::new(check_point_component(self.resolve_type(x_type, true)?)?),
-                    y_type: Box::new(check_point_component(self.resolve_type(y_type, true)?)?),
-                })
+                let x_type = self.resolve_type(x_type, true)?;
+                let y_type = self.resolve_type(y_type, true)?;
+
+                self.types.point_2d_type(x_type, y_type)
             }
             TypeExpressionKind::Point3 { x_type, y_type, z_type } => {
                 // Allow broadcastable components for the purposes of giving a nicer error message
-                Ok(Type::Point3D {
-                    x_type: Box::new(check_point_component(self.resolve_type(x_type, true)?)?),
-                    y_type: Box::new(check_point_component(self.resolve_type(y_type, true)?)?),
-                    z_type: Box::new(check_point_component(self.resolve_type(z_type, true)?)?),
-                })
+                let x_type = self.resolve_type(x_type, true)?;
+                let y_type = self.resolve_type(y_type, true)?;
+                let z_type = self.resolve_type(z_type, true)?;
+
+                self.types.point_3d_type(x_type, y_type, z_type)
             }
         }
     }
@@ -311,7 +302,7 @@ impl GlobalContext {
 pub struct LocalContext<'a> {
     outer_context: Option<&'a Self>,
     source_path: &'a Path,
-    locals: HashMap<Rc<str>, ValueKind>,
+    locals: HashMap<Rc<str>, ValueHandle>,
 }
 
 impl<'a> LocalContext<'a> {
@@ -344,22 +335,13 @@ impl<'a> LocalContext<'a> {
         }
     }
 
-    pub fn add_local(&mut self, identifier: Rc<str>, value: ValueKind) {
+    pub fn add_local(&mut self, identifier: Rc<str>, value: ValueHandle) {
         // TODO: prevent duplicate names?
         self.locals.insert(identifier, value);
     }
 
-    pub fn add_local_variable(&mut self, identifier: Rc<str>, id: u64, value_type: Type) -> LocalReference {
-        let local_reference = LocalReference {
-            id,
-            value_type,
-        };
-        self.add_local(identifier, ValueKind::Local(local_reference.clone()));
-        local_reference
-    }
-
-    pub fn find_local(&self, identifier: &str) -> Option<&ValueKind> {
-        self.locals.get(identifier).or_else(|| {
+    pub fn find_local(&self, identifier: &str) -> Option<ValueHandle> {
+        self.locals.get(identifier).copied().or_else(|| {
             self.outer_context.and_then(|context| context.find_local(identifier))
         })
     }

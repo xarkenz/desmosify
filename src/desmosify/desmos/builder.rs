@@ -6,7 +6,7 @@ use crate::desmos::target::DesmosTargetContext;
 use crate::desmos_expression;
 use crate::sema::{Program, ProgramAction, ProgramImmutable, ProgramPublicEntry, ProgramPublicLine, ProgramTicker, ProgramVariable, ProgramVariableKind};
 use crate::sema::display::{ImageValue, ProgramDisplayAttributeKind, ProgramDisplayElement};
-use crate::sema::values::{ActionValue, ActionValueKind, BinaryKind, DoubleReducerKind, IndexKind, InequalityKind, MathematicalConstant, ParameterizedReducerKind, ReducerKind, TernaryKind, UnaryKind, Value, ValueKind};
+use crate::sema::values::{ActionValue, ActionValueKind, BinaryKind, DoubleReducerKind, IndexKind, InequalityKind, MathematicalConstant, ParameterizedReducerKind, ReducerKind, TernaryKind, UnaryKind, ValueRegistryEntry, Value};
 
 pub mod library;
 pub mod fragile;
@@ -190,73 +190,73 @@ impl<'ctx> GraphExpressionListBuilder<'ctx> {
         symbol
     }
 
-    pub fn translate_value(&mut self, value: &Value) -> crate::Result<GraphExpression> {
+    pub fn translate_value(&mut self, value: &ValueRegistryEntry) -> crate::Result<GraphExpression> {
         let unsupported_error = || Box::new(crate::Error {
             kind: crate::ErrorKind::UnsupportedValue,
             span: value.span,
         });
 
         match &value.kind {
-            ValueKind::Undefined(..) => {
+            Value::Undefined(..) => {
                 // Create undefined using the alternative branch of a piecewise. This is the best
                 // way to generate it reliably for any type that I can think of.
                 Ok(desmos_expression!(
                     Piecewise ((@int 0) Equal (@int 1))
                 ))
             }
-            ValueKind::Infinity(..) => {
+            Value::Infinity(..) => {
                 Ok(GraphExpression::Escape("infty".into()))
             }
-            ValueKind::Real(value) => {
+            Value::Real(value) => {
                 Ok(GraphExpression::Decimal(*value))
             }
-            ValueKind::Mathematical(kind) => {
+            Value::Mathematical(kind) => {
                 Ok(match kind {
                     MathematicalConstant::Pi => GraphExpression::Escape("pi".into()),
                     MathematicalConstant::Tau => GraphExpression::Escape("tau".into()),
                     MathematicalConstant::E => GraphExpression::Letter('e'),
                 })
             }
-            ValueKind::Int(value) => {
+            Value::Int(value) => {
                 Ok(GraphExpression::Integer(*value))
             }
-            ValueKind::Bool(value) => {
+            Value::Bool(value) => {
                 Ok(GraphExpression::Integer(*value as i64))
             }
-            ValueKind::EnumVariant { variant_ordinal, .. } => {
+            Value::EnumVariant { ordinal: variant_ordinal, .. } => {
                 Ok(GraphExpression::Integer(*variant_ordinal))
             }
-            ValueKind::Global(reference) => {
+            Value::Global(reference) => {
                 Ok(self.context.get_global_symbol(&reference.identifier))
             }
-            ValueKind::Action(reference) => {
+            Value::Action(reference) => {
                 Ok(self.context.get_action_symbol(&reference.identifier))
             }
-            ValueKind::Local(reference) => {
+            Value::Local(reference) => {
                 Ok(self.context.get_local_symbol(reference.id))
             }
-            ValueKind::ViewportWidth => {
+            Value::ViewportWidth => {
                 Ok(GraphExpression::OperatorName("width".into()))
             }
-            ValueKind::ViewportHeight => {
+            Value::ViewportHeight => {
                 Ok(GraphExpression::OperatorName("height".into()))
             }
-            ValueKind::TickerDt => {
+            Value::TickerDt => {
                 Ok(GraphExpression::OperatorName("dt".into()))
             }
-            ValueKind::ClickIndex => {
+            Value::ClickIndex => {
                 Ok(GraphExpression::OperatorName("index".into()))
             }
-            ValueKind::Unary { kind, operand, .. } => {
+            Value::Unary { kind, operand, .. } => {
                 self.translate_unary(*kind, operand, unsupported_error)
             }
-            ValueKind::Binary { kind, lhs, rhs, .. } => {
+            Value::Binary { kind, lhs, rhs, .. } => {
                 self.translate_binary(*kind, lhs, rhs, unsupported_error)
             }
-            ValueKind::Ternary { kind, first, second, third, .. } => {
+            Value::Ternary { kind, first, second, third, .. } => {
                 self.translate_ternary(*kind, first, second, third, unsupported_error)
             }
-            ValueKind::InequalityChain { lhs, chain, .. } => {
+            Value::InequalityChain { lhs, chain, .. } => {
                 Ok(desmos_expression!(
                     Piecewise [
                         (@ineq {self.translate_value(lhs)?} [@? chain
@@ -274,26 +274,26 @@ impl<'ctx> GraphExpressionListBuilder<'ctx> {
                     ]
                 ))
             }
-            ValueKind::Reducer { kind, list, .. } => {
+            Value::Reducer { kind, list, .. } => {
                 self.translate_reducer(*kind, [list.as_ref()], false, unsupported_error)
             }
-            ValueKind::ArgumentsReducer { kind, arguments, .. } => {
+            Value::ArgumentsReducer { kind, arguments, .. } => {
                 self.translate_reducer(*kind, arguments, true, unsupported_error)
             }
-            ValueKind::DoubleReducer { kind, list_1, list_2, .. } => {
+            Value::DoubleReducer { kind, lhs_list: list_1, rhs_list: list_2, .. } => {
                 self.translate_double_reducer(*kind, list_1, list_2, unsupported_error)
             }
-            ValueKind::ParameterizedReducer { kind, list, parameter, .. } => {
+            Value::ParameterizedReducer { kind, list, parameter, .. } => {
                 self.translate_parameterized_reducer(*kind, list, parameter, unsupported_error)
             }
-            ValueKind::Join { values, .. } => {
+            Value::Join { values, .. } => {
                 Ok(desmos_expression!(
                     (@operatorname "join") Call [@? values
                         .iter()
                         .map(|argument| self.translate_value(argument))]
                 ))
             }
-            ValueKind::Random { source, sample_count, .. } => {
+            Value::Random { source, sample_count, .. } => {
                 Ok(desmos_expression!(
                     (@operatorname "random") Call [@? source.as_deref()
                         .into_iter()
@@ -301,7 +301,7 @@ impl<'ctx> GraphExpressionListBuilder<'ctx> {
                         .map(|argument| self.translate_value(argument))]
                 ))
             }
-            ValueKind::RandomSeeded { source, sample_count, seed, .. } => {
+            Value::RandomSeeded { source, sample_count, seed, .. } => {
                 Ok(desmos_expression!(
                     (@operatorname "random") Call [@? source.as_deref()
                         .into_iter()
@@ -309,14 +309,14 @@ impl<'ctx> GraphExpressionListBuilder<'ctx> {
                         .map(|argument| self.translate_value(argument))]
                 ))
             }
-            ValueKind::List { items, .. } => {
+            Value::List { items, .. } => {
                 Ok(desmos_expression!(
                     List [@? items
                         .iter()
                         .map(|item| self.translate_value(item))]
                 ))
             }
-            ValueKind::ListRange { kind, start, end, step, .. } => {
+            Value::ListRange { kind, start, end, step, .. } => {
                 Ok(desmos_expression!(
                     {match kind {
                         RangeKind::Inclusive => self.library.range_inclusive(self.context),
@@ -328,7 +328,7 @@ impl<'ctx> GraphExpressionListBuilder<'ctx> {
                     ]
                 ))
             }
-            ValueKind::ListFill { value, count } => {
+            Value::ListFill { value, count } => {
                 Ok(desmos_expression!(
                     (@operatorname "repeat") Call [
                         {self.translate_value(value)?},
@@ -336,7 +336,7 @@ impl<'ctx> GraphExpressionListBuilder<'ctx> {
                     ]
                 ))
             }
-            ValueKind::ListMap { loops, value } => {
+            Value::ListMap { loops, value } => {
                 Ok(desmos_expression!(
                     List ({self.translate_value(value)?} For [@? loops
                         .iter()
@@ -347,12 +347,12 @@ impl<'ctx> GraphExpressionListBuilder<'ctx> {
                         )))])
                 ))
             }
-            ValueKind::ListFilter { list, condition, .. } => {
+            Value::ListFilter { list, condition, .. } => {
                 Ok(desmos_expression!(
                     {self.translate_value(list)?} Index {self.translate_condition(condition)?}
                 ))
             }
-            ValueKind::Index { list, kind: operation, .. } => match operation {
+            Value::Index { list, kind: operation, .. } => match operation {
                 IndexKind::Single { index } => {
                     Ok(desmos_expression!(
                         {self.translate_value(list)?} Index {self.translate_value(index)?}
@@ -394,7 +394,7 @@ impl<'ctx> GraphExpressionListBuilder<'ctx> {
                     ))
                 }
             }
-            ValueKind::Conditional { condition_consequents, alternative, .. } => {
+            Value::Conditional { condition_consequents, alternative, .. } => {
                 Ok(GraphExpression::Unary {
                     kind: GraphUnaryKind::Piecewise,
                     inner: Box::new(GraphExpression::Sequence {
@@ -421,14 +421,14 @@ impl<'ctx> GraphExpressionListBuilder<'ctx> {
                     }),
                 })
             }
-            ValueKind::UserFunctionCall { function, arguments, .. } => {
+            Value::UserFunctionCall { function, arguments, .. } => {
                 Ok(desmos_expression!(
                     {self.translate_value(function)?} Call [@? arguments
                         .iter()
                         .map(|argument| self.translate_value(argument))]
                 ))
             }
-            ValueKind::InlineAction { parameters, action } => {
+            Value::InlineAction { parameters, action } => {
                 let action = self.translate_action_value(action)?;
                 let action_symbol = self.context.create_inline_action_symbol();
 
@@ -460,13 +460,13 @@ impl<'ctx> GraphExpressionListBuilder<'ctx> {
     fn translate_unary(
         &mut self,
         kind: UnaryKind,
-        operand: &Value,
+        operand: &ValueRegistryEntry,
         unsupported_error: impl Fn() -> Box<crate::Error>,
     ) -> crate::Result<GraphExpression> {
         let _ = unsupported_error; // We'll use you soon enough
 
         match kind {
-            UnaryKind::AssumeType => {
+            UnaryKind::Alias => {
                 self.translate_value(operand)
             }
             UnaryKind::Positive => {
@@ -771,8 +771,8 @@ impl<'ctx> GraphExpressionListBuilder<'ctx> {
     fn translate_binary(
         &mut self,
         kind: BinaryKind,
-        lhs: &Value,
-        rhs: &Value,
+        lhs: &ValueRegistryEntry,
+        rhs: &ValueRegistryEntry,
         unsupported_error: impl Fn() -> Box<crate::Error>,
     ) -> crate::Result<GraphExpression> {
         let _ = unsupported_error; // We'll use you soon enough
@@ -1039,9 +1039,9 @@ impl<'ctx> GraphExpressionListBuilder<'ctx> {
     fn translate_ternary(
         &mut self,
         kind: TernaryKind,
-        first: &Value,
-        second: &Value,
-        third: &Value,
+        first: &ValueRegistryEntry,
+        second: &ValueRegistryEntry,
+        third: &ValueRegistryEntry,
         unsupported_error: impl Fn() -> Box<crate::Error>,
     ) -> crate::Result<GraphExpression> {
         let _ = unsupported_error; // We'll use you soon enough
@@ -1124,7 +1124,7 @@ impl<'ctx> GraphExpressionListBuilder<'ctx> {
     fn translate_reducer<'a>(
         &mut self,
         kind: ReducerKind,
-        arguments: impl IntoIterator<Item = &'a Value>,
+        arguments: impl IntoIterator<Item = &'a ValueRegistryEntry>,
         is_arg_reducer: bool,
         unsupported_error: impl Fn() -> Box<crate::Error>,
     ) -> crate::Result<GraphExpression> {
@@ -1181,8 +1181,8 @@ impl<'ctx> GraphExpressionListBuilder<'ctx> {
     fn translate_double_reducer(
         &mut self,
         kind: DoubleReducerKind,
-        lhs_list: &Value,
-        rhs_list: &Value,
+        lhs_list: &ValueRegistryEntry,
+        rhs_list: &ValueRegistryEntry,
         unsupported_error: impl Fn() -> Box<crate::Error>,
     ) -> crate::Result<GraphExpression> {
         let _ = unsupported_error; // We'll use you soon enough
@@ -1204,8 +1204,8 @@ impl<'ctx> GraphExpressionListBuilder<'ctx> {
     fn translate_parameterized_reducer(
         &mut self,
         kind: ParameterizedReducerKind,
-        list: &Value,
-        parameter: &Value,
+        list: &ValueRegistryEntry,
+        parameter: &ValueRegistryEntry,
         unsupported_error: impl Fn() -> Box<crate::Error>,
     ) -> crate::Result<GraphExpression> {
         let _ = unsupported_error; // We'll use you soon enough
@@ -1223,29 +1223,29 @@ impl<'ctx> GraphExpressionListBuilder<'ctx> {
         ))
     }
 
-    pub fn translate_condition(&mut self, value: &Value) -> crate::Result<GraphExpression> {
+    pub fn translate_condition(&mut self, value: &ValueRegistryEntry) -> crate::Result<GraphExpression> {
         match &value.kind {
-            ValueKind::Bool(true) => {
+            Value::Bool(true) => {
                 Ok(desmos_expression!(
                     (@int 0) Equal (@int 0)
                 ))
             }
-            ValueKind::Bool(false) => {
+            Value::Bool(false) => {
                 Ok(desmos_expression!(
                     (@int 0) Equal (@int 1)
                 ))
             }
-            ValueKind::Unary { kind: UnaryKind::LogicalNot, operand, .. } => {
+            Value::Unary { kind: UnaryKind::LogicalNot, operand, .. } => {
                 Ok(desmos_expression!(
                     {self.translate_value(operand)?} Equal (@int 0)
                 ))
             }
-            ValueKind::Binary { kind: BinaryKind::Equal, lhs, rhs, .. } => {
+            Value::Binary { kind: BinaryKind::Equal, lhs, rhs, .. } => {
                 Ok(desmos_expression!(
                     {self.translate_value(lhs)?} Equal {self.translate_value(rhs)?}
                 ))
             }
-            ValueKind::Binary { kind: BinaryKind::NotEqual, lhs, rhs, .. } => {
+            Value::Binary { kind: BinaryKind::NotEqual, lhs, rhs, .. } => {
                 // If only Desmos had an operator for this... substitute with {lhs = rhs, 0} = 0
                 Ok(desmos_expression!(
                     (Piecewise [
@@ -1254,7 +1254,7 @@ impl<'ctx> GraphExpressionListBuilder<'ctx> {
                     ]) Equal (@int 0)
                 ))
             }
-            ValueKind::InequalityChain { lhs, chain, .. } => {
+            Value::InequalityChain { lhs, chain, .. } => {
                 Ok(desmos_expression!(
                     (@ineq {self.translate_value(lhs)?} [@? chain
                         .iter()
@@ -1502,7 +1502,7 @@ impl<'ctx> GraphExpressionListBuilder<'ctx> {
         let id = self.context.create_entry_id();
         let entry: BoxedGraphEntry = match public_line {
             ProgramPublicLine::Expression(value) => match &value.kind {
-                ValueKind::Str(text) => {
+                Value::Str(text) => {
                     let text = text.trim();
                     if text.is_empty() {
                         Box::new(GraphExpressionEntry {
@@ -1571,7 +1571,7 @@ impl<'ctx> GraphExpressionListBuilder<'ctx> {
 
     pub fn add_display_element(&mut self, element: &ProgramDisplayElement) -> crate::Result<()> {
         match &element.value.kind {
-            ValueKind::Image(image, _) => {
+            Value::Image(image, _) => {
                 self.add_image_display_element(element, image)
             }
             _ => {

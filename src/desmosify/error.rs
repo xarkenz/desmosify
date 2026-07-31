@@ -3,6 +3,7 @@ use super::*;
 use std::io::{BufRead, BufReader};
 use std::fs::File;
 use std::path::{Path, PathBuf};
+use std::rc::Rc;
 
 #[derive(Copy, Clone, PartialEq, Debug)]
 pub struct Span {
@@ -122,7 +123,7 @@ pub enum ErrorKind {
         cause: std::io::Error,
     },
     UnsupportedTarget {
-        name: Box<str>,
+        name: String,
     },
     InvalidToken,
     InvalidLiteralSuffix,
@@ -165,127 +166,127 @@ pub enum ErrorKind {
         keyword: token::TokenKind,
     },
     ReservedIdentifier {
-        identifier: Box<str>,
+        identifier: Rc<str>,
     },
     ConflictingGlobalIdentifiers {
-        identifier: Box<str>,
+        identifier: Rc<str>,
     },
     ConflictingActionIdentifiers {
-        identifier: Box<str>,
+        identifier: Rc<str>,
     },
     UnrecognizedType {
-        identifier: Box<str>,
+        identifier: Rc<str>,
     },
     InvalidListItemType {
-        item_type: String,
+        item_type: Rc<str>,
     },
     BroadcastableTypeNotAllowed,
     InvalidBroadcastableItemType {
-        item_type: String,
+        item_type: Rc<str>,
     },
     InvalidPointComponentType {
-        component_type: String,
+        component_type: Rc<str>,
     },
     InvalidArity {
         expected: usize,
         got: usize,
     },
     InvalidIntrinsicArity {
-        identifier: Box<str>,
+        identifier: Rc<str>,
         min: usize,
         max: usize,
         got: usize,
     },
     InvalidVariadicIntrinsicArity {
-        identifier: Box<str>,
+        identifier: Rc<str>,
         min: usize,
         got: usize,
     },
     MismatchedTypes {
-        expected: String,
-        got: String,
+        expected_type: Rc<str>,
+        got_type: Rc<str>,
     },
     ExpectedNumericType {
-        got_type: String,
+        got_type: Rc<str>,
     },
     ExpectedNumericOrPointType {
-        got_type: String,
+        got_type: Rc<str>,
     },
     ExpectedNumericPointType {
-        got_type: String,
+        got_type: Rc<str>,
     },
     ExpectedNumericPoint2Type {
-        got_type: String,
+        got_type: Rc<str>,
     },
     ExpectedNumericPoint3Type {
-        got_type: String,
+        got_type: Rc<str>,
     },
     ExpectedListType {
-        got_type: String,
+        got_type: Rc<str>,
     },
     ExpectedListOrDistributionType {
-        got_type: String,
+        got_type: Rc<str>,
     },
     ExpectedFunctionType {
-        got_type: String,
+        got_type: Rc<str>,
     },
     ExpectedActionType {
-        expected_parameter_lists: Vec<Vec<String>>,
-        got_type: String,
+        expected_parameter_lists: Vec<Vec<Rc<str>>>,
+        got_type: Rc<str>,
     },
     ExpectedTypeValue,
     ExpectedEnumTypeValue,
     CannotMergeTypes {
-        type_1: String,
-        type_2: String,
+        lhs_type: Rc<str>,
+        rhs_type: Rc<str>,
     },
     IncompatibleTickerIntervals,
     InvalidUpdateLhs,
     UnexpectedExpressionKind,
     IntegerTooLarge,
     UndefinedIntrinsic {
-        identifier: Box<str>,
+        identifier: Rc<str>,
     },
     UndefinedAction {
-        identifier: Box<str>,
+        identifier: Rc<str>,
     },
     UndefinedIdentifier {
-        identifier: Box<str>,
+        identifier: Rc<str>,
     },
     UndefinedEnumVariant {
-        enum_identifier: Box<str>,
-        variant_identifier: Box<str>,
+        enum_identifier: Rc<str>,
+        variant_identifier: Rc<str>,
     },
     InvalidAccessOperation {
-        lhs_type: String,
-        rhs: Box<str>,
+        lhs_type: Rc<str>,
+        rhs: Rc<str>,
     },
     UnsupportedValue,
     UnsupportedDisplayAttribute {
-        key: Box<str>,
+        key: Rc<str>,
     },
     DuplicatedDisplayAttribute {
-        key: Box<str>,
+        key: Rc<str>,
     },
     InvalidDisplayAttributeArity {
-        key: Box<str>,
+        key: Rc<str>,
         min: usize,
         max: usize,
         got: usize,
     },
     ExpectedConstant {
-        type_identifier: String,
+        type_identifier: Rc<str>,
     },
     ExpectedConstantStrFromList {
-        allowed: Vec<Box<str>>,
+        allowed: Vec<Rc<str>>,
     },
     ExpectedAction,
     ExpectedGlobalOrActionReference,
     MultipleSlidersForVariable {
-        identifier: Box<str>,
+        identifier: Rc<str>,
     },
     InvalidSliderReference {
-        identifier: Box<str>,
+        identifier: Rc<str>,
     },
     CannotNestFolders,
 }
@@ -427,7 +428,7 @@ impl std::fmt::Display for ErrorKind {
             Self::InvalidVariadicIntrinsicArity { identifier, min, got } => {
                 write!(f, "function '@{identifier}' expects at least {min} arguments but received {got}")
             }
-            Self::MismatchedTypes { expected, got } => {
+            Self::MismatchedTypes { expected_type: expected, got_type: got } => {
                 write!(f, "expected a value of type '{expected}', but got '{got}' instead")
             }
             Self::ExpectedNumericType { got_type } => {
@@ -456,7 +457,7 @@ impl std::fmt::Display for ErrorKind {
             }
             Self::ExpectedActionType { expected_parameter_lists, got_type } => {
                 write!(f, "expected an action accepting parameters ")?;
-                fn write_parameter_list(f: &mut std::fmt::Formatter, parameter_list: &[String]) -> std::fmt::Result {
+                fn write_parameter_list(f: &mut std::fmt::Formatter, parameter_list: &[Rc<str>]) -> std::fmt::Result {
                     match parameter_list {
                         [] => write!(f, "()"),
                         [first, rest @ ..] => {
@@ -481,8 +482,8 @@ impl std::fmt::Display for ErrorKind {
             Self::ExpectedEnumTypeValue => {
                 write!(f, "expected the name of an enumeration type")
             }
-            Self::CannotMergeTypes { type_1, type_2 } => {
-                write!(f, "types '{type_1}' and '{type_2}' are incompatible")
+            Self::CannotMergeTypes { lhs_type, rhs_type } => {
+                write!(f, "types '{lhs_type}' and '{rhs_type}' are incompatible")
             }
             Self::IncompatibleTickerIntervals => {
                 write!(f, "having multiple tickers with different intervals is not yet allowed")
