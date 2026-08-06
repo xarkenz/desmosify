@@ -31,7 +31,7 @@ pub fn get_core_intrinsics(target: &dyn Target) -> impl Iterator<Item = (&'stati
             (function.identifier, Intrinsic::Entry(ValueEntry {
                 value: Value::IntrinsicFunction(function),
                 type_handle: TypeHandle::INTRINSIC_FUNCTION,
-                ..Default::default()
+                span: None,
             }))
         })
         .chain([
@@ -46,7 +46,7 @@ pub fn get_core_intrinsics(target: &dyn Target) -> impl Iterator<Item = (&'stati
             ("target", ValueEntry {
                 value: Value::Str(target.name().into()),
                 type_handle: TypeHandle::STR,
-                ..Default::default()
+                span: None,
             }.into()),
         ])
 }
@@ -57,25 +57,23 @@ pub struct IntrinsicFunction {
     pub min_arity: usize,
     pub max_arity: Option<usize>,
     pub interpret_call: fn(
-        target: &mut dyn Target,
         context: &mut GlobalContext,
         local_context: &LocalContext,
         arguments: Box<[ValueHandle]>,
-    ) -> crate::Result<Value>,
+    ) -> crate::Result<ValueEntry>,
 }
 
 impl IntrinsicFunction {
     pub fn interpret_call(
         &self,
-        target: &mut dyn Target,
         context: &mut GlobalContext,
         local_context: &LocalContext,
         span: Option<crate::Span>,
         arguments: Box<[ValueHandle]>,
-    ) -> crate::Result<Value> {
+    ) -> crate::Result<ValueEntry> {
         self.check_arity(arguments.len(), span)?;
 
-        (self.interpret_call)(target, context, local_context, arguments)
+        (self.interpret_call)(context, local_context, arguments)
     }
 
     pub fn check_arity(&self, argument_count: usize, span: Option<crate::Span>) -> crate::Result<()> {
@@ -1931,10 +1929,10 @@ pub static TARGET_SYMBOL: IntrinsicFunction = IntrinsicFunction {
         let argument = arguments.into_iter().next().unwrap();
 
         let symbol_name = match &argument.kind {
-            Value::Global(reference) => {
+            Value::GlobalReference(reference) => {
                 target.get_global_symbol_name(&reference.identifier)
             }
-            Value::Action(reference) => {
+            Value::ActionReference(reference) => {
                 target.get_action_symbol_name(&reference.identifier)
             }
             _ => return Err(Box::new(crate::Error {

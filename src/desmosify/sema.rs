@@ -1,7 +1,7 @@
 use std::rc::Rc;
 use crate::sema::display::ProgramDisplay;
 use crate::sema::types::TypeHandle;
-use crate::sema::values::{ActionValue, LocalReference, ValueHandle};
+use crate::sema::values::{ActionValue, ValueHandle};
 
 pub mod context;
 pub mod display;
@@ -19,7 +19,7 @@ pub struct ProgramEnumeration {
 #[derive(Clone, Debug)]
 pub struct ProgramImmutable {
     pub identifier: Rc<str>,
-    pub parameters: Option<Box<[LocalReference]>>,
+    pub parameters: Option<Box<[ValueHandle]>>,
     pub value: ValueHandle,
 }
 
@@ -44,7 +44,7 @@ pub struct ProgramVariable {
 #[derive(Clone, Debug)]
 pub struct ProgramAction {
     pub identifier: Rc<str>,
-    pub parameters: Box<[LocalReference]>,
+    pub parameters: Box<[ValueHandle]>,
     pub action: ActionValue,
 }
 

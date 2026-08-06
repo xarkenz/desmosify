@@ -296,7 +296,7 @@ impl<'a, T: BufRead> Parser<'a, T> {
 
                         if let Some(TokenKind::ParenRight) = self.current_token_kind() {
                             // Point literal with two components
-                            ExpressionKind::Point2 {
+                            ExpressionKind::Point2D {
                                 x: Box::new(first_item),
                                 y: Box::new(second_item),
                             }
@@ -311,7 +311,7 @@ impl<'a, T: BufRead> Parser<'a, T> {
                                 self.expect_token_from(&[TokenKind::ParenRight])?;
                             }
 
-                            ExpressionKind::Point3 {
+                            ExpressionKind::Point3D {
                                 x: Box::new(first_item),
                                 y: Box::new(second_item),
                                 z: Box::new(third_item),

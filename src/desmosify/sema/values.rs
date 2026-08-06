@@ -7,28 +7,33 @@ use crate::sema::intrinsic::IntrinsicFunction;
 use crate::sema::types::{ListState, Type, TypeHandle, TypeRegistry};
 use crate::util::LazyConst;
 
-#[derive(Copy, Clone, PartialEq, Eq, Debug)]
+#[derive(Copy, Clone, PartialEq, Eq, Hash, Debug)]
 pub enum MathematicalConstant {
     Pi,
     Tau,
     E,
 }
 
+#[derive(Copy, Clone, PartialEq, Eq, Hash, Debug)]
+pub enum GlobalSymbolKind {
+    PrimitiveType,
+    UserDefinedType,
+    EnumOrdinal,
+    Intrinsic,
+    Immutable,
+    Variable,
+    Action,
+}
+
 #[derive(Clone, Debug)]
-pub struct ActionReference {
+pub struct GlobalSymbol {
+    pub kind: GlobalSymbolKind,
     pub identifier: Rc<str>,
-    pub action_type: TypeHandle,
+    pub value: ValueHandle,
 }
 
-#[derive(Clone, Debug)]
-pub struct LocalReference {
-    pub id: u64,
-    pub value: Option<ValueHandle>,
-}
-
-#[derive(Copy, Clone, PartialEq, Eq, Debug)]
+#[derive(Copy, Clone, PartialEq, Eq, Hash, Debug)]
 pub enum UnaryKind {
-    Alias,
     Positive,
     Negative,
     LogicalNot,
@@ -92,7 +97,7 @@ pub enum UnaryKind {
     BoolFromInternal,
 }
 
-#[derive(Copy, Clone, PartialEq, Eq, Debug)]
+#[derive(Copy, Clone, PartialEq, Eq, Hash, Debug)]
 pub enum BinaryKind {
     Exponent,
     Multiply,
@@ -158,7 +163,7 @@ pub enum BinaryKind {
     MidpointOfPoints3D,
 }
 
-#[derive(Copy, Clone, PartialEq, Eq, Debug)]
+#[derive(Copy, Clone, PartialEq, Eq, Hash, Debug)]
 pub enum TernaryKind {
     /// first = x, second = y, third = z
     Point3D,
@@ -183,7 +188,7 @@ pub enum TernaryKind {
     Oklch,
 }
 
-#[derive(Copy, Clone, PartialEq, Eq, Debug)]
+#[derive(Copy, Clone, PartialEq, Eq, Hash, Debug)]
 pub enum InequalityKind {
     LessThan,
     LessEqual,
@@ -191,7 +196,7 @@ pub enum InequalityKind {
     GreaterEqual,
 }
 
-#[derive(Copy, Clone, PartialEq, Eq, Debug)]
+#[derive(Copy, Clone, PartialEq, Eq, Hash, Debug)]
 pub enum ReducerKind {
     Lcm,
     Gcd,
@@ -210,7 +215,7 @@ pub enum ReducerKind {
     ComposeTransforms2D,
 }
 
-#[derive(Copy, Clone, PartialEq, Eq, Debug)]
+#[derive(Copy, Clone, PartialEq, Eq, Hash, Debug)]
 pub enum DoubleReducerKind {
     Cov,
     Covp,
@@ -218,7 +223,7 @@ pub enum DoubleReducerKind {
     Spearman,
 }
 
-#[derive(Copy, Clone, PartialEq, Eq, Debug)]
+#[derive(Copy, Clone, PartialEq, Eq, Hash, Debug)]
 pub enum ParameterizedReducerKind {
     Quartile,
     Quantile,
@@ -246,10 +251,15 @@ pub enum IndexKind {
     },
 }
 
+impl IndexKind {
+    pub const fn result_is_list(&self) -> bool {
+        !matches!(self, Self::Single { .. })
+    }
+}
+
 #[derive(Clone, Debug)]
 pub struct ListMapLoop {
-    pub local: LocalReference,
-    pub local_span: Option<crate::Span>,
+    pub local: ValueHandle,
     pub list: ValueHandle,
 }
 
@@ -257,9 +267,10 @@ pub struct ListMapLoop {
 pub enum Value {
     /// Indicates a value that is currently unknown. This is distinct from `Undefined`, which is a
     /// known value. This is used as a placeholder for the value of a global variable before it is
-    /// fully interpreted.
+    /// fully interpreted. It is also used as the value for local variables such as parameters.
     #[default]
     Opaque,
+    Alias(ValueHandle),
     Type(TypeHandle),
     Undefined,
     Infinity,
@@ -267,14 +278,15 @@ pub enum Value {
     Mathematical(MathematicalConstant),
     Int(i64),
     Bool(bool),
-    EnumVariant {
-        ordinal: i64,
-    },
     Str(Rc<str>),
     Image(Box<ImageValue>),
     IntrinsicFunction(&'static IntrinsicFunction),
-    Action(ActionReference),
-    Local(LocalReference),
+    IntrinsicReference(GlobalSymbol),
+    GlobalReference(GlobalSymbol),
+    ActionReference(GlobalSymbol),
+    Local {
+        id: u64,
+    },
     ViewportWidth,
     ViewportHeight,
     TickerDt,
@@ -336,7 +348,6 @@ pub enum Value {
         start: ValueHandle,
         end: ValueHandle,
         step: ValueHandle,
-        item_type: Type,
     },
     ListFill {
         value: ValueHandle,
@@ -362,8 +373,8 @@ pub enum Value {
         function: ValueHandle,
         arguments: Box<[ValueHandle]>,
     },
-    InlineAction {
-        parameters: Box<[LocalReference]>,
+    Action {
+        parameters: Box<[ValueHandle]>,
         action: Box<ActionValue>,
     },
 }
@@ -410,33 +421,25 @@ impl Value {
     }
 }
 
-#[derive(Clone, Debug)]
-pub enum ValueTagKind {
-    EnumOrdinal,
-    GlobalImmutable,
-    GlobalVariable,
-}
-
-#[derive(Clone, Debug)]
-pub struct ValueTag {
-    pub identifier: Rc<str>,
-    pub kind: ValueTagKind,
-}
-
 #[derive(Clone, Default, Debug)]
 pub struct ValueEntry {
     pub value: Value,
     pub type_handle: TypeHandle,
-    pub tag: Option<ValueTag>,
     pub span: Option<crate::Span>,
 }
 
 impl ValueEntry {
+    pub fn with_span(self, span: Option<crate::Span>) -> Self {
+        Self {
+            span,
+            ..self
+        }
+    }
+
     pub const fn undefined(type_handle: TypeHandle) -> Self {
         Self {
             value: Value::Undefined,
             type_handle,
-            tag: None,
             span: None,
         }
     }
@@ -445,7 +448,6 @@ impl ValueEntry {
         Self {
             value: Value::Infinity,
             type_handle,
-            tag: None,
             span: None,
         }
     }
@@ -454,7 +456,6 @@ impl ValueEntry {
         Self {
             value: Value::Real(value),
             type_handle: TypeHandle::REAL,
-            tag: None,
             span: None,
         }
     }
@@ -463,7 +464,6 @@ impl ValueEntry {
         Self {
             value: Value::Int(value),
             type_handle: TypeHandle::INT,
-            tag: None,
             span: None,
         }
     }
@@ -472,9 +472,12 @@ impl ValueEntry {
         Self {
             value: Value::Bool(value),
             type_handle: TypeHandle::BOOL,
-            tag: None,
             span: None,
         }
+    }
+
+    pub fn register(self, registry: &mut ValueRegistry) -> ValueHandle {
+        registry.register(self)
     }
 }
 
@@ -568,6 +571,26 @@ impl ValueHandle {
         // This is trivially guaranteed to never underflow.
         self.0.get() - 1
     }
+
+    pub fn entry(self, registry: &ValueRegistry) -> &ValueEntry {
+        registry.entry(self)
+    }
+
+    pub fn entry_mut(self, registry: &mut ValueRegistry) -> &mut ValueEntry {
+        registry.entry_mut(self)
+    }
+
+    pub fn get(self, registry: &ValueRegistry) -> &Value {
+        registry.get(self)
+    }
+
+    pub fn get_type(self, registry: &ValueRegistry) -> TypeHandle {
+        registry.get_type(self)
+    }
+
+    pub fn get_span(self, registry: &ValueRegistry) -> Option<crate::Span> {
+        registry.get_span(self)
+    }
 }
 
 #[derive(Debug)]
@@ -612,8 +635,8 @@ impl ValueRegistry {
         &self.entries[handle.index()].value
     }
 
-    pub fn get_mut(&mut self, handle: ValueHandle) -> &mut Value {
-        &mut self.entries[handle.index()].value
+    pub fn replace(&mut self, handle: ValueHandle, value: Value) -> Value {
+        std::mem::replace(&mut self.entries[handle.index()].value, value)
     }
 
     pub fn get_type(&self, handle: ValueHandle) -> TypeHandle {
@@ -630,6 +653,13 @@ impl ValueRegistry {
 
     pub fn set_span(&mut self, handle: ValueHandle, span: Option<crate::Span>) {
         self.entries[handle.index()].span = span;
+    }
+
+    pub fn ignoring_alias(&self, mut handle: ValueHandle) -> ValueHandle {
+        while let Value::Alias(alias_handle) = *self.get(handle) {
+            handle = alias_handle;
+        }
+        handle
     }
 
     pub fn type_value(&mut self, type_handle: TypeHandle) -> ValueHandle {
@@ -651,10 +681,7 @@ impl ValueRegistry {
         }
         else {
             self.register(ValueEntry {
-                value: Value::Unary {
-                    kind: UnaryKind::Alias,
-                    operand: handle,
-                },
+                value: Value::Alias(handle),
                 type_handle,
                 span,
                 ..Default::default()
@@ -692,12 +719,6 @@ impl ValueRegistry {
             (&Value::Bool(value), Type::Real) => {
                 Some(Value::Real(value as i32 as f64))
             }
-            (&Value::EnumVariant { ordinal, .. }, Type::Int) => {
-                Some(Value::Int(ordinal))
-            }
-            (&Value::EnumVariant { ordinal, .. }, Type::Real) => {
-                Some(Value::Real(ordinal as f64))
-            }
             _ => None
         };
 
@@ -705,7 +726,6 @@ impl ValueRegistry {
             Some(value) => self.register(ValueEntry {
                 value,
                 type_handle: result_type,
-                tag: None,
                 span,
             }),
             None => self.assume_type(handle, result_type, span),
@@ -742,6 +762,7 @@ macro_rules! known_value_handles {
 
 known_value_handles! {
     UNDEFINED => (ValueEntry::undefined(TypeHandle::ANY)),
+    INFINITY => (ValueEntry::infinity(TypeHandle::INT)),
     ZERO_REAL => (ValueEntry::real(0.0)),
     ONE_REAL => (ValueEntry::real(1.0)),
     TWO_REAL => (ValueEntry::real(2.0)),
@@ -753,43 +774,36 @@ known_value_handles! {
     PI => (ValueEntry {
         value: Value::Mathematical(MathematicalConstant::Pi),
         type_handle: TypeHandle::REAL,
-        tag: None,
         span: None,
     }),
     TAU => (ValueEntry {
         value: Value::Mathematical(MathematicalConstant::Tau),
         type_handle: TypeHandle::REAL,
-        tag: None,
         span: None,
     }),
     E => (ValueEntry {
         value: Value::Mathematical(MathematicalConstant::E),
         type_handle: TypeHandle::REAL,
-        tag: None,
         span: None,
     }),
     WIDTH_PIXELS => (ValueEntry {
         value: Value::ViewportWidth,
         type_handle: TypeHandle::REAL,
-        tag: None,
         span: None,
     }),
     HEIGHT_PIXELS => (ValueEntry {
         value: Value::ViewportHeight,
         type_handle: TypeHandle::REAL,
-        tag: None,
         span: None,
     }),
     TICKER_DT => (ValueEntry {
         value: Value::TickerDt,
         type_handle: TypeHandle::REAL,
-        tag: None,
         span: None,
     }),
     CLICK_INDEX => (ValueEntry {
         value: Value::ClickIndex,
         type_handle: TypeHandle::INT,
-        tag: None,
         span: None,
     }),
     BLACK => (ValueEntry {
@@ -800,7 +814,6 @@ known_value_handles! {
             third: ValueHandle::ZERO_REAL,
         },
         type_handle: TypeHandle::COLOR,
-        tag: None,
         span: None,
     }),
     WHITE => (ValueEntry {
@@ -811,13 +824,11 @@ known_value_handles! {
             third: ValueHandle::ONE_REAL,
         },
         type_handle: TypeHandle::COLOR,
-        tag: None,
         span: None,
     }),
     TRANSPARENT_IMAGE_DATA => (|| ValueEntry {
         value: Value::Str("data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAAAXNSR0IArs4c6QAAAAtJREFUGFdjYAACAAAFAAGq1chRAAAAAElFTkSuQmCC".into()),
         type_handle: TypeHandle::STR,
-        tag: None,
         span: None,
     }),
 }

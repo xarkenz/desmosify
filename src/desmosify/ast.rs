@@ -343,11 +343,11 @@ pub enum ExpressionKind {
         lhs: Box<Expression>,
         rhs: Box<Expression>,
     },
-    Point2 {
+    Point2D {
         x: Box<Expression>,
         y: Box<Expression>,
     },
-    Point3 {
+    Point3D {
         x: Box<Expression>,
         y: Box<Expression>,
         z: Box<Expression>,
@@ -440,10 +440,10 @@ impl std::fmt::Display for ExpressionKind {
             Self::Binary { operation, lhs, rhs } => {
                 operation.fmt_with_operands(f, &lhs.kind, &rhs.kind)
             }
-            Self::Point2 { x, y } => {
+            Self::Point2D { x, y } => {
                 write!(f, "({x}, {y})")
             }
-            Self::Point3 { x, y, z } => {
+            Self::Point3D { x, y, z } => {
                 write!(f, "({x}, {y}, {z})")
             }
             Self::List { items } => match items.as_ref() {
@@ -706,7 +706,7 @@ impl std::fmt::Display for EnumerationVariant {
     fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
         write!(f, "{}", self.identifier)?;
         if let Some(value) = &self.value {
-            write!(f, "= {value}")?;
+            write!(f, " = {value}")?;
         }
         Ok(())
     }

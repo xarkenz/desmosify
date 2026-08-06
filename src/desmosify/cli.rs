@@ -42,7 +42,7 @@ pub fn invoke(args: &DesmosifyArgs) -> crate::Result<()> {
 
     println!("Analyzing program...");
 
-    let context = GlobalContext::from_declarations(declarations, target.as_ref())?;
+    let context = GlobalContext::initialize(&args.source_paths, target.as_mut(), &declarations)?;
     let program = interpret_program(&args.source_paths, target.as_mut(), &context)?;
 
     println!("Compiling program...");

@@ -1,71 +1,78 @@
-use std::path::PathBuf;
 use std::rc::Rc;
-use crate::ast::{ActionExpression, ActionExpressionKind, BinaryOperation, DefinitionKind, DisplayAttribute, Expression, IndexOperation, ExpressionKind, ParameterList, PublicLineKind, TypeDefinition, UnaryOperation, ValueDefinition, VariableKind, EnumerationVariant, PublicLine};
+use crate::ast::{ActionExpression, ActionExpressionKind, BinaryOperation, DefinitionKind, DisplayAttribute, Expression, IndexOperation, ExpressionKind, ParameterList, PublicLineKind, TypeDefinition, UnaryOperation, ValueDefinition, VariableKind, EnumerationVariant, PublicLine, Declaration, TickerDeclaration, PublicDeclaration, DisplayDeclaration};
 use crate::sema::{Program, ProgramAction, ProgramEnumeration, ProgramImmutable, ProgramPublic, ProgramPublicEntry, ProgramPublicLine, ProgramTicker, ProgramVariable, ProgramVariableKind};
 use crate::sema::context::{GlobalContext, LocalContext};
 use crate::sema::display::{DragMode, LabelOrientation, LineStyle, PointStyle, ProgramDisplay, ProgramDisplayAttribute, ProgramDisplayAttributeKind, ProgramDisplayElement};
-use crate::sema::types::{ListState, Type};
-use crate::sema::values::{ActionValue, ActionValueKind, GlobalReference, LocalReference, IndexKind, Value, ListMapLoop, BinaryKind, UnaryKind, ActionReference, InequalityKind, TernaryKind};
+use crate::sema::types::{ListState, Type, TypeHandle};
+use crate::sema::values::{ActionValue, ActionValueKind, GlobalSymbol, IndexKind, Value, ListMapLoop, BinaryKind, UnaryKind, InequalityKind, TernaryKind, ValueHandle, ValueEntry, GlobalSymbolKind};
 use crate::target::Target;
 
-pub fn interpret_program(source_paths: &[PathBuf], target: &mut dyn Target, context: &GlobalContext) -> crate::Result<Program> {
+pub fn interpret_program(context: &mut GlobalContext, declarations: &[Declaration]) -> crate::Result<Program> {
     let mut enumerations = Vec::new();
     let mut immutables = Vec::new();
     let mut variables = Vec::new();
     let mut actions = Vec::new();
 
-    for (identifier, definition) in context.globals().chain(context.actions()) {
-        let local_context = LocalContext::new(&source_paths[definition.definition.span.source_id]);
+    let mut ticker_declarations = Vec::new();
+    let mut public_declarations = Vec::new();
+    let mut display_declarations = Vec::new();
 
-        match &definition.definition.kind {
-            DefinitionKind::Type(TypeDefinition::Enumeration { variants }) => {
-                enumerations.push(interpret_enumeration_definition(
-                    target,
-                    context,
-                    local_context,
-                    identifier.clone(),
-                    variants,
-                )?);
+    for declaration in declarations {
+        let local_context = context.new_local_context(declaration.span().source_id);
+
+        match declaration {
+            Declaration::Definition(definition) => match &definition.kind {
+                DefinitionKind::Type(TypeDefinition::Enumeration { variants }) => {
+                    enumerations.push(interpret_enumeration_definition(
+                        context,
+                        local_context,
+                        definition.identifier.clone(),
+                        variants,
+                    )?);
+                }
+                DefinitionKind::Value(ValueDefinition::Let { parameters, value, .. }) => {
+                    immutables.push(interpret_let_definition(
+                        context,
+                        local_context,
+                        definition.identifier.clone(),
+                        parameters.as_ref(),
+                        value,
+                    )?);
+                }
+                DefinitionKind::Value(ValueDefinition::Variable { kind, value, .. }) => {
+                    variables.push(interpret_variable_definition(
+                        context,
+                        local_context,
+                        definition.identifier.clone(),
+                        kind,
+                        value,
+                    )?);
+                }
+                DefinitionKind::Value(ValueDefinition::Action { parameters, action }) => {
+                    actions.push(interpret_action_definition(
+                        context,
+                        local_context,
+                        definition.identifier.clone(),
+                        parameters,
+                        action,
+                    )?);
+                }
             }
-            DefinitionKind::Value(ValueDefinition::Let { parameters, value, .. }) => {
-                immutables.push(interpret_let_definition(
-                    target,
-                    context,
-                    local_context,
-                    identifier.clone(),
-                    parameters.as_ref(),
-                    &definition.value_type,
-                    value,
-                )?);
+            Declaration::Ticker(ticker_declaration) => {
+                ticker_declarations.push(ticker_declaration);
             }
-            DefinitionKind::Value(ValueDefinition::Variable { kind, value, .. }) => {
-                variables.push(interpret_variable_definition(
-                    target,
-                    context,
-                    local_context,
-                    identifier.clone(),
-                    kind,
-                    &definition.value_type,
-                    value,
-                )?);
+            Declaration::Public(public_declaration) => {
+                public_declarations.push(public_declaration);
             }
-            DefinitionKind::Value(ValueDefinition::Action { parameters, action }) => {
-                actions.push(interpret_action_definition(
-                    target,
-                    context,
-                    local_context,
-                    identifier.clone(),
-                    parameters,
-                    &definition.value_type,
-                    action,
-                )?);
+            Declaration::Display(display_declaration) => {
+                display_declarations.push(display_declaration);
             }
         }
     }
 
-    let ticker = interpret_ticker_declarations(source_paths, target, context)?;
-    let public = interpret_public_declarations(source_paths, target, context, &mut variables)?;
-    let display = interpret_display_declarations(source_paths, target, context)?;
+    let ticker = interpret_ticker_declarations(context, ticker_declarations)?;
+    let public = interpret_public_declarations(context, &mut variables, public_declarations)?;
+    let display = interpret_display_declarations(context, display_declarations)?;
 
     Ok(Program {
         enumerations: enumerations.into_boxed_slice(),
@@ -79,54 +86,65 @@ pub fn interpret_program(source_paths: &[PathBuf], target: &mut dyn Target, cont
 }
 
 pub fn interpret_enumeration_definition(
-    target: &mut dyn Target,
-    context: &GlobalContext,
+    context: &mut GlobalContext,
     local_context: LocalContext,
     identifier: Rc<str>,
     variants: &[EnumerationVariant],
 ) -> crate::Result<ProgramEnumeration> {
-    let mut values: Vec<(Rc<str>, ValueRegistryEntry)> = Vec::with_capacity(variants.len());
+    let Some(&Value::Type(type_handle)) = context.find_global(&identifier)
+        .map(|global| context.values.get(global.value))
+    else {
+        panic!("no enum '{identifier}' found in context")
+    };
+    let Type::Enum { values, .. } = context.types.get(type_handle) else {
+        panic!("invalid type definition for enum '{identifier}'")
+    };
+    let ordinals: Vec<_> = values
+        .iter()
+        .map(|&(_, ordinal)| ordinal)
+        .collect();
 
-    for variant in variants {
-        let value = if let Some(value) = &variant.value {
-            interpret_expression(target, context, &local_context, value)?
-                .coerce_to(&Type::Int, false)?
-        }
-        else if let Some((_, previous_value)) = values.last() {
-            // TODO: eliminate this once constant folding is implemented?
-            if let Value::Int(previous_int) = previous_value.kind {
-                // TODO: should raise error if this would be too big
-                Value::Int(previous_int + 1).into()
+    let mut previous_value: Option<(Rc<str>, ValueHandle)> = None;
+    for (variant, ordinal) in std::iter::zip(variants, ordinals) {
+        let ordinal_value = if let Some(value) = &variant.value {
+            // Use the explicit value as the ordinal.
+            interpret_expression(context, &local_context, value)?.value
+        } else if let Some((previous_identifier, previous_ordinal)) = previous_value.take() {
+            // Use the ordinal of the previous value plus one.
+            let previous_reference = context.values.register(ValueEntry {
+                value: Value::GlobalReference(GlobalSymbol {
+                    kind: GlobalSymbolKind::EnumOrdinal,
+                    identifier: previous_identifier,
+                    value: previous_ordinal,
+                }),
+                type_handle,
+                span: None,
+            });
+            Value::Binary {
+                kind: BinaryKind::Add,
+                lhs: previous_reference,
+                rhs: ValueHandle::ONE_INT,
             }
-            else {
-                Value::Binary {
-                    kind: BinaryKind::Add,
-                    lhs: Box::new(previous_value.clone()),
-                    rhs: Box::new(Value::Int(1).into()),
-                    result_type: Type::Int,
-                }.into()
-            }
-        }
-        else {
-            Value::Int(0).into()
+        } else {
+            // No previous value, so start at zero.
+            Value::Int(0)
         };
 
-        values.push((variant.identifier.clone(), value));
+        context.values.replace(ordinal, ordinal_value);
+        previous_value = Some((variant.identifier.clone(), ordinal));
     }
 
     Ok(ProgramEnumeration {
         identifier,
-        values: values.into_boxed_slice(),
+        type_handle,
     })
 }
 
 pub fn interpret_let_definition(
-    target: &mut dyn Target,
-    context: &GlobalContext,
+    context: &mut GlobalContext,
     mut local_context: LocalContext,
     identifier: Rc<str>,
     parameters: Option<&ParameterList>,
-    value_type: &Type,
     value: &Expression,
 ) -> crate::Result<ProgramImmutable> {
     let (typed_parameters, expected_type) = if let Some(parameters) = parameters {
@@ -153,12 +171,10 @@ pub fn interpret_let_definition(
 }
 
 pub fn interpret_variable_definition(
-    target: &mut dyn Target,
-    context: &GlobalContext,
+    context: &mut GlobalContext,
     local_context: LocalContext,
     identifier: Rc<str>,
     kind: &VariableKind,
-    value_type: &Type,
     value: &Expression,
 ) -> crate::Result<ProgramVariable> {
     // TODO: timer and slider should be restricted to certain types, should also affect slider step
@@ -191,12 +207,10 @@ pub fn interpret_variable_definition(
 }
 
 pub fn interpret_action_definition(
-    target: &mut dyn Target,
-    context: &GlobalContext,
+    context: &mut GlobalContext,
     mut local_context: LocalContext,
     identifier: Rc<str>,
     parameters: &ParameterList,
-    action_type: &Type,
     action: &ActionExpression,
 ) -> crate::Result<ProgramAction> {
     let Type::Action { parameter_types } = action_type else {
@@ -214,78 +228,79 @@ pub fn interpret_action_definition(
 }
 
 pub fn process_parameters(
-    target: &mut dyn Target,
+    context: &mut GlobalContext,
     local_context: &mut LocalContext,
     parameters: &ParameterList,
-    parameter_types: &[Type],
-) -> Box<[LocalReference]> {
+    parameter_types: &[TypeHandle],
+) -> Box<[ValueHandle]> {
     std::iter::zip(&parameters.0, parameter_types)
-        .map(|(parameter, parameter_type)| {
-            local_context.add_local_variable(parameter.identifier.clone(), target.create_local_id(), parameter_type.clone())
+        .map(|(parameter, &parameter_type)| {
+            let parameter_value = context.values.register(ValueEntry {
+                value: Value::Local {
+                    id: context.target.create_local_id(),
+                },
+                type_handle: parameter_type,
+                span: Some(parameter.identifier_span),
+            });
+            local_context.add_local(parameter.identifier.clone(), parameter_value);
+            parameter_value
         })
         .collect()
 }
 
-pub fn interpret_ticker_declarations(
-    source_paths: &[PathBuf],
-    target: &mut dyn Target,
-    context: &GlobalContext,
+pub fn interpret_ticker_declarations<'a>(
+    context: &mut GlobalContext,
+    ticker_declarations: impl IntoIterator<Item = &'a TickerDeclaration>,
 ) -> crate::Result<ProgramTicker> {
-    let mut tick_actions = Vec::with_capacity(context.ticker_declarations().len());
+    let mut interval_ms = None;
 
-    let interval_ms = context
-        .ticker_declarations()
+    let tick_actions = ticker_declarations
         .iter()
         .enumerate()
-        .try_fold::<_, _, crate::Result<_>>(
-            None,
-            |interval_ms, (index, declaration)| {
-                let local_context = LocalContext::new(&source_paths[declaration.span.source_id]);
+        .map(|(index, declaration)| {
+            let local_context = context.new_local_context(declaration.span.source_id);
 
-                let new_interval_ms = match declaration.interval_ms.as_ref() {
-                    Some(interval_expression) => Some(interpret_expression(target, context, &local_context, interval_expression)?),
-                    None => None,
-                };
-                if index != 0 && new_interval_ms != interval_ms {
-                    return Err(Box::new(crate::Error {
-                        kind: crate::ErrorKind::IncompatibleTickerIntervals,
-                        span: Some(declaration.span),
-                    }))
-                }
+            let new_interval_ms = match declaration.interval_ms.as_ref() {
+                Some(interval_expression) => Some(interpret_expression(context, &local_context, interval_expression)?),
+                None => None,
+            };
+            if index != 0 && new_interval_ms != interval_ms {
+                return Err(Box::new(crate::Error {
+                    kind: crate::ErrorKind::IncompatibleTickerIntervals,
+                    span: Some(declaration.span),
+                }))
+            }
+            interval_ms = new_interval_ms;
 
-                let tick = interpret_expression(target, context, &local_context, &declaration.tick_action)?;
-                let tick_type = tick.get_type();
+            let tick_action = interpret_expression(context, &local_context, &declaration.tick_action)?;
+            let tick_type = context.values.get_type(tick_action);
 
-                let tick_arguments: Box<[_]> = match tick_type.require_action(0, &[Type::Real])? {
-                    [] => Box::new([]),
-                    [dt_type] => Box::new([
-                        Value::TickerDt.with_span(None).coerce_to(dt_type, false)?
-                    ]),
-                    _ => unreachable!()
-                };
+            let tick_arguments: Box<[_]> = match context.types.expect_action_type(tick_type, 0, &[TypeHandle::REAL])? {
+                &[] => Box::new([]),
+                &[dt_type, ..] => Box::new([
+                    context.coerce_value(ValueHandle::TICKER_DT, dt_type, false)?,
+                ]),
+            };
 
-                tick_actions.push(ActionValueKind::ActionCall {
-                    action: Box::new(tick),
-                    arguments: tick_arguments,
-                }.with_span(None));
-
-                Ok(new_interval_ms)
-            },
-        )?;
+            Ok(ActionValueKind::ActionCall {
+                action: tick_action,
+                arguments: tick_arguments,
+            }.with_span(None))
+        })
+        .collect::<crate::Result<_>>()?;
 
     Ok(ProgramTicker {
         interval_ms,
         tick_action: ActionValueKind::Compound {
-            actions: tick_actions.into_boxed_slice(),
+            actions: tick_actions,
         }.into(),
     })
 }
 
-pub fn interpret_public_declarations(
-    source_paths: &[PathBuf],
-    target: &mut dyn Target,
-    context: &GlobalContext,
+pub fn interpret_public_declarations<'a>(
+    context: &mut GlobalContext,
     variables: &mut Vec<ProgramVariable>,
+    public_declarations: impl IntoIterator<Item = &'a PublicDeclaration>,
 ) -> crate::Result<ProgramPublic> {
     let mut entries = Vec::new();
 
@@ -318,8 +333,7 @@ pub fn interpret_public_declarations(
 }
 
 fn interpret_public_line(
-    target: &mut dyn Target,
-    context: &GlobalContext,
+    context: &mut GlobalContext,
     variables: &mut Vec<ProgramVariable>,
     local_context: &LocalContext,
     line: &PublicLine,
@@ -376,10 +390,9 @@ fn interpret_public_line(
     }
 }
 
-pub fn interpret_display_declarations(
-    source_paths: &[PathBuf],
-    target: &mut dyn Target,
-    context: &GlobalContext,
+pub fn interpret_display_declarations<'a>(
+    context: &mut GlobalContext,
+    display_declarations: impl IntoIterator<Item = &'a DisplayDeclaration>,
 ) -> crate::Result<ProgramDisplay> {
     fn prevent_duplicate(attribute: &DisplayAttribute, has_attribute: &mut bool) -> crate::Result<()> {
         if std::mem::replace(has_attribute, true) {
@@ -634,8 +647,7 @@ pub fn interpret_display_declarations(
 
 // TODO: detect multiple updates of same variable
 pub fn interpret_action_expression(
-    target: &mut dyn Target,
-    context: &GlobalContext,
+    context: &mut GlobalContext,
     local_context: &LocalContext,
     action: &ActionExpression,
 ) -> crate::Result<ActionValue> {
@@ -661,7 +673,7 @@ pub fn interpret_action_expression(
 
             let variable = interpret_expression(target, context, &local_context, variable)?;
             let variable_span = variable.span;
-            let Value::Global(variable) = variable.kind else {
+            let Value::GlobalReference(variable) = variable.kind else {
                 return Err(invalid_update_lhs_error())
             };
             let DefinitionKind::Value(ValueDefinition::Variable { .. }) = context.find_global(&variable.identifier).unwrap().definition.kind else {
@@ -738,39 +750,31 @@ pub fn interpret_action_expression(
 }
 
 pub fn interpret_expression(
-    target: &mut dyn Target,
-    context: &GlobalContext,
+    context: &mut GlobalContext,
     local_context: &LocalContext,
     expression: &Expression,
-) -> crate::Result<ValueRegistryEntry> {
-    let kind = match &expression.kind {
+) -> crate::Result<ValueEntry> {
+    match &expression.kind {
         ExpressionKind::Undefined => {
-            Value::Undefined(Type::Any)
+            Ok(ValueEntry {
+                value: Value::Undefined,
+                type_handle: TypeHandle::ANY,
+                span: Some(expression.span),
+            })
         }
         ExpressionKind::Infinity => {
-            Value::Infinity(Type::Int)
-        }
-        ExpressionKind::Identifier(identifier) => {
-            if let Some(local) = local_context.find_local(identifier) {
-                local.clone()
-            }
-            else if let Some(definition) = context.find_global(identifier) {
-                Value::Global(GlobalReference {
-                    identifier: identifier.clone(),
-                    value_type: definition.value_type.clone(),
-                })
-            }
-            else {
-                return Err(Box::new(crate::Error {
-                    kind: crate::ErrorKind::UndefinedIdentifier {
-                        identifier: identifier.as_ref().into(),
-                    },
-                    span: Some(expression.span),
-                }))
-            }
+            Ok(ValueEntry {
+                value: Value::Infinity,
+                type_handle: TypeHandle::INT,
+                span: Some(expression.span),
+            })
         }
         ExpressionKind::Real(value) => {
-            Value::Real(*value)
+            Ok(ValueEntry {
+                value: Value::Real(*value),
+                type_handle: TypeHandle::REAL,
+                span: Some(expression.span),
+            })
         }
         ExpressionKind::Integer(value) => {
             let value = i64::try_from(*value).map_err(|_| Box::new(crate::Error {
@@ -778,142 +782,216 @@ pub fn interpret_expression(
                 span: Some(expression.span),
             }))?;
 
-            Value::Int(value)
+            Ok(ValueEntry {
+                value: Value::Int(value),
+                type_handle: TypeHandle::INT,
+                span: Some(expression.span),
+            })
         }
         ExpressionKind::Boolean(value) => {
-            Value::Bool(*value)
+            Ok(ValueEntry {
+                value: Value::Bool(*value),
+                type_handle: TypeHandle::BOOL,
+                span: Some(expression.span),
+            })
         }
         ExpressionKind::String(value) => {
-            Value::Str(value.clone())
+            Ok(ValueEntry {
+                value: Value::Str(value.clone()),
+                type_handle: TypeHandle::STR,
+                span: Some(expression.span),
+            })
         }
-        ExpressionKind::ActionIdentifier(identifier) => {
-            if let Some(definition) = context.find_action(identifier) {
-                Value::Action(ActionReference {
-                    identifier: identifier.clone(),
-                    action_type: definition.value_type.clone(),
+        ExpressionKind::Identifier(identifier) => {
+            if let Some(local) = local_context.find_local(identifier) {
+                Ok(ValueEntry {
+                    value: Value::Alias(local),
+                    type_handle: context.values.get_type(local),
+                    span: Some(expression.span),
+                })
+            }
+            else if let Some(symbol) = context.find_global(identifier) {
+                Ok(ValueEntry {
+                    value: Value::GlobalReference(symbol.clone()),
+                    type_handle: context.values.get_type(symbol.value),
+                    span: Some(expression.span),
                 })
             }
             else {
-                return Err(Box::new(crate::Error {
+                Err(Box::new(crate::Error {
+                    kind: crate::ErrorKind::UndefinedIdentifier {
+                        identifier: identifier.clone(),
+                    },
+                    span: Some(expression.span),
+                }))
+            }
+        }
+        ExpressionKind::ActionIdentifier(identifier) => {
+            if let Some(symbol) = context.find_action(identifier) {
+                Ok(ValueEntry {
+                    value: Value::ActionReference(symbol.clone()),
+                    type_handle: context.values.get_type(symbol.value),
+                    span: Some(expression.span),
+                })
+            }
+            else {
+                Err(Box::new(crate::Error {
                     kind: crate::ErrorKind::UndefinedAction {
-                        identifier: identifier.as_ref().into(),
+                        identifier: identifier.clone(),
                     },
                     span: Some(expression.span),
                 }))
             }
         }
         ExpressionKind::IntrinsicIdentifier(identifier) => {
-            if let Some(intrinsic) = context.find_intrinsic(identifier) {
-                intrinsic.clone()
+            if let Some(symbol) = context.find_intrinsic(identifier) {
+                Ok(ValueEntry {
+                    value: Value::IntrinsicReference(symbol.clone()),
+                    type_handle: context.values.get_type(symbol.value),
+                    span: Some(expression.span),
+                })
             }
             else {
-                return Err(Box::new(crate::Error {
+                Err(Box::new(crate::Error {
                     kind: crate::ErrorKind::UndefinedIntrinsic {
-                        identifier: identifier.as_ref().into(),
+                        identifier: identifier.clone(),
                     },
                     span: Some(expression.span),
                 }))
             }
         }
         ExpressionKind::Grouping { expression } => {
-            interpret_expression(target, context, local_context, expression)?.kind
+            interpret_expression(context, local_context, expression)
         }
         ExpressionKind::Unary { operation, operand } => {
-            interpret_unary_operation(target, context, local_context, *operation, operand)?
+            interpret_unary_operation(context, local_context, *operation, operand, Some(expression.span))
         }
         ExpressionKind::Binary { operation, lhs, rhs } => {
-            interpret_binary_operation(target, context, local_context, *operation, lhs, rhs, Some(expression.span))?
+            interpret_binary_operation(context, local_context, *operation, lhs, rhs, Some(expression.span))
         }
-        ExpressionKind::Point2 { x, y } => {
-            let x = interpret_expression(target, context, local_context, x)?;
-            let y = interpret_expression(target, context, local_context, y)?;
+        ExpressionKind::Point2D { x, y } => {
+            let x = interpret_expression(context, local_context, x)?;
+            let y = interpret_expression(context, local_context, y)?;
 
-            let (x_list, x_type) = x.get_type().into_flatten_list();
-            let (y_list, y_type) = y.get_type().into_flatten_list();
+            let (x_list, x_type) = context.types.flatten_list(x.type_handle);
+            let (y_list, y_type) = context.types.flatten_list(y.type_handle);
 
-            Value::Binary {
-                kind: BinaryKind::Point2D,
-                lhs: Box::new(x),
-                rhs: Box::new(y),
-                result_type: Type::Point2D {
-                    x_type: Box::new(x_type),
-                    y_type: Box::new(y_type),
-                }.unflatten_list(ListState::merge(x_list, y_list)),
-            }
+            Ok(ValueEntry {
+                value: Value::Binary {
+                    kind: BinaryKind::Point2D,
+                    lhs: context.values.register(x),
+                    rhs: context.values.register(y),
+                },
+                type_handle: context.types.point_2d_type(x_type, y_type)
+                    .and_then(|point_type| context.types.unflatten_list(
+                        ListState::merge(x_list, y_list),
+                        point_type,
+                    ))
+                    .map_err(|error| error.with_span(Some(expression.span)))?,
+                span: Some(expression.span),
+            })
         }
-        ExpressionKind::Point3 { x, y, z } => {
-            let x = interpret_expression(target, context, local_context, x)?;
-            let y = interpret_expression(target, context, local_context, y)?;
-            let z = interpret_expression(target, context, local_context, z)?;
+        ExpressionKind::Point3D { x, y, z } => {
+            let x = interpret_expression(context, local_context, x)?;
+            let y = interpret_expression(context, local_context, y)?;
+            let z = interpret_expression(context, local_context, z)?;
 
-            let (x_list, x_type) = x.get_type().into_flatten_list();
-            let (y_list, y_type) = y.get_type().into_flatten_list();
-            let (z_list, z_type) = z.get_type().into_flatten_list();
+            let (x_list, x_type) = context.types.flatten_list(x.type_handle);
+            let (y_list, y_type) = context.types.flatten_list(y.type_handle);
+            let (z_list, z_type) = context.types.flatten_list(z.type_handle);
 
-            Value::Ternary {
-                kind: TernaryKind::Point3D,
-                first: Box::new(x),
-                second: Box::new(y),
-                third: Box::new(z),
-                result_type: Type::Point3D {
-                    x_type: Box::new(x_type),
-                    y_type: Box::new(y_type),
-                    z_type: Box::new(z_type),
-                }.unflatten_list(ListState::merge_all([x_list, y_list, z_list])),
-            }
+            Ok(ValueEntry {
+                value: Value::Ternary {
+                    kind: TernaryKind::Point3D,
+                    first: context.values.register(x),
+                    second: context.values.register(y),
+                    third: context.values.register(z),
+                },
+                type_handle: context.types.point_3d_type(x_type, y_type, z_type)
+                    .and_then(|point_type| context.types.unflatten_list(
+                        ListState::merge_all([x_list, y_list, z_list]),
+                        point_type,
+                    ))
+                    .map_err(|error| error.with_span(Some(expression.span)))?,
+                span: Some(expression.span),
+            })
         }
         ExpressionKind::List { items } => {
-            let items: Vec<_> = items
+            let mut items: Box<[_]> = items
                 .iter()
-                .map(|item| interpret_expression(target, context, local_context, item))
+                .map(|item| {
+                    let entry = interpret_expression(context, local_context, item)?;
+                    Ok(context.values.register(entry))
+                })
                 .collect::<crate::Result<_>>()?;
 
             let item_type = items
                 .iter()
-                .try_fold(Type::Any, |current_type, item| {
-                    current_type.merge(&item.get_type())
-                        .map_err(|error| error.with_span(item.span))
+                .try_fold(TypeHandle::ANY, |current_type, &item| {
+                    context.types.merge(current_type, context.values.get_type(item))
+                        .map_err(|error| error.with_span(context.values.get_span(item)))
                 })?;
+            let list_type = context.types.list_type(ListState::IsList, item_type)?;
 
-            Value::List {
-                items: items
-                    .into_iter()
-                    .map(|item| item.coerce_to(&item_type, false))
-                    .collect::<crate::Result<_>>()?,
-                item_type,
+            for item in &mut items {
+                *item = context.coerce_value(*item, item_type, false)?;
             }
+
+            Ok(ValueEntry {
+                value: Value::List {
+                    items,
+                },
+                type_handle: list_type,
+                span: Some(expression.span),
+            })
         }
         ExpressionKind::ListRange { kind, start, end, step } => {
-            let start = interpret_expression(target, context, local_context, start)?;
-            let end = interpret_expression(target, context, local_context, end)?;
+            let start = interpret_expression(context, local_context, start)?
+                .register(&mut context.values);
+            let end = interpret_expression(context, local_context, end)?
+                .register(&mut context.values);
             let step = match step {
-                Some(step) => interpret_expression(target, context, local_context, step)?,
-                None => Value::Int(1).into(),
+                Some(step) => interpret_expression(context, local_context, step)?
+                    .register(&mut context.values),
+                None => ValueHandle::ONE_INT,
             };
 
-            let item_type = start.get_type()
-                .merge(&end.get_type())
-                .map_err(|error| error.with_span(end.span))?
-                .merge(&step.get_type())
-                .map_err(|error| error.with_span(step.span))?;
+            let start_type = context.values.get_type(start);
+            let end_type = context.values.get_type(end);
+            let step_type = context.values.get_type(step);
 
-            Value::ListRange {
-                kind: *kind,
-                start: Box::new(start.coerce_to(&item_type, false)?),
-                end: Box::new(end.coerce_to(&item_type, false)?),
-                step: Box::new(step.coerce_to(&item_type, false)?),
-                item_type,
-            }
+            let item_type = context.types.merge(start_type, end_type)
+                .and_then(|item_type| context.types.merge(item_type, step_type))
+                .map_err(|error| error.with_span(Some(expression.span)))?;
+            let list_type = context.types.list_type(ListState::IsList, item_type)?;
+
+            Ok(ValueEntry {
+                value: Value::ListRange {
+                    kind: *kind,
+                    start: context.coerce_value(start, item_type, false)?,
+                    end: context.coerce_value(end, item_type, false)?,
+                    step: context.coerce_value(step, item_type, false)?,
+                },
+                type_handle: list_type,
+                span: Some(expression.span),
+            })
         }
         ExpressionKind::ListFill { value, count } => {
-            let value = interpret_expression(target, context, local_context, value)?;
-            let count = interpret_expression(target, context, local_context, count)?
-                .coerce_to(&Type::Int, false)?;
+            let value = interpret_expression(context, local_context, value)?
+                .register(&mut context.values);
+            let count = interpret_expression(context, local_context, count)?
+                .register(&mut context.values);
 
-            Value::ListFill {
-                value: Box::new(value),
-                count: Box::new(count),
-            }
+            let list_type = context.types.list_type(ListState::IsList, context.values.get_type(value))?;
+
+            Ok(ValueEntry {
+                value: Value::ListFill {
+                    value,
+                    count: context.coerce_value(count, TypeHandle::INT, false)?,
+                },
+                type_handle: list_type,
+                span: Some(expression.span),
+            })
         }
         ExpressionKind::ListMap { loops, expression: map_expression } => {
             let mut map_context = local_context.new_inner();
@@ -921,201 +999,236 @@ pub fn interpret_expression(
             let loops = loops
                 .iter()
                 .map(|map_loop| {
-                    let list = interpret_expression(target, context, local_context, &map_loop.list)?;
-                    let item_type = list.get_type().require_flatten_list()
+                    let list = interpret_expression(context, local_context, &map_loop.list)?;
+                    let item_type = context.types.expect_list_type(list.type_handle)
                         .map_err(|error| error.with_span(list.span))?;
 
+                    let local = context.values.register(ValueEntry {
+                        value: Value::Local {
+                            id: context.target.create_local_id(),
+                        },
+                        type_handle: item_type,
+                        span: Some(map_loop.identifier_span),
+                    });
+                    map_context.add_local(map_loop.identifier.clone(), local);
+
                     Ok(ListMapLoop {
-                        local: map_context.add_local_variable(map_loop.identifier.clone(), target.create_local_id(), item_type),
-                        local_span: Some(map_loop.identifier_span),
-                        list,
+                        local,
+                        list: context.values.register(list),
                     })
                 })
                 .collect::<crate::Result<_>>()?;
 
-            let value = interpret_expression(target, context, &map_context, map_expression)?;
+            let value = interpret_expression(context, &map_context, map_expression)?;
 
-            Value::ListMap {
-                loops,
-                value: Box::new(value),
-            }
+            Ok(ValueEntry {
+                type_handle: context.types.list_type(ListState::IsList, value.type_handle)?,
+                value: Value::ListMap {
+                    loops,
+                    value: context.values.register(value),
+                },
+                span: Some(expression.span),
+            })
         }
         ExpressionKind::ListFilter { list, condition } => {
-            let list = interpret_expression(target, context, local_context, list)?;
-            let item_type = list.get_type().require_flatten_list()
+            let list = interpret_expression(context, local_context, list)?;
+            context.types.expect_list_type(list.type_handle)
                 .map_err(|error| error.with_span(list.span))?;
 
-            let condition = interpret_expression(target, context, local_context, condition)?
-                .coerce_to(&Type::Bool, true)?;
+            let condition = interpret_expression(context, local_context, condition)?
+                .register(&mut context.values);
 
-            Value::ListFilter {
-                list: Box::new(list),
-                condition: Box::new(condition),
-                item_type,
-            }
+            Ok(ValueEntry {
+                type_handle: list.type_handle,
+                value: Value::ListFilter {
+                    list: context.values.register(list),
+                    condition: context.coerce_value(condition, TypeHandle::BOOL, true)?,
+                },
+                span: Some(expression.span),
+            })
         }
         ExpressionKind::Index { list, operation } => {
-            let list = interpret_expression(target, context, local_context, list)?;
-            let item_type = list.get_type().require_flatten_list()
+            let list = interpret_expression(context, local_context, list)?;
+            let item_type = context.types.expect_list_type(list.type_handle)
                 .map_err(|error| error.with_span(list.span))?;
 
-            let operation = interpret_index_operation(target, context, local_context, operation)?;
+            let kind = interpret_index_operation(context, local_context, operation)?;
 
-            Value::Index {
-                list: Box::new(list),
-                kind: operation,
-                item_type,
-            }
+            Ok(ValueEntry {
+                type_handle: if kind.result_is_list() {
+                    list.type_handle
+                } else {
+                    item_type
+                },
+                value: Value::Index {
+                    list: context.values.register(list),
+                    kind,
+                },
+                span: Some(expression.span),
+            })
         }
         ExpressionKind::FunctionCall { function, arguments } => {
-            let function = interpret_expression(target, context, local_context, function)?;
-            let arguments: Box<[_]> = arguments
+            let function = interpret_expression(context, local_context, function)?;
+            let mut arguments: Box<[_]> = arguments
                 .iter()
-                .map(|argument| interpret_expression(target, context, local_context, argument))
+                .map(|argument| Ok(interpret_expression(context, local_context, argument)?
+                    .register(&mut context.values)))
                 .collect::<crate::Result<_>>()?;
 
-            match function.get_type() {
-                Type::IntrinsicFunction(intrinsic_function) => {
-                    intrinsic_function.interpret_call(target, context, local_context, function.span, arguments)?
-                }
-                Type::Function { signature } => {
-                    if arguments.len() != signature.parameter_types.len() {
-                        return Err(Box::new(crate::Error {
-                            kind: crate::ErrorKind::InvalidArity {
-                                expected: signature.parameter_types.len(),
-                                got: arguments.len(),
-                            },
-                            span: function.span,
-                        }))
-                    }
-
-                    let mut result_list_state = None;
-                    let arguments = std::iter::zip(arguments, &signature.parameter_types)
-                        .map(|(argument, parameter_type)| {
-                            if let Type::List { state: ListState::MaybeList, .. } = parameter_type {
-                                result_list_state = ListState::merge(result_list_state, argument.get_type().list_state())
-                            }
-                            argument.coerce_to(parameter_type, false)
-                        })
-                        .collect::<crate::Result<_>>()?;
-
-                    let return_type = match signature.return_type {
-                        Type::List { state: ListState::MaybeList, item_type } => {
-                            item_type.unflatten_list(result_list_state)
-                        }
-                        other => other
-                    };
-
-                    Value::UserFunctionCall {
-                        function: Box::new(function),
-                        arguments,
-                        return_type,
-                    }
-                }
-                got_type => {
+            if let Value::IntrinsicFunction(intrinsic_function) = function.value {
+                intrinsic_function.interpret_call(context, local_context, Some(expression.span), arguments)
+            }
+            else if let Type::Function { signature } = context.types.get(function.type_handle) {
+                let signature = signature.clone();
+                if arguments.len() != signature.parameter_types.len() {
                     return Err(Box::new(crate::Error {
-                        kind: crate::ErrorKind::ExpectedFunctionType {
-                            got_type: got_type.to_string(),
+                        kind: crate::ErrorKind::InvalidArity {
+                            expected: signature.parameter_types.len(),
+                            got: arguments.len(),
                         },
                         span: function.span,
                     }))
                 }
+
+                let mut result_list_state = None;
+                for (argument, parameter_type) in std::iter::zip(&mut arguments, signature.parameter_types) {
+                    if let Type::List { state: ListState::MaybeList, .. } = context.types.get(parameter_type) {
+                        result_list_state = ListState::merge(
+                            result_list_state,
+                            argument.get_type(&context.values).flatten_list(&context.types).0,
+                        )
+                    }
+
+                    *argument = context.coerce_value(*argument, parameter_type, false)?;
+                }
+
+                let return_type = match context.types.get(signature.return_type) {
+                    &Type::List { state: ListState::MaybeList, item_type } => {
+                        context.types.unflatten_list(result_list_state, item_type)?
+                    }
+                    _ => signature.return_type
+                };
+
+                Ok(ValueEntry {
+                    value: Value::UserFunctionCall {
+                        function: context.values.register(function),
+                        arguments,
+                    },
+                    type_handle: return_type,
+                    span: Some(expression.span),
+                })
+            }
+            else {
+                Err(Box::new(crate::Error {
+                    kind: crate::ErrorKind::ExpectedFunctionType {
+                        got_type: context.types.repr(function.type_handle),
+                    },
+                    span: function.span,
+                }))
             }
         }
         ExpressionKind::Conditional { condition_consequents, alternative } => {
-            let mut result_type = Type::Any;
+            let mut result_type = TypeHandle::ANY;
 
-            let condition_consequents: Box<[_]> = condition_consequents
+            let mut condition_consequents: Box<[_]> = condition_consequents
                 .iter()
                 .map(|(condition, consequent)| {
-                    let condition = interpret_expression(target, context, local_context, condition)?
-                        .coerce_to(&Type::Bool, true)?;
-                    // A list condition should cause the whole expression to broadcast
-                    let (result_list, inner_type) = result_type.flatten_list();
-                    result_type = inner_type.clone().unflatten_list(ListState::merge(result_list, condition.get_type().list_state()));
+                    let condition = interpret_expression(context, local_context, condition)?
+                        .register(&mut context.values);
+                    let condition = context.coerce_value(condition, TypeHandle::BOOL, true)?;
+                    // A list condition should cause the whole expression to broadcast.
+                    let (result_list, inner_type) = context.types.flatten_list(result_type);
+                    result_type = context.types.unflatten_list(
+                        ListState::merge(
+                            result_list,
+                            condition.get_type(&context.values).flatten_list(&context.types).0,
+                        ),
+                        inner_type,
+                    )?;
 
-                    let consequent = interpret_expression(target, context, local_context, consequent)?;
-                    result_type = result_type.merge(&consequent.get_type())
+                    let consequent = interpret_expression(context, local_context, consequent)?;
+                    result_type = context.types.merge(result_type, consequent.type_handle)
                         .map_err(|error| error.with_span(consequent.span))?;
 
-                    Ok((condition, consequent))
+                    Ok((condition, context.values.register(consequent)))
                 })
                 .collect::<crate::Result<_>>()?;
 
             let alternative = alternative
                 .as_ref()
-                .map_or(Ok(Value::Undefined(result_type.clone()).into()), |alternative| {
-                    let alternative = interpret_expression(target, context, local_context, alternative)?;
-                    result_type = result_type.merge(&alternative.get_type())
+                .map_or(Ok(ValueHandle::UNDEFINED), |alternative| {
+                    let alternative = interpret_expression(context, local_context, alternative)?;
+                    result_type = context.types.merge(result_type, alternative.type_handle)
                         .map_err(|error| error.with_span(alternative.span))?;
 
-                    alternative.coerce_to(result_type.flatten_list().1, true)
+                    let alternative = context.values.register(alternative);
+                    context.coerce_value(alternative, context.types.flatten_list(result_type).1, true)
                 })?;
 
-            let result_inner_type = result_type.flatten_list().1;
-            let condition_consequents = condition_consequents
-                .into_iter()
-                .map(|(condition, consequent)| {
-                    Ok((condition, consequent.coerce_to(result_inner_type, true)?))
-                })
-                .collect::<crate::Result<_>>()?;
-
-            Value::Conditional {
-                condition_consequents,
-                alternative: Box::new(alternative),
-                result_type,
+            let result_inner_type = context.types.flatten_list(result_type).1;
+            for (_, consequent) in &mut condition_consequents {
+                *consequent = context.coerce_value(*consequent, result_inner_type, true)?;
             }
+
+            Ok(ValueEntry {
+                value: Value::Conditional {
+                    condition_consequents,
+                    alternative,
+                },
+                type_handle: result_type,
+                span: Some(expression.span),
+            })
         }
         ExpressionKind::Let { identifier, value_type, value, inner, .. } => {
-            let mut value = interpret_expression(target, context, local_context, value)?;
+            let mut value = interpret_expression(context, local_context, value)?
+                .register(&mut context.values);
 
             if let Some(value_type) = value_type {
                 let value_type = context.resolve_type(value_type, true)?;
-                value = value.coerce_to(&value_type, false)?;
+                value = context.coerce_value(value, value_type, false)?;
             }
 
             let mut inner_context = local_context.new_inner();
-            inner_context.add_local(identifier.clone(), value.kind);
+            inner_context.add_local(identifier.clone(), value);
 
-            interpret_expression(target, context, &inner_context, inner)?.kind
+            interpret_expression(context, &inner_context, inner)
         }
         ExpressionKind::InlineAction { parameters, action } => {
             let mut action_context = local_context.new_inner();
 
-            let parameter_types: Vec<_> = parameters.0
+            let parameter_types: Box<[_]> = parameters.0
                 .iter()
                 .map(|parameter| context.resolve_type(&parameter.parameter_type, false))
                 .collect::<crate::Result<_>>()?;
-            let typed_parameters = process_parameters(target, &mut action_context, parameters, &parameter_types);
+            let typed_parameters = process_parameters(context, &mut action_context, parameters, &parameter_types);
 
-            let action = interpret_action_expression(target, context, &action_context, action)?;
+            let action = interpret_action_expression(context, &action_context, action)?;
 
-            Value::InlineAction {
-                parameters: typed_parameters,
-                action: Box::new(action),
-            }
+            Ok(ValueEntry {
+                value: Value::Action {
+                    parameters: typed_parameters,
+                    action: Box::new(action),
+                },
+                type_handle: context.types.action_type(parameter_types),
+                span: Some(expression.span),
+            })
         }
         ExpressionKind::Character(..) => {
-            return Err(Box::new(crate::Error {
+            Err(Box::new(crate::Error {
                 kind: crate::ErrorKind::UnexpectedExpressionKind,
                 span: Some(expression.span),
             }))
         }
-    };
-
-    Ok(ValueRegistryEntry {
-        kind,
-        span: Some(expression.span),
-    })
+    }
 }
 
 pub fn interpret_unary_operation(
-    target: &mut dyn Target,
-    context: &GlobalContext,
+    context: &mut GlobalContext,
     local_context: &LocalContext,
     operation: UnaryOperation,
     operand: &Expression,
-) -> crate::Result<Value> {
+    span: Option<crate::Span>,
+) -> crate::Result<ValueEntry> {
     let kind = match operation {
         UnaryOperation::Positive => UnaryKind::Positive,
         UnaryOperation::Negative => UnaryKind::Negative,
@@ -1147,14 +1260,13 @@ pub fn interpret_unary_operation(
 }
 
 pub fn interpret_binary_operation(
-    target: &mut dyn Target,
-    context: &GlobalContext,
+    context: &mut GlobalContext,
     local_context: &LocalContext,
     operation: BinaryOperation,
     lhs: &Expression,
     rhs: &Expression,
     span: Option<crate::Span>,
-) -> crate::Result<Value> {
+) -> crate::Result<ValueEntry> {
     let kind = match operation {
         BinaryOperation::MemberAccess => {
             // Handle this operation separately since its right hand side is not a value
@@ -1299,12 +1411,11 @@ pub fn interpret_binary_operation(
 }
 
 fn interpret_access_operation(
-    target: &mut dyn Target,
-    context: &GlobalContext,
+    context: &mut GlobalContext,
     local_context: &LocalContext,
     lhs: &Expression,
     rhs: &Expression,
-) -> crate::Result<Value> {
+) -> crate::Result<ValueEntry> {
     let lhs = interpret_expression(target, context, local_context, lhs)?;
     let (lhs_list, lhs_type) = lhs.get_type().into_flatten_list();
 
@@ -1393,14 +1504,13 @@ fn interpret_access_operation(
 }
 
 fn interpret_inequality_chain(
-    target: &mut dyn Target,
-    context: &GlobalContext,
+    context: &mut GlobalContext,
     local_context: &LocalContext,
     rightmost_kind: InequalityKind,
     lhs: &Expression,
     rhs: &Expression,
     span: Option<crate::Span>,
-) -> crate::Result<Value> {
+) -> crate::Result<ValueEntry> {
     let rhs_value = interpret_expression(target, context, local_context, rhs)?;
     let (mut list_state, mut compared_type) = rhs_value.get_type().into_flatten_list();
 
@@ -1451,8 +1561,7 @@ fn interpret_inequality_chain(
 }
 
 pub fn interpret_index_operation(
-    target: &mut dyn Target,
-    context: &GlobalContext,
+    context: &mut GlobalContext,
     local_context: &LocalContext,
     operation: &IndexOperation,
 ) -> crate::Result<IndexKind> {

@@ -219,33 +219,22 @@ impl TypeHandle {
         self.0.get() - 1
     }
 
-    pub fn display(self, registry: &TypeRegistry) -> TypeHandleDisplay<'_> {
-        TypeHandleDisplay {
-            handle: self,
-            registry,
-        }
-    }
-
     pub fn into_list(self, registry: &mut TypeRegistry, state: ListState) -> crate::Result<Self> {
         registry.list_type(state, self)
+    }
+
+    pub fn flatten_list(self, registry: &TypeRegistry) -> (Option<ListState>, Self) {
+        registry.flatten_list(self)
+    }
+
+    pub fn unflatten_list(self, registry: &mut TypeRegistry, state: Option<ListState>) -> crate::Result<Self> {
+        registry.unflatten_list(state, self)
     }
 }
 
 impl Default for TypeHandle {
     fn default() -> Self {
         Self::ANY
-    }
-}
-
-#[derive(Copy, Clone, Debug)]
-pub struct TypeHandleDisplay<'a> {
-    handle: TypeHandle,
-    registry: &'a TypeRegistry,
-}
-
-impl std::fmt::Display for TypeHandleDisplay<'_> {
-    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
-        f.write_str(&self.registry.repr(self.handle))
     }
 }
 
@@ -550,34 +539,34 @@ impl TypeRegistry {
         }
     }
 
-    pub fn merge(&mut self, lhs_type: TypeHandle, rhs_type: TypeHandle) -> Option<TypeHandle> {
+    pub fn merge(&mut self, lhs_type: TypeHandle, rhs_type: TypeHandle) -> crate::Result<TypeHandle> {
         let (lhs_list, lhs_inner) = self.flatten_list(lhs_type);
         let (rhs_list, rhs_inner) = self.flatten_list(rhs_type);
 
         let merged_list = ListState::merge(lhs_list, rhs_list);
         let merged_inner = self.merge_inner(lhs_inner, rhs_inner)?;
 
-        self.unflatten_list(merged_list, merged_inner).ok()
+        self.unflatten_list(merged_list, merged_inner)
     }
 
-    pub fn merge_inner(&mut self, lhs_type: TypeHandle, rhs_type: TypeHandle) -> Option<TypeHandle> {
+    pub fn merge_inner(&mut self, lhs_type: TypeHandle, rhs_type: TypeHandle) -> crate::Result<TypeHandle> {
         if lhs_type == rhs_type {
-            return Some(lhs_type)
+            return Ok(lhs_type)
         }
 
         let lhs_def = self.get(lhs_type);
         let rhs_def = self.get(rhs_type);
 
         match (lhs_def, rhs_def) {
-            (Type::Any, _) if rhs_def.is_first_class(self) => Some(rhs_type),
-            (_, Type::Any) if lhs_def.is_first_class(self) => Some(lhs_type),
+            (Type::Any, _) if rhs_def.is_first_class(self) => Ok(rhs_type),
+            (_, Type::Any) if lhs_def.is_first_class(self) => Ok(lhs_type),
             (
                 &Type::Point2D { x_type: lhs_x, y_type: lhs_y },
                 &Type::Point2D { x_type: rhs_x, y_type: rhs_y },
             ) => {
                 let merged_x = self.merge(lhs_x, rhs_x)?;
                 let merged_y = self.merge(lhs_y, rhs_y)?;
-                self.point_2d_type(merged_x, merged_y).ok()
+                self.point_2d_type(merged_x, merged_y)
             }
             (
                 &Type::Point3D { x_type: lhs_x, y_type: lhs_y, z_type: lhs_z },
@@ -586,7 +575,7 @@ impl TypeRegistry {
                 let merged_x = self.merge(lhs_x, rhs_x)?;
                 let merged_y = self.merge(lhs_y, rhs_y)?;
                 let merged_z = self.merge(lhs_z, rhs_z)?;
-                self.point_3d_type(merged_x, merged_y, merged_z).ok()
+                self.point_3d_type(merged_x, merged_y, merged_z)
             }
             _ => {
                 for numeric_type in [
@@ -596,17 +585,23 @@ impl TypeRegistry {
                     TypeHandle::COMPLEX,
                 ] {
                     if self.can_coerce(lhs_type, numeric_type) && self.can_coerce(rhs_type, numeric_type) {
-                        return Some(numeric_type)
+                        return Ok(numeric_type)
                     }
                 }
                 if self.can_coerce(lhs_type, rhs_type) {
-                    Some(rhs_type)
+                    Ok(rhs_type)
                 }
                 else if self.can_coerce(rhs_type, lhs_type) {
-                    Some(lhs_type)
+                    Ok(lhs_type)
                 }
                 else {
-                    None
+                    Err(Box::new(crate::Error {
+                        kind: crate::ErrorKind::CannotMergeTypes {
+                            lhs_type: self.repr(lhs_type),
+                            rhs_type: self.repr(rhs_type),
+                        },
+                        span: None,
+                    }))
                 }
             }
         }

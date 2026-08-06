@@ -226,10 +226,10 @@ impl<'ctx> GraphExpressionListBuilder<'ctx> {
             Value::EnumVariant { ordinal: variant_ordinal, .. } => {
                 Ok(GraphExpression::Integer(*variant_ordinal))
             }
-            Value::Global(reference) => {
+            Value::GlobalReference(reference) => {
                 Ok(self.context.get_global_symbol(&reference.identifier))
             }
-            Value::Action(reference) => {
+            Value::ActionReference(reference) => {
                 Ok(self.context.get_action_symbol(&reference.identifier))
             }
             Value::Local(reference) => {
@@ -428,7 +428,7 @@ impl<'ctx> GraphExpressionListBuilder<'ctx> {
                         .map(|argument| self.translate_value(argument))]
                 ))
             }
-            Value::InlineAction { parameters, action } => {
+            Value::Action { parameters, action } => {
                 let action = self.translate_action_value(action)?;
                 let action_symbol = self.context.create_inline_action_symbol();
 
