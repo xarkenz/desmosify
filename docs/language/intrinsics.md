@@ -785,7 +785,7 @@ This intrinsic is *only* available on `--target desmos-graphing3d`.
 Construct a 3D triangle with vertices at `a`, `b`, and `c`.
 
 {: #glider }
-### `@glider` — Construct a directed angle marker
+### `@glider` — Construct a geometry glider
 
 ```
 T: segment | circle | line | ray | arc | polygon
