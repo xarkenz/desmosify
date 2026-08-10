@@ -1708,11 +1708,11 @@ impl<'ctx> GraphExpressionListBuilder<'ctx> {
         for action in &program.actions {
             self.add_program_action(action)?;
         }
-        self.set_program_ticker(&program.ticker)?;
-        for public_entry in &program.public.entries {
+        self.set_program_ticker(&program.tickers)?;
+        for public_entry in &program.public_lists.entries {
             self.add_public_entry(public_entry)?;
         }
-        for display_element in &program.display.elements {
+        for display_element in &program.display_lists.elements {
             self.add_display_element(display_element)?;
         }
 

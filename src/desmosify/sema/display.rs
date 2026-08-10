@@ -283,6 +283,6 @@ pub struct ProgramDisplayElement {
 }
 
 #[derive(Clone, Debug)]
-pub struct ProgramDisplay {
+pub struct ProgramDisplayList {
     pub elements: Box<[ProgramDisplayElement]>,
 }

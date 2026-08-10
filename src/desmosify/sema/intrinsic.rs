@@ -289,13 +289,14 @@ pub const CORE_INTRINSIC_FUNCTIONS: &[&IntrinsicFunction] = &[
 ];
 
 pub fn interpret_strict_unary_call(
+    context: &mut GlobalContext,
     kind: UnaryKind,
-    argument_type: Type,
-    result_type: Option<Type>,
-    arguments: Box<[ValueRegistryEntry]>,
+    argument_type: TypeHandle,
+    result_type: Option<TypeHandle>,
+    arguments: Box<[ValueHandle]>,
 ) -> crate::Result<Value> {
     let argument = arguments.into_iter().next().unwrap()
-        .coerce_to(&argument_type, false)?;
+        .coerce(context, argument_type, false)?;
 
     Ok(Value::Unary {
         kind,
@@ -305,13 +306,14 @@ pub fn interpret_strict_unary_call(
 }
 
 pub fn interpret_broadcastable_unary_call(
+    context: &mut GlobalContext,
     kind: UnaryKind,
-    argument_type: Type,
-    result_type: Option<Type>,
-    arguments: Box<[ValueRegistryEntry]>,
+    argument_type: TypeHandle,
+    result_type: Option<TypeHandle>,
+    arguments: Box<[ValueHandle]>,
 ) -> crate::Result<Value> {
     let argument = arguments.into_iter().next().unwrap()
-        .coerce_to(&argument_type, true)?;
+        .coerce(context, &argument_type, true)?;
 
     Ok(Value::Unary {
         kind,
@@ -324,18 +326,19 @@ pub fn interpret_broadcastable_unary_call(
 }
 
 pub fn interpret_broadcastable_binary_call(
+    context: &mut GlobalContext,
     kind: BinaryKind,
-    lhs_type: Type,
-    rhs_type: Type,
+    lhs_type: TypeHandle,
+    rhs_type: TypeHandle,
     result_type: Type,
-    arguments: Box<[ValueRegistryEntry]>,
+    arguments: Box<[ValueHandle]>,
 ) -> crate::Result<Value> {
     let mut arguments = arguments.into_iter();
 
     let lhs = arguments.next().unwrap()
-        .coerce_to(&lhs_type, true)?;
+        .coerce(context, lhs_type, true)?;
     let rhs = arguments.next().unwrap()
-        .coerce_to(&rhs_type, true)?;
+        .coerce(context, rhs_type, true)?;
 
     let list_state = ListState::merge(
         lhs.get_type().list_state(),
@@ -351,21 +354,22 @@ pub fn interpret_broadcastable_binary_call(
 }
 
 pub fn interpret_broadcastable_ternary_call(
+    context: &mut GlobalContext,
     kind: TernaryKind,
-    first_type: Type,
-    second_type: Type,
-    third_type: Type,
-    result_type: Type,
-    arguments: Box<[ValueRegistryEntry]>,
+    first_type: TypeHandle,
+    second_type: TypeHandle,
+    third_type: TypeHandle,
+    result_type: TypeHandle,
+    arguments: Box<[ValueHandle]>,
 ) -> crate::Result<Value> {
     let mut arguments = arguments.into_iter();
 
     let first = arguments.next().unwrap()
-        .coerce_to(&first_type, true)?;
+        .coerce(context, &first_type, true)?;
     let second = arguments.next().unwrap()
-        .coerce_to(&second_type, true)?;
+        .coerce(context, &second_type, true)?;
     let third = arguments.next().unwrap()
-        .coerce_to(&third_type, true)?;
+        .coerce(context, &third_type, true)?;
 
     let list_state = ListState::merge_all([
         first.get_type().list_state(),
@@ -383,10 +387,11 @@ pub fn interpret_broadcastable_ternary_call(
 }
 
 pub fn interpret_broadcastable_reducer_call(
+    context: &mut GlobalContext,
     kind: ReducerKind,
     element_type: Option<Type>,
     result_type: Option<Type>,
-    arguments: Box<[ValueRegistryEntry]>,
+    arguments: Box<[ValueHandle]>,
 ) -> crate::Result<Value> {
     if let [argument] = arguments.as_ref() {
         let (list_state, argument_type) = argument.get_type().into_flatten_list();
@@ -394,7 +399,7 @@ pub fn interpret_broadcastable_reducer_call(
             // This should also work for any MaybeList.
             let list = arguments.into_iter().next().unwrap();
             let list = match &element_type {
-                Some(element_type) => list.coerce_to(element_type, true)?,
+                Some(element_type) => list.coerce(context, element_type, true)?,
                 None => list,
             };
 
@@ -416,7 +421,7 @@ pub fn interpret_broadcastable_reducer_call(
     )?;
 
     let element_type = match element_type {
-        Some(element_type) => merged_type.flatten_list().1.clone().coerce_to(&element_type)
+        Some(element_type) => merged_type.flatten_list().1.clone().coerce(context, &element_type)
             .ok_or_else(|| Box::new(crate::Error {
                 kind: crate::ErrorKind::MismatchedTypes {
                     expected_type: element_type.to_string(),
@@ -437,7 +442,7 @@ pub fn interpret_broadcastable_reducer_call(
             .into_iter()
             .map(|argument| {
                 list_state = ListState::merge(list_state, argument.get_type().list_state());
-                argument.coerce_to(&element_type, true)
+                argument.coerce(context, &element_type, true)
             })
             .collect::<crate::Result<_>>()?,
         result_type: result_type.unwrap_or(element_type).unflatten_list(list_state),
@@ -588,7 +593,7 @@ macro_rules! broadcastable_intrinsic {
     };
 }
 
-pub fn read_file_bytes(local_context: &LocalContext, path_value: &ValueRegistryEntry) -> crate::Result<(PathBuf, Vec<u8>)> {
+pub fn read_file_bytes(local_context: &LocalContext, path_value: &ValueHandle) -> crate::Result<(PathBuf, Vec<u8>)> {
     let relative_path = path_value.kind
         .as_const_str()
         .ok_or_else(|| Box::new(crate::Error {
@@ -819,7 +824,7 @@ pub static SORT: IntrinsicFunction = IntrinsicFunction {
                 .require_flatten_list()
                 .map_err(|error| error.with_span(list.span))?;
 
-            let key_list = key_list.coerce_to(&key_type, true)?;
+            let key_list = key_list.coerce(context, &key_type, true)?;
 
             Ok(Value::Binary {
                 kind: BinaryKind::SortKeyed,
@@ -829,7 +834,7 @@ pub static SORT: IntrinsicFunction = IntrinsicFunction {
             })
         }
         else {
-            let list = list.coerce_to(&key_type, true)?;
+            let list = list.coerce(context, &key_type, true)?;
 
             Ok(Value::Unary {
                 kind: UnaryKind::Sort,
@@ -853,7 +858,7 @@ pub static SHUFFLE: IntrinsicFunction = IntrinsicFunction {
             .map_err(|error| error.with_span(list.span))?;
 
         if let Some(seed) = arguments.next() {
-            let seed = seed.coerce_to(&Type::Real, false)?;
+            let seed = seed.coerce(context, &Type::Real, false)?;
 
             Ok(Value::Binary {
                 kind: BinaryKind::ShuffleSeeded,
@@ -981,7 +986,7 @@ pub static ANY: IntrinsicFunction = IntrinsicFunction {
     interpret_call: |target, context, local_context, arguments| {
         let arguments: Box<[_]> = arguments
             .into_iter()
-            .map(|argument| argument.coerce_to(&Type::Bool, true))
+            .map(|argument| argument.coerce(context, &Type::Bool, true))
             .collect::<crate::Result<_>>()?;
         let total = (TOTAL.interpret_call)(target, context, local_context, arguments)?;
         let list_state = total.get_type().list_state();
@@ -1010,7 +1015,7 @@ pub static ALL: IntrinsicFunction = IntrinsicFunction {
 
                 Ok(Value::Unary {
                     kind: UnaryKind::LogicalNot,
-                    operand: Box::new(argument.coerce_to(&Type::Bool, true)?),
+                    operand: Box::new(argument.coerce(context, &Type::Bool, true)?),
                     result_type: Type::Bool.unflatten_list(list_state),
                 }.into())
             })
@@ -1059,17 +1064,17 @@ pub static ALL: IntrinsicFunction = IntrinsicFunction {
 // INVERSE_CDF
 
 fn interpret_random_call_end(
-    arguments: impl IntoIterator<Item = ValueRegistryEntry>,
-    source: Option<Box<ValueRegistryEntry>>,
+    arguments: impl IntoIterator<Item = ValueHandle>,
+    source: Option<Box<ValueHandle>>,
     source_type: Type,
 ) -> crate::Result<Value> {
     let mut arguments = arguments.into_iter();
 
     if let Some(sample_count) = arguments.next() {
-        let sample_count = sample_count.coerce_to(&Type::Int, false)?;
+        let sample_count = sample_count.coerce(context, &Type::Int, false)?;
 
         if let Some(seed) = arguments.next() {
-            let seed = seed.coerce_to(&Type::Real, false)?;
+            let seed = seed.coerce(context, &Type::Real, false)?;
 
             Ok(Value::RandomSeeded {
                 source,
@@ -1160,8 +1165,8 @@ pub static LINE: IntrinsicFunction = IntrinsicFunction {
 
         if let Some(end) = arguments.next() {
             let real_point_2d = Type::real_point_2d();
-            let start = first_argument.coerce_to(&real_point_2d, true)?;
-            let end = end.coerce_to(&real_point_2d, true)?;
+            let start = first_argument.coerce(context, &real_point_2d, true)?;
+            let end = end.coerce(context, &real_point_2d, true)?;
 
             let list_state = ListState::merge(
                 start.get_type().list_state(),
@@ -1176,7 +1181,7 @@ pub static LINE: IntrinsicFunction = IntrinsicFunction {
             })
         }
         else {
-            let segment_or_ray = first_argument.coerce_to(&Type::union([
+            let segment_or_ray = first_argument.coerce(context, &Type::union([
                 Type::Segment,
                 Type::Ray,
             ]), true)?;
@@ -1220,9 +1225,9 @@ pub static CIRCLE: IntrinsicFunction = IntrinsicFunction {
         let mut arguments = arguments.into_iter();
 
         let lhs = arguments.next().unwrap()
-            .coerce_to(&Type::real_point_2d(), true)?;
+            .coerce(context, &Type::real_point_2d(), true)?;
         let rhs = arguments.next().unwrap()
-            .coerce_to(&Type::union([
+            .coerce(context, &Type::union([
                 Type::Real,
                 Type::real_point_2d(),
             ]), true)?;
@@ -1339,7 +1344,7 @@ pub static MIDPOINT: IntrinsicFunction = IntrinsicFunction {
         let point_1_or_segment = arguments.next().unwrap();
 
         if let Some(point_2) = arguments.next() {
-            let point_1 = point_1_or_segment.coerce_to(&Type::union([
+            let point_1 = point_1_or_segment.coerce(context, &Type::union([
                 Type::real_point_2d(),
                 Type::real_point_3d(),
             ]), true)?;
@@ -1351,7 +1356,7 @@ pub static MIDPOINT: IntrinsicFunction = IntrinsicFunction {
                 _ => unreachable!()
             };
 
-            let point_2 = point_2.coerce_to(&point_type, true)?;
+            let point_2 = point_2.coerce(context, &point_type, true)?;
 
             let list_state = ListState::merge(
                 point_1_list,
@@ -1366,7 +1371,7 @@ pub static MIDPOINT: IntrinsicFunction = IntrinsicFunction {
             })
         }
         else {
-            let segment = point_1_or_segment.coerce_to(&Type::union([
+            let segment = point_1_or_segment.coerce(context, &Type::union([
                 Type::Segment,
                 Type::Segment3D,
             ]), true)?;
@@ -1390,10 +1395,10 @@ pub static MIDPOINT: IntrinsicFunction = IntrinsicFunction {
 fn interpret_start_end_call(
     kind_2d: UnaryKind,
     kind_3d: UnaryKind,
-    arguments: Box<[ValueRegistryEntry]>,
+    arguments: Box<[ValueHandle]>,
 ) -> crate::Result<Value> {
     let vector = arguments.into_iter().next().unwrap()
-        .coerce_to(&Type::union([Type::Vector, Type::Vector3D]), true)?;
+        .coerce(context, &Type::union([Type::Vector, Type::Vector3D]), true)?;
     let (list_state, vector_type) = vector.get_type().into_flatten_list();
 
     let (kind, point_type) = match vector_type {
@@ -1435,19 +1440,19 @@ pub static END: IntrinsicFunction = IntrinsicFunction {
 
 fn interpret_rotate_dilate_call(
     kind: TernaryKind,
-    arguments: Box<[ValueRegistryEntry]>,
+    arguments: Box<[ValueHandle]>,
 ) -> crate::Result<Value> {
     let mut arguments = arguments.into_iter();
 
     let object = arguments.next().unwrap()
-        .coerce_to(&Type::transformable(), true)?;
+        .coerce(context, &Type::transformable(), true)?;
     let (object_list, object_type) = object.get_type().into_flatten_list();
 
     let point = arguments.next().unwrap()
-        .coerce_to(&Type::real_point_2d(), true)?;
+        .coerce(context, &Type::real_point_2d(), true)?;
 
     let factor_or_angle = arguments.next().unwrap()
-        .coerce_to(&Type::Real, true)?;
+        .coerce(context, &Type::Real, true)?;
 
     let list_state = ListState::merge_all([
         object_list,
@@ -1492,11 +1497,11 @@ pub static REFLECT: IntrinsicFunction = IntrinsicFunction {
         let mut arguments = arguments.into_iter();
 
         let object = arguments.next().unwrap()
-            .coerce_to(&Type::transformable(), true)?;
+            .coerce(context, &Type::transformable(), true)?;
         let (object_list, object_type) = object.get_type().into_flatten_list();
 
         let line = arguments.next().unwrap()
-            .coerce_to(&Type::line_like(), true)?;
+            .coerce(context, &Type::line_like(), true)?;
 
         let list_state = ListState::merge(
             object_list,
@@ -1520,15 +1525,15 @@ pub static TRANSLATE: IntrinsicFunction = IntrinsicFunction {
         let mut arguments = arguments.into_iter();
 
         let object = arguments.next().unwrap()
-            .coerce_to(&Type::transformable(), true)?;
+            .coerce(context, &Type::transformable(), true)?;
         let (object_list, object_type) = object.get_type().into_flatten_list();
 
         let first_argument = arguments.next().unwrap();
 
         if let Some(end) = arguments.next() {
             let real_point2 = Type::real_point_2d();
-            let start = first_argument.coerce_to(&real_point2, true)?;
-            let end = end.coerce_to(&real_point2, true)?;
+            let start = first_argument.coerce(context, &real_point2, true)?;
+            let end = end.coerce(context, &real_point2, true)?;
 
             let list_state = ListState::merge_all([
                 object_list,
@@ -1545,7 +1550,7 @@ pub static TRANSLATE: IntrinsicFunction = IntrinsicFunction {
             })
         }
         else {
-            let vector = first_argument.coerce_to(&Type::Vector, true)?;
+            let vector = first_argument.coerce(context, &Type::Vector, true)?;
 
             let list_state = ListState::merge(
                 object_list,
@@ -1564,15 +1569,15 @@ pub static TRANSLATE: IntrinsicFunction = IntrinsicFunction {
 
 fn interpret_rotation_dilation_call(
     kind: BinaryKind,
-    arguments: Box<[ValueRegistryEntry]>,
+    arguments: Box<[ValueHandle]>,
 ) -> crate::Result<Value> {
     let mut arguments = arguments.into_iter();
 
     let point = arguments.next().unwrap()
-        .coerce_to(&Type::real_point_2d(), true)?;
+        .coerce(context, &Type::real_point_2d(), true)?;
 
     let factor_or_angle = arguments.next().unwrap()
-        .coerce_to(&Type::Real, true)?;
+        .coerce(context, &Type::Real, true)?;
 
     let list_state = ListState::merge(
         point.get_type().list_state(),
@@ -1615,7 +1620,7 @@ pub static REFLECTION: IntrinsicFunction = IntrinsicFunction {
         let mut arguments = arguments.into_iter();
 
         let line = arguments.next().unwrap()
-            .coerce_to(&Type::Line, true)?;
+            .coerce(context, &Type::Line, true)?;
 
         Ok(Value::Unary {
             kind: UnaryKind::ReflectionByLine2D,
@@ -1634,7 +1639,7 @@ pub static TRANSLATION: IntrinsicFunction = IntrinsicFunction {
         let mut arguments = arguments.into_iter();
 
         let displacement = arguments.next().unwrap()
-            .coerce_to(&Type::real_point_2d(), true)?;
+            .coerce(context, &Type::real_point_2d(), true)?;
 
         Ok(Value::Unary {
             kind: UnaryKind::TranslationByPoint2D,
@@ -1652,10 +1657,10 @@ pub static APPLY: IntrinsicFunction = IntrinsicFunction {
         let mut arguments = arguments.into_iter();
 
         let transformation = arguments.next().unwrap()
-            .coerce_to(&Type::Transformation, true)?;
+            .coerce(context, &Type::Transformation, true)?;
 
         let object = arguments.next().unwrap()
-            .coerce_to(&Type::transformable(), true)?;
+            .coerce(context, &Type::transformable(), true)?;
         let (object_list, object_type) = object.get_type().into_flatten_list();
 
         let list_state = ListState::merge(
@@ -1781,7 +1786,7 @@ pub static ENUM_VALUE: IntrinsicFunction = IntrinsicFunction {
         };
 
         let variant_ordinal = arguments.next().unwrap()
-            .coerce_to(&Type::Int, true)?;
+            .coerce(context, &Type::Int, true)?;
         let list_state = variant_ordinal.get_type().list_state();
 
         let result_type = Type::Enum {
@@ -1858,20 +1863,20 @@ pub static IMAGE: IntrinsicFunction = IntrinsicFunction {
         let name_value = arguments.next().unwrap();
         let name = name_value.get_const_str()?;
         let center = arguments.next().unwrap()
-            .coerce_to(&Type::Point2D {
+            .coerce(context, &Type::Point2D {
                 x_type: Box::new(Type::Real),
                 y_type: Box::new(Type::Real),
             }, true)?;
         let width = arguments.next().unwrap()
-            .coerce_to(&Type::Real, true)?;
+            .coerce(context, &Type::Real, true)?;
         let height = arguments.next().unwrap()
-            .coerce_to(&Type::Real, true)?;
+            .coerce(context, &Type::Real, true)?;
         let opacity = arguments.next()
             .unwrap_or(Value::Real(1.0).into())
-            .coerce_to(&Type::Real, true)?;
+            .coerce(context, &Type::Real, true)?;
         let angle = arguments.next()
             .unwrap_or(Value::Real(0.0).into())
-            .coerce_to(&Type::Real, true)?;
+            .coerce(context, &Type::Real, true)?;
         let background = arguments.next()
             .map_or(Ok(false), |background_value| {
                 background_value.kind

@@ -1,11 +1,10 @@
 use std::rc::Rc;
 use crate::ast::{ActionExpression, ActionExpressionKind, BinaryOperation, DefinitionKind, DisplayAttribute, Expression, IndexOperation, ExpressionKind, ParameterList, PublicLineKind, TypeDefinition, UnaryOperation, ValueDefinition, VariableKind, EnumerationVariant, PublicLine, Declaration, TickerDeclaration, PublicDeclaration, DisplayDeclaration};
-use crate::sema::{Program, ProgramAction, ProgramEnumeration, ProgramImmutable, ProgramPublic, ProgramPublicEntry, ProgramPublicLine, ProgramTicker, ProgramVariable, ProgramVariableKind};
+use crate::sema::{Program, ProgramAction, ProgramEnumeration, ProgramImmutable, ProgramPublicList, ProgramPublicEntry, ProgramPublicLine, ProgramTicker, ProgramVariable, ProgramVariableKind};
 use crate::sema::context::{GlobalContext, LocalContext};
-use crate::sema::display::{DragMode, LabelOrientation, LineStyle, PointStyle, ProgramDisplay, ProgramDisplayAttribute, ProgramDisplayAttributeKind, ProgramDisplayElement};
+use crate::sema::display::{DragMode, LabelOrientation, LineStyle, PointStyle, ProgramDisplayList, ProgramDisplayAttribute, ProgramDisplayAttributeKind, ProgramDisplayElement};
 use crate::sema::types::{ListState, Type, TypeHandle};
 use crate::sema::values::{ActionValue, ActionValueKind, GlobalSymbol, IndexKind, Value, ListMapLoop, BinaryKind, UnaryKind, InequalityKind, TernaryKind, ValueHandle, ValueEntry, GlobalSymbolKind};
-use crate::target::Target;
 
 pub fn interpret_program(context: &mut GlobalContext, declarations: &[Declaration]) -> crate::Result<Program> {
     let mut enumerations = Vec::new();
@@ -13,9 +12,9 @@ pub fn interpret_program(context: &mut GlobalContext, declarations: &[Declaratio
     let mut variables = Vec::new();
     let mut actions = Vec::new();
 
-    let mut ticker_declarations = Vec::new();
-    let mut public_declarations = Vec::new();
-    let mut display_declarations = Vec::new();
+    let mut tickers = Vec::new();
+    let mut public_lists = Vec::new();
+    let mut display_lists = Vec::new();
 
     for declaration in declarations {
         let local_context = context.new_local_context(declaration.span().source_id);
@@ -59,29 +58,35 @@ pub fn interpret_program(context: &mut GlobalContext, declarations: &[Declaratio
                 }
             }
             Declaration::Ticker(ticker_declaration) => {
-                ticker_declarations.push(ticker_declaration);
+                tickers.push(interpret_ticker_declaration(
+                    context,
+                    ticker_declaration,
+                )?);
             }
             Declaration::Public(public_declaration) => {
-                public_declarations.push(public_declaration);
+                public_lists.push(interpret_public_declaration(
+                    context,
+                    &mut variables,
+                    public_declaration,
+                )?);
             }
             Declaration::Display(display_declaration) => {
-                display_declarations.push(display_declaration);
+                display_lists.push(interpret_display_declaration(
+                    context,
+                    display_declaration,
+                )?);
             }
         }
     }
-
-    let ticker = interpret_ticker_declarations(context, ticker_declarations)?;
-    let public = interpret_public_declarations(context, &mut variables, public_declarations)?;
-    let display = interpret_display_declarations(context, display_declarations)?;
 
     Ok(Program {
         enumerations: enumerations.into_boxed_slice(),
         immutables: immutables.into_boxed_slice(),
         variables: variables.into_boxed_slice(),
         actions: actions.into_boxed_slice(),
-        ticker,
-        public,
-        display,
+        tickers: tickers.into_boxed_slice(),
+        public_lists: public_lists.into_boxed_slice(),
+        display_lists: display_lists.into_boxed_slice(),
     })
 }
 
@@ -97,7 +102,7 @@ pub fn interpret_enumeration_definition(
         panic!("no enum '{identifier}' found in context")
     };
     let Type::Enum { values, .. } = context.types.get(type_handle) else {
-        panic!("invalid type definition for enum '{identifier}'")
+        panic!("invalid definition for enum '{identifier}'")
     };
     let ordinals: Vec<_> = values
         .iter()
@@ -108,7 +113,9 @@ pub fn interpret_enumeration_definition(
     for (variant, ordinal) in std::iter::zip(variants, ordinals) {
         let ordinal_value = if let Some(value) = &variant.value {
             // Use the explicit value as the ordinal.
-            interpret_expression(context, &local_context, value)?.value
+            let entry = interpret_expression(context, &local_context, value)?;
+            context.expect_coercible(entry.type_handle, TypeHandle::INT, entry.span)?;
+            entry.value
         } else if let Some((previous_identifier, previous_ordinal)) = previous_value.take() {
             // Use the ordinal of the previous value plus one.
             let previous_reference = context.values.register(ValueEntry {
@@ -147,26 +154,31 @@ pub fn interpret_let_definition(
     parameters: Option<&ParameterList>,
     value: &Expression,
 ) -> crate::Result<ProgramImmutable> {
-    let (typed_parameters, expected_type) = if let Some(parameters) = parameters {
-        let Type::Function { signature } = value_type else {
+    let Some(value_handle) = context.find_global(&identifier)
+        .map(|global| global.value)
+    else {
+        panic!("no immutable '{identifier}' found in context")
+    };
+    let mut expected_type = context.values.get_type(value_handle);
+
+    let parameter_values = parameters.map(|parameters| {
+        let Type::Function { signature } = context.types.get(expected_type) else {
             panic!("parameter list is present but value type is not a function")
         };
+        expected_type = signature.return_type;
+        let parameter_types = signature.parameter_types.clone();
 
-        let typed_parameters = process_parameters(target, &mut local_context, parameters, &signature.parameter_types);
+        process_parameters(context, &mut local_context, parameters, &parameter_types)
+    });
 
-        (Some(typed_parameters), &signature.return_type)
-    }
-    else {
-        (None, value_type)
-    };
-
-    let value = interpret_expression(target, context, &local_context, value)?
-        .coerce_to(expected_type, false)?;
+    let entry = interpret_expression(context, &local_context, value)?;
+    context.expect_coercible(entry.type_handle, expected_type, entry.span)?;
+    context.values.replace(value_handle, entry.value);
 
     Ok(ProgramImmutable {
         identifier,
-        parameters: typed_parameters,
-        value,
+        parameters: parameter_values,
+        value: value_handle,
     })
 }
 
@@ -177,6 +189,13 @@ pub fn interpret_variable_definition(
     kind: &VariableKind,
     value: &Expression,
 ) -> crate::Result<ProgramVariable> {
+    let Some(value_handle) = context.find_global(&identifier)
+        .map(|global| global.value)
+    else {
+        panic!("no variable '{identifier}' found in context")
+    };
+    let expected_type = context.values.get_type(value_handle);
+
     // TODO: timer and slider should be restricted to certain types, should also affect slider step
     let kind = match kind {
         VariableKind::Default => ProgramVariableKind::Default,
@@ -184,25 +203,27 @@ pub fn interpret_variable_definition(
         VariableKind::Slider { min, max, step } => {
             let mut interpret = |option: Option<&Expression>| {
                 option.map(|expression| {
-                    interpret_expression(target, context, &local_context, expression)?
-                        .coerce_to(value_type, false)
+                    interpret_expression(context, &local_context, expression)?
+                        .register(&mut context.values)
+                        .coerce(context, expected_type, false)
                 }).transpose()
             };
             ProgramVariableKind::Slider {
-                min: interpret(min.as_deref())?.map(Box::new),
-                max: interpret(max.as_deref())?.map(Box::new),
-                step: interpret(step.as_deref())?.map(Box::new),
+                min: interpret(min.as_deref())?,
+                max: interpret(max.as_deref())?,
+                step: interpret(step.as_deref())?,
             }
         }
     };
 
-    let value = interpret_expression(target, context, &local_context, value)?
-        .coerce_to(value_type, false)?;
+    let entry = interpret_expression(context, &local_context, value)?;
+    context.expect_coercible(entry.type_handle, expected_type, entry.span)?;
+    context.values.replace(value_handle, entry.value);
 
     Ok(ProgramVariable {
         identifier,
         kind,
-        value,
+        value: value_handle,
     })
 }
 
@@ -213,16 +234,23 @@ pub fn interpret_action_definition(
     parameters: &ParameterList,
     action: &ActionExpression,
 ) -> crate::Result<ProgramAction> {
-    let Type::Action { parameter_types } = action_type else {
-        panic!("action definition has invalid type")
+    let Some(type_handle) = context.find_global(&identifier)
+        .map(|global| context.values.get_type(global.value))
+    else {
+        panic!("no action '{identifier}' found in context")
     };
-    let typed_parameters = process_parameters(target, &mut local_context, parameters, parameter_types);
+    let Type::Action { parameter_types } = context.types.get(type_handle) else {
+        panic!("invalid definition for action '{identifier}'")
+    };
+    let parameter_types = parameter_types.clone();
 
-    let action = interpret_action_expression(target, context, &local_context, action)?;
+    let parameter_values = process_parameters(context, &mut local_context, parameters, &parameter_types);
+
+    let action = interpret_action_expression(context, &local_context, action)?;
 
     Ok(ProgramAction {
         identifier,
-        parameters: typed_parameters,
+        parameters: parameter_values,
         action,
     })
 }
@@ -248,87 +276,69 @@ pub fn process_parameters(
         .collect()
 }
 
-pub fn interpret_ticker_declarations<'a>(
+pub fn interpret_ticker_declaration(
     context: &mut GlobalContext,
-    ticker_declarations: impl IntoIterator<Item = &'a TickerDeclaration>,
+    declaration: &TickerDeclaration,
 ) -> crate::Result<ProgramTicker> {
-    let mut interval_ms = None;
+    let local_context = context.new_local_context(declaration.span.source_id);
 
-    let tick_actions = ticker_declarations
-        .iter()
-        .enumerate()
-        .map(|(index, declaration)| {
-            let local_context = context.new_local_context(declaration.span.source_id);
+    let interval_ms = declaration.interval_ms.as_ref().map(|interval_ms| {
+        interpret_expression(context, &local_context, interval_ms)?
+            .register(&mut context.values)
+            .coerce(context, TypeHandle::REAL, false)
+    }).transpose()?;
 
-            let new_interval_ms = match declaration.interval_ms.as_ref() {
-                Some(interval_expression) => Some(interpret_expression(context, &local_context, interval_expression)?),
-                None => None,
-            };
-            if index != 0 && new_interval_ms != interval_ms {
-                return Err(Box::new(crate::Error {
-                    kind: crate::ErrorKind::IncompatibleTickerIntervals,
-                    span: Some(declaration.span),
-                }))
-            }
-            interval_ms = new_interval_ms;
+    let tick_action = interpret_expression(context, &local_context, &declaration.tick_action)?;
 
-            let tick_action = interpret_expression(context, &local_context, &declaration.tick_action)?;
-            let tick_type = context.values.get_type(tick_action);
-
-            let tick_arguments: Box<[_]> = match context.types.expect_action_type(tick_type, 0, &[TypeHandle::REAL])? {
-                &[] => Box::new([]),
-                &[dt_type, ..] => Box::new([
-                    context.coerce_value(ValueHandle::TICKER_DT, dt_type, false)?,
-                ]),
-            };
-
-            Ok(ActionValueKind::ActionCall {
-                action: tick_action,
-                arguments: tick_arguments,
-            }.with_span(None))
-        })
-        .collect::<crate::Result<_>>()?;
+    let tick_arguments: Box<[_]> = match context.types.expect_action_type(
+        tick_action.type_handle,
+        0,
+        &[TypeHandle::REAL],
+        tick_action.span,
+    )? {
+        &[] => Box::new([]),
+        &[dt_type, ..] => Box::new([
+            context.coerce_value(ValueHandle::TICKER_DT, dt_type, false)?,
+        ]),
+    };
 
     Ok(ProgramTicker {
         interval_ms,
-        tick_action: ActionValueKind::Compound {
-            actions: tick_actions,
+        tick_action: ActionValueKind::ActionCall {
+            action: tick_action.register(&mut context.values),
+            arguments: tick_arguments,
         }.into(),
     })
 }
 
-pub fn interpret_public_declarations<'a>(
+pub fn interpret_public_declaration(
     context: &mut GlobalContext,
     variables: &mut Vec<ProgramVariable>,
-    public_declarations: impl IntoIterator<Item = &'a PublicDeclaration>,
-) -> crate::Result<ProgramPublic> {
-    let mut entries = Vec::new();
+    declaration: &PublicDeclaration,
+) -> crate::Result<ProgramPublicList> {
+    let local_context = context.new_local_context(declaration.span.source_id);
 
-    for declaration in context.public_declarations() {
-        let local_context = LocalContext::new(&source_paths[declaration.span.source_id]);
-
-        for line in &declaration.lines {
-            entries.push(match &line.kind {
+    Ok(ProgramPublicList {
+        entries: declaration.lines
+            .iter()
+            .map(|line| match &line.kind {
                 PublicLineKind::Expression(..) |
                 PublicLineKind::Action(..) |
                 PublicLineKind::Slider { .. } => {
-                    ProgramPublicEntry::Line(interpret_public_line(target, context, variables, &local_context, line)?)
+                    interpret_public_line(context, variables, &local_context, line)
+                        .map(ProgramPublicEntry::Line)
                 }
                 PublicLineKind::Folder { label, lines } => {
-                    ProgramPublicEntry::Folder {
+                    Ok(ProgramPublicEntry::Folder {
                         label: label.clone(),
                         lines: lines
                             .iter()
-                            .map(|line| interpret_public_line(target, context, variables, &local_context, line))
+                            .map(|line| interpret_public_line(context, variables, &local_context, line))
                             .collect::<crate::Result<_>>()?,
-                    }
+                    })
                 }
-            });
-        }
-    }
-
-    Ok(ProgramPublic {
-        entries: entries.into_boxed_slice(),
+            })
+            .collect::<crate::Result<_>>()?,
     })
 }
 
@@ -340,10 +350,11 @@ fn interpret_public_line(
 ) -> crate::Result<ProgramPublicLine> {
     match &line.kind {
         PublicLineKind::Expression(expression) => {
-            Ok(ProgramPublicLine::Expression(interpret_expression(target, context, local_context, expression)?))
+            Ok(ProgramPublicLine::Expression(interpret_expression(context, local_context, expression)?
+                .register(&mut context.values)))
         }
         PublicLineKind::Action(action) => {
-            Ok(ProgramPublicLine::Action(interpret_action_expression(target, context, local_context, action)?))
+            Ok(ProgramPublicLine::Action(interpret_action_expression(context, local_context, action)?))
         }
         PublicLineKind::Slider { var_identifier } => {
             let var_index = variables
@@ -351,26 +362,28 @@ fn interpret_public_line(
                 .position(|variable| &variable.identifier == var_identifier)
                 .ok_or_else(|| {
                     // We can provide some pretty good diagnostics for this error.
-                    let Some(definition) = context.find_global(var_identifier) else {
-                        return Box::new(crate::Error {
-                            kind: crate::ErrorKind::UndefinedIdentifier {
-                                identifier: var_identifier.as_ref().into(),
-                            },
-                            span: Some(line.span),
-                        })
-                    };
-                    if matches!(definition.definition.kind, DefinitionKind::Value(ValueDefinition::Variable { .. })) {
-                        Box::new(crate::Error {
-                            kind: crate::ErrorKind::MultipleSlidersForVariable {
-                                identifier: var_identifier.as_ref().into(),
-                            },
-                            span: Some(line.span),
-                        })
+                    if let Some(global) = context.find_global(var_identifier) {
+                        if matches!(global.kind, GlobalSymbolKind::Variable) {
+                            Box::new(crate::Error {
+                                kind: crate::ErrorKind::MultipleSlidersForVariable {
+                                    identifier: var_identifier.clone(),
+                                },
+                                span: Some(line.span),
+                            })
+                        }
+                        else {
+                            Box::new(crate::Error {
+                                kind: crate::ErrorKind::InvalidSliderReference {
+                                    identifier: var_identifier.clone(),
+                                },
+                                span: Some(line.span),
+                            })
+                        }
                     }
                     else {
                         Box::new(crate::Error {
-                            kind: crate::ErrorKind::InvalidSliderReference {
-                                identifier: var_identifier.as_ref().into(),
+                            kind: crate::ErrorKind::UndefinedIdentifier {
+                                identifier: var_identifier.clone(),
                             },
                             span: Some(line.span),
                         })
@@ -390,10 +403,10 @@ fn interpret_public_line(
     }
 }
 
-pub fn interpret_display_declarations<'a>(
+pub fn interpret_display_declaration(
     context: &mut GlobalContext,
-    display_declarations: impl IntoIterator<Item = &'a DisplayDeclaration>,
-) -> crate::Result<ProgramDisplay> {
+    declaration: &DisplayDeclaration,
+) -> crate::Result<ProgramDisplayList> {
     fn prevent_duplicate(attribute: &DisplayAttribute, has_attribute: &mut bool) -> crate::Result<()> {
         if std::mem::replace(has_attribute, true) {
             Err(Box::new(crate::Error {
@@ -427,220 +440,213 @@ pub fn interpret_display_declarations<'a>(
 
     let mut elements = Vec::new();
 
-    for declaration in context.display_declarations() {
-        let local_context = LocalContext::new(&source_paths[declaration.span.source_id]);
+    let local_context = context.new_local_context(declaration.span.source_id);
 
-        macro_rules! interpret_option {
-            ($opt:expr, $t:expr) => {
-                (($opt)
-                    .map(|expression| {
-                        interpret_expression(target, context, &local_context, expression)?
-                            .coerce_to($t, true)
-                    })
-                    .transpose())
-            };
-        }
+    let interpret_option = |context: &mut GlobalContext, option: Option<&Expression>, to_type: TypeHandle| {
+        option.map(|expression| {
+            interpret_expression(context, &local_context, expression)?
+                .register(&mut context.values)
+                .coerce(context, to_type, true)
+        }).transpose()
+    };
 
-        macro_rules! interpret_option_named {
-            ($opt:expr, $e:ty) => {
-                (($opt)
-                    .map_or(Ok(Default::default()), |expression| {
-                        let value = interpret_expression(target, context, &local_context, expression)?;
-                        value.kind
-                            .as_const_str()
-                            .and_then(|name| <$e>::from_name(&name))
-                            .ok_or_else(|| Box::new(crate::Error {
-                                kind: crate::ErrorKind::ExpectedConstantStrFromList {
-                                    allowed: <$e>::NAMES
-                                        .iter()
-                                        .copied()
-                                        .map(Into::into)
-                                        .collect(),
-                                },
-                                span: value.span,
-                            }))
+    macro_rules! interpret_option_named {
+        ($opt:expr, $e:ty) => {
+            $opt.map_or(Ok(Default::default()), |expression| {
+                let entry = interpret_expression(context, &local_context, expression)?;
+                entry.value
+                    .as_const_str()
+                    .and_then(|name| <$e>::from_name(&name))
+                    .ok_or_else(|| Box::new(crate::Error {
+                        kind: crate::ErrorKind::ExpectedConstantStrFromList {
+                            allowed: <$e>::NAMES
+                                .iter()
+                                .copied()
+                                .map(Into::into)
+                                .collect(),
+                        },
+                        span: entry.span,
                     }))
-            };
-        }
-
-        macro_rules! interpret_option_bool {
-            ($opt:expr, $default:expr) => {
-                (($opt)
-                    .map_or(Ok($default), |expression| {
-                        let value = interpret_expression(target, context, &local_context, expression)?;
-                        value.kind
-                            .as_const_bool()
-                            .ok_or_else(|| Box::new(crate::Error {
-                                kind: crate::ErrorKind::ExpectedConstant {
-                                    type_identifier: Type::Bool.to_string(),
-                                },
-                                span: value.span,
-                            }))
-                    }))
-            };
-        }
-
-        for element in &declaration.elements {
-            let mut has_color = false;
-            let mut has_point = false;
-            let mut has_drag = false;
-            let mut has_label = false;
-            let mut has_line = false;
-            let mut has_fill = false;
-            let mut has_click = false;
-            let mut has_hovered = false;
-            let mut has_pressed = false;
-            let mut has_description = false;
-
-            let mut attributes = Vec::with_capacity(element.attributes.len());
-
-            for attribute in &element.attributes {
-                let kind = match attribute.key.as_ref() {
-                    "color" => {
-                        // color(c: color)
-                        prevent_duplicate(attribute, &mut has_color)?;
-                        check_arity(attribute, 1, 1)?;
-
-                        ProgramDisplayAttributeKind::Color {
-                            value: interpret_expression(target, context, &local_context, &attribute.arguments[0])?
-                                .coerce_to(&Type::Color, true)?,
-                        }
-                    }
-                    "point" => {
-                        // point(opacity?: real, size?: real, style?: str, outline?: bool)
-                        prevent_duplicate(attribute, &mut has_point)?;
-                        check_arity(attribute, 0, 4)?;
-
-                        ProgramDisplayAttributeKind::Point {
-                            opacity: interpret_option!(attribute.arguments.get(0), &Type::Real)?,
-                            size: interpret_option!(attribute.arguments.get(1), &Type::Real)?,
-                            style: interpret_option_named!(attribute.arguments.get(2), PointStyle)?,
-                            outline: interpret_option_bool!(attribute.arguments.get(3), false)?,
-                        }
-                    }
-                    "drag" => {
-                        // drag(mode?: str)
-                        prevent_duplicate(attribute, &mut has_drag)?;
-                        check_arity(attribute, 0, 1)?;
-
-                        ProgramDisplayAttributeKind::Drag {
-                            mode: interpret_option_named!(attribute.arguments.get(0), DragMode)?,
-                        }
-                    }
-                    "label" => {
-                        // label(text: str, opacity?: real, size?: real, angle?: real,
-                        //       orientation?: str, outline?: bool)
-                        prevent_duplicate(attribute, &mut has_label)?;
-                        check_arity(attribute, 1, 6)?;
-
-                        ProgramDisplayAttributeKind::Label {
-                            text: interpret_expression(target, context, &local_context, &attribute.arguments[0])?
-                                .get_const_str()?,
-                            opacity: interpret_option!(attribute.arguments.get(1), &Type::Real)?,
-                            size: interpret_option!(attribute.arguments.get(2), &Type::Real)?,
-                            angle: interpret_option!(attribute.arguments.get(3), &Type::Real)?,
-                            orientation: interpret_option_named!(attribute.arguments.get(4), LabelOrientation)?,
-                            outline: interpret_option_bool!(attribute.arguments.get(5), true)?,
-                        }
-                    }
-                    "line" => {
-                        // line(opacity?: real, width?: real, style?: str)
-                        prevent_duplicate(attribute, &mut has_line)?;
-                        check_arity(attribute, 0, 3)?;
-
-                        ProgramDisplayAttributeKind::Line {
-                            opacity: interpret_option!(attribute.arguments.get(0), &Type::Real)?,
-                            width: interpret_option!(attribute.arguments.get(1), &Type::Real)?,
-                            style: interpret_option_named!(attribute.arguments.get(2), LineStyle)?,
-                        }
-                    }
-                    "fill" => {
-                        // fill(opacity?: real)
-                        prevent_duplicate(attribute, &mut has_fill)?;
-                        check_arity(attribute, 0, 1)?;
-
-                        ProgramDisplayAttributeKind::Fill {
-                            opacity: interpret_option!(attribute.arguments.get(0), &Type::Real)?,
-                        }
-                    }
-                    "click" => {
-                        // click(on_click: action(int?))
-                        prevent_duplicate(attribute, &mut has_click)?;
-                        check_arity(attribute, 1, 1)?;
-
-                        let on_click = interpret_expression(target, context, &local_context, &attribute.arguments[0])?;
-                        let on_click_type = on_click.get_type();
-
-                        let on_click_arguments: Box<[_]> = match on_click_type.require_action(0, &[Type::Int])? {
-                            [] => Box::new([]),
-                            [index_type] => Box::new([
-                                Value::ClickIndex.with_span(None).coerce_to(index_type, false)?
-                            ]),
-                            _ => unreachable!()
-                        };
-
-                        ProgramDisplayAttributeKind::Click {
-                            action: ActionValueKind::ActionCall {
-                                action: Box::new(on_click),
-                                arguments: on_click_arguments,
-                            }.into(),
-                        }
-                    }
-                    "hovered" => {
-                        // hovered(url: str)
-                        prevent_duplicate(attribute, &mut has_hovered)?;
-                        check_arity(attribute, 1, 1)?;
-
-                        ProgramDisplayAttributeKind::Hovered {
-                            url: interpret_expression(target, context, &local_context, &attribute.arguments[0])?
-                                .get_const_str()?,
-                        }
-                    }
-                    "pressed" => {
-                        // pressed(url: str)
-                        prevent_duplicate(attribute, &mut has_pressed)?;
-                        check_arity(attribute, 1, 1)?;
-
-                        ProgramDisplayAttributeKind::Pressed {
-                            url: interpret_expression(target, context, &local_context, &attribute.arguments[0])?
-                                .get_const_str()?,
-                        }
-                    }
-                    "description" => {
-                        // description(text: str)
-                        prevent_duplicate(attribute, &mut has_description)?;
-                        check_arity(attribute, 1, 1)?;
-
-                        ProgramDisplayAttributeKind::Description {
-                            text: interpret_expression(target, context, &local_context, &attribute.arguments[0])?
-                                .get_const_str()?,
-                        }
-                    }
-                    _ => {
-                        return Err(Box::new(crate::Error {
-                            kind: crate::ErrorKind::UnsupportedDisplayAttribute {
-                                key: attribute.key.as_ref().into(),
-                            },
-                            span: Some(attribute.key_span),
-                        }))
-                    }
-                };
-
-                attributes.push(ProgramDisplayAttribute {
-                    kind,
-                    key_span: Some(attribute.key_span),
-                });
-            }
-
-            elements.push(ProgramDisplayElement {
-                value: interpret_expression(target, context, &local_context, &element.expression)?,
-                span: Some(element.span),
-                attributes: attributes.into_boxed_slice(),
-            });
-        }
+            })
+        };
     }
 
-    Ok(ProgramDisplay {
+    let interpret_option_bool = |context: &mut GlobalContext, option: Option<&Expression>, default: bool| {
+        option.map_or(Ok(default), |expression| {
+            let entry = interpret_expression(context, &local_context, expression)?;
+            entry.value
+                .as_const_bool()
+                .ok_or_else(|| Box::new(crate::Error {
+                    kind: crate::ErrorKind::ExpectedConstant {
+                        type_identifier: context.types.repr(TypeHandle::BOOL),
+                    },
+                    span: entry.span,
+                }))
+        })
+    };
+
+    for element in &declaration.elements {
+        let mut has_color = false;
+        let mut has_point = false;
+        let mut has_drag = false;
+        let mut has_label = false;
+        let mut has_line = false;
+        let mut has_fill = false;
+        let mut has_click = false;
+        let mut has_hovered = false;
+        let mut has_pressed = false;
+        let mut has_description = false;
+
+        let mut attributes = Vec::with_capacity(element.attributes.len());
+
+        for attribute in &element.attributes {
+            let kind = match attribute.key.as_ref() {
+                "color" => {
+                    // color(c: color)
+                    prevent_duplicate(attribute, &mut has_color)?;
+                    check_arity(attribute, 1, 1)?;
+
+                    ProgramDisplayAttributeKind::Color {
+                        value: interpret_expression(context, &local_context, &attribute.arguments[0])?
+                            .register(&mut context.values)
+                            .coerce(context, TypeHandle::COLOR, true)?,
+                    }
+                }
+                "point" => {
+                    // point(opacity?: real, size?: real, style?: str, outline?: bool)
+                    prevent_duplicate(attribute, &mut has_point)?;
+                    check_arity(attribute, 0, 4)?;
+
+                    ProgramDisplayAttributeKind::Point {
+                        opacity: interpret_option(context, attribute.arguments.get(0), TypeHandle::REAL)?,
+                        size: interpret_option(context, attribute.arguments.get(1), TypeHandle::REAL)?,
+                        style: interpret_option_named!(attribute.arguments.get(2), PointStyle)?,
+                        outline: interpret_option_bool(context, attribute.arguments.get(3), false)?,
+                    }
+                }
+                "drag" => {
+                    // drag(mode?: str)
+                    prevent_duplicate(attribute, &mut has_drag)?;
+                    check_arity(attribute, 0, 1)?;
+
+                    ProgramDisplayAttributeKind::Drag {
+                        mode: interpret_option_named!(attribute.arguments.get(0), DragMode)?,
+                    }
+                }
+                "label" => {
+                    // label(text: str, opacity?: real, size?: real, angle?: real,
+                    //       orientation?: str, outline?: bool)
+                    prevent_duplicate(attribute, &mut has_label)?;
+                    check_arity(attribute, 1, 6)?;
+
+                    ProgramDisplayAttributeKind::Label {
+                        text: interpret_expression(context, &local_context, &attribute.arguments[0])?
+                            .expect_const_str(&context.types)?,
+                        opacity: interpret_option(context, attribute.arguments.get(1), TypeHandle::REAL)?,
+                        size: interpret_option(context, attribute.arguments.get(2), TypeHandle::REAL)?,
+                        angle: interpret_option(context, attribute.arguments.get(3), TypeHandle::REAL)?,
+                        orientation: interpret_option_named!(attribute.arguments.get(4), LabelOrientation)?,
+                        outline: interpret_option_bool(context, attribute.arguments.get(5), true)?,
+                    }
+                }
+                "line" => {
+                    // line(opacity?: real, width?: real, style?: str)
+                    prevent_duplicate(attribute, &mut has_line)?;
+                    check_arity(attribute, 0, 3)?;
+
+                    ProgramDisplayAttributeKind::Line {
+                        opacity: interpret_option(context, attribute.arguments.get(0), TypeHandle::REAL)?,
+                        width: interpret_option(context, attribute.arguments.get(1), TypeHandle::REAL)?,
+                        style: interpret_option_named!(attribute.arguments.get(2), LineStyle)?,
+                    }
+                }
+                "fill" => {
+                    // fill(opacity?: real)
+                    prevent_duplicate(attribute, &mut has_fill)?;
+                    check_arity(attribute, 0, 1)?;
+
+                    ProgramDisplayAttributeKind::Fill {
+                        opacity: interpret_option(context, attribute.arguments.get(0), TypeHandle::REAL)?,
+                    }
+                }
+                "click" => {
+                    // click(on_click: action(int?))
+                    prevent_duplicate(attribute, &mut has_click)?;
+                    check_arity(attribute, 1, 1)?;
+
+                    let on_click = interpret_expression(context, &local_context, &attribute.arguments[0])?;
+
+                    let on_click_arguments: Box<[_]> = match context.types.expect_action_type(
+                        on_click.type_handle,
+                        0,
+                        &[TypeHandle::INT],
+                        on_click.span,
+                    )? {
+                        &[] => Box::new([]),
+                        &[index_type, ..] => Box::new([
+                            context.coerce_value(ValueHandle::CLICK_INDEX, index_type, false)?,
+                        ]),
+                    };
+
+                    ProgramDisplayAttributeKind::Click {
+                        action: ActionValueKind::ActionCall {
+                            action: on_click.register(&mut context.values),
+                            arguments: on_click_arguments,
+                        }.into(),
+                    }
+                }
+                "hovered" => {
+                    // hovered(url: str)
+                    prevent_duplicate(attribute, &mut has_hovered)?;
+                    check_arity(attribute, 1, 1)?;
+
+                    ProgramDisplayAttributeKind::Hovered {
+                        url: interpret_expression(context, &local_context, &attribute.arguments[0])?
+                            .expect_const_str(&context.types)?,
+                    }
+                }
+                "pressed" => {
+                    // pressed(url: str)
+                    prevent_duplicate(attribute, &mut has_pressed)?;
+                    check_arity(attribute, 1, 1)?;
+
+                    ProgramDisplayAttributeKind::Pressed {
+                        url: interpret_expression(context, &local_context, &attribute.arguments[0])?
+                            .expect_const_str(&context.types)?,
+                    }
+                }
+                "description" => {
+                    // description(text: str)
+                    prevent_duplicate(attribute, &mut has_description)?;
+                    check_arity(attribute, 1, 1)?;
+
+                    ProgramDisplayAttributeKind::Description {
+                        text: interpret_expression(context, &local_context, &attribute.arguments[0])?
+                            .expect_const_str(&context.types)?,
+                    }
+                }
+                _ => return Err(Box::new(crate::Error {
+                    kind: crate::ErrorKind::UnsupportedDisplayAttribute {
+                        key: attribute.key.as_ref().into(),
+                    },
+                    span: Some(attribute.key_span),
+                }))
+            };
+
+            attributes.push(ProgramDisplayAttribute {
+                kind,
+                key_span: Some(attribute.key_span),
+            });
+        }
+
+        elements.push(ProgramDisplayElement {
+            value: interpret_expression(context, &local_context, &element.expression)?,
+            span: Some(element.span),
+            attributes: attributes.into_boxed_slice(),
+        });
+    }
+
+    Ok(ProgramDisplayList {
         elements: elements.into_boxed_slice(),
     })
 }
@@ -660,7 +666,7 @@ pub fn interpret_action_expression(
                 actions: actions
                     .iter()
                     .map(|action| {
-                        interpret_action_expression(target, context, local_context, action)
+                        interpret_action_expression(context, local_context, action)
                     })
                     .collect::<crate::Result<_>>()?,
             }
@@ -671,33 +677,34 @@ pub fn interpret_action_expression(
                 span: Some(variable.span),
             });
 
-            let variable = interpret_expression(target, context, &local_context, variable)?;
-            let variable_span = variable.span;
-            let Value::GlobalReference(variable) = variable.kind else {
+            let variable = interpret_expression(context, &local_context, variable)?;
+            let Value::GlobalReference(global) = variable.value else {
                 return Err(invalid_update_lhs_error())
             };
-            let DefinitionKind::Value(ValueDefinition::Variable { .. }) = context.find_global(&variable.identifier).unwrap().definition.kind else {
+            let GlobalSymbolKind::Variable = global.kind else {
                 return Err(invalid_update_lhs_error())
             };
 
-            let value = interpret_expression(target, context, &local_context, value)?
-                .coerce_to(&variable.value_type, false)?;
+            let value = interpret_expression(context, &local_context, value)?
+                .register(&mut context.values)
+                .coerce(context, variable.type_handle, false)?;
 
             ActionValueKind::Update {
-                variable,
-                variable_span,
-                value: Box::new(value),
+                variable_identifier: global.identifier,
+                variable_span: variable.span,
+                value,
             }
         }
         ActionExpressionKind::ActionCall { action: callee, arguments } => {
-            let callee = interpret_expression(target, context, &local_context, callee)?;
+            let callee = interpret_expression(context, &local_context, callee)?;
 
-            let Type::Action { parameter_types } = callee.get_type() else {
+            let Type::Action { parameter_types } = context.types.get(callee.type_handle) else {
                 return Err(Box::new(crate::Error {
                     kind: crate::ErrorKind::ExpectedAction,
                     span: callee.span,
                 }))
             };
+            let parameter_types = parameter_types.clone();
 
             if arguments.len() != parameter_types.len() {
                 return Err(Box::new(crate::Error {
@@ -710,11 +717,12 @@ pub fn interpret_action_expression(
             }
 
             ActionValueKind::ActionCall {
-                action: Box::new(callee),
-                arguments: std::iter::zip(arguments, &parameter_types)
+                action: callee.register(&mut context.values),
+                arguments: std::iter::zip(arguments, parameter_types)
                     .map(|(argument, parameter_type)| {
-                        interpret_expression(target, context, local_context, argument)?
-                            .coerce_to(parameter_type, false)
+                        interpret_expression(context, local_context, argument)?
+                            .register(&mut context.values)
+                            .coerce(context, parameter_type, false)
                     })
                     .collect::<crate::Result<_>>()?,
             }
@@ -724,16 +732,17 @@ pub fn interpret_action_expression(
                 condition_consequents: condition_consequents
                     .iter()
                     .map(|(condition, consequent)| {
-                        let condition = interpret_expression(target, context, local_context, condition)?
-                            .coerce_to(&Type::Bool, false)?;
-                        let consequent = interpret_action_expression(target, context, local_context, consequent)?;
+                        let condition = interpret_expression(context, local_context, condition)?
+                            .register(&mut context.values)
+                            .coerce(context, TypeHandle::BOOL, false)?;
+                        let consequent = interpret_action_expression(context, local_context, consequent)?;
 
                         Ok((condition, consequent))
                     })
                     .collect::<crate::Result<_>>()?,
                 alternative: match alternative {
                     Some(alternative) => {
-                        Box::new(interpret_action_expression(target, context, local_context, alternative)?)
+                        Box::new(interpret_action_expression(context, local_context, alternative)?)
                     }
                     None => {
                         Box::new(ActionValueKind::empty().into())
@@ -879,15 +888,15 @@ pub fn interpret_expression(
             Ok(ValueEntry {
                 value: Value::Binary {
                     kind: BinaryKind::Point2D,
-                    lhs: context.values.register(x),
-                    rhs: context.values.register(y),
+                    lhs: x.register(&mut context.values),
+                    rhs: y.register(&mut context.values),
                 },
-                type_handle: context.types.point_2d_type(x_type, y_type)
+                type_handle: context.types.point_2d_type(x_type, y_type, Some(expression.span))
                     .and_then(|point_type| context.types.unflatten_list(
                         ListState::merge(x_list, y_list),
                         point_type,
-                    ))
-                    .map_err(|error| error.with_span(Some(expression.span)))?,
+                        Some(expression.span),
+                    ))?,
                 span: Some(expression.span),
             })
         }
@@ -903,16 +912,16 @@ pub fn interpret_expression(
             Ok(ValueEntry {
                 value: Value::Ternary {
                     kind: TernaryKind::Point3D,
-                    first: context.values.register(x),
-                    second: context.values.register(y),
-                    third: context.values.register(z),
+                    first: x.register(&mut context.values),
+                    second: y.register(&mut context.values),
+                    third: z.register(&mut context.values),
                 },
-                type_handle: context.types.point_3d_type(x_type, y_type, z_type)
+                type_handle: context.types.point_3d_type(x_type, y_type, z_type, Some(expression.span))
                     .and_then(|point_type| context.types.unflatten_list(
                         ListState::merge_all([x_list, y_list, z_list]),
                         point_type,
-                    ))
-                    .map_err(|error| error.with_span(Some(expression.span)))?,
+                        Some(expression.span),
+                    ))?,
                 span: Some(expression.span),
             })
         }
@@ -920,21 +929,22 @@ pub fn interpret_expression(
             let mut items: Box<[_]> = items
                 .iter()
                 .map(|item| {
-                    let entry = interpret_expression(context, local_context, item)?;
-                    Ok(context.values.register(entry))
+                    Ok(interpret_expression(context, local_context, item)?
+                        .register(&mut context.values))
                 })
                 .collect::<crate::Result<_>>()?;
 
             let item_type = items
                 .iter()
-                .try_fold(TypeHandle::ANY, |current_type, &item| {
-                    context.types.merge(current_type, context.values.get_type(item))
-                        .map_err(|error| error.with_span(context.values.get_span(item)))
-                })?;
-            let list_type = context.types.list_type(ListState::IsList, item_type)?;
+                .try_fold(TypeHandle::ANY, |current_type, &item| context.types.merge(
+                    current_type,
+                    context.values.get_type(item),
+                    context.values.get_span(item),
+                ))?;
+            let list_type = context.types.list_type(ListState::IsList, item_type, Some(expression.span))?;
 
             for item in &mut items {
-                *item = context.coerce_value(*item, item_type, false)?;
+                *item = item.coerce(context, item_type, false)?;
             }
 
             Ok(ValueEntry {
@@ -960,17 +970,16 @@ pub fn interpret_expression(
             let end_type = context.values.get_type(end);
             let step_type = context.values.get_type(step);
 
-            let item_type = context.types.merge(start_type, end_type)
-                .and_then(|item_type| context.types.merge(item_type, step_type))
-                .map_err(|error| error.with_span(Some(expression.span)))?;
-            let list_type = context.types.list_type(ListState::IsList, item_type)?;
+            let item_type = context.types.merge(start_type, end_type, Some(expression.span))
+                .and_then(|item_type| context.types.merge(item_type, step_type, Some(expression.span)))?;
+            let list_type = context.types.list_type(ListState::IsList, item_type, Some(expression.span))?;
 
             Ok(ValueEntry {
                 value: Value::ListRange {
                     kind: *kind,
-                    start: context.coerce_value(start, item_type, false)?,
-                    end: context.coerce_value(end, item_type, false)?,
-                    step: context.coerce_value(step, item_type, false)?,
+                    start: start.coerce(context, item_type, false)?,
+                    end: end.coerce(context, item_type, false)?,
+                    step: step.coerce(context, item_type, false)?,
                 },
                 type_handle: list_type,
                 span: Some(expression.span),
@@ -982,12 +991,16 @@ pub fn interpret_expression(
             let count = interpret_expression(context, local_context, count)?
                 .register(&mut context.values);
 
-            let list_type = context.types.list_type(ListState::IsList, context.values.get_type(value))?;
+            let list_type = context.types.list_type(
+                ListState::IsList,
+                context.values.get_type(value),
+                context.values.get_span(value),
+            )?;
 
             Ok(ValueEntry {
                 value: Value::ListFill {
                     value,
-                    count: context.coerce_value(count, TypeHandle::INT, false)?,
+                    count: count.coerce(context, TypeHandle::INT, false)?,
                 },
                 type_handle: list_type,
                 span: Some(expression.span),
@@ -1000,8 +1013,7 @@ pub fn interpret_expression(
                 .iter()
                 .map(|map_loop| {
                     let list = interpret_expression(context, local_context, &map_loop.list)?;
-                    let item_type = context.types.expect_list_type(list.type_handle)
-                        .map_err(|error| error.with_span(list.span))?;
+                    let item_type = context.types.expect_list_type(list.type_handle, list.span)?;
 
                     let local = context.values.register(ValueEntry {
                         value: Value::Local {
@@ -1014,7 +1026,7 @@ pub fn interpret_expression(
 
                     Ok(ListMapLoop {
                         local,
-                        list: context.values.register(list),
+                        list: list.register(&mut context.values),
                     })
                 })
                 .collect::<crate::Result<_>>()?;
@@ -1022,18 +1034,17 @@ pub fn interpret_expression(
             let value = interpret_expression(context, &map_context, map_expression)?;
 
             Ok(ValueEntry {
-                type_handle: context.types.list_type(ListState::IsList, value.type_handle)?,
+                type_handle: context.types.list_type(ListState::IsList, value.type_handle, value.span)?,
                 value: Value::ListMap {
                     loops,
-                    value: context.values.register(value),
+                    value: value.register(&mut context.values),
                 },
                 span: Some(expression.span),
             })
         }
         ExpressionKind::ListFilter { list, condition } => {
             let list = interpret_expression(context, local_context, list)?;
-            context.types.expect_list_type(list.type_handle)
-                .map_err(|error| error.with_span(list.span))?;
+            context.types.expect_list_type(list.type_handle, list.span)?;
 
             let condition = interpret_expression(context, local_context, condition)?
                 .register(&mut context.values);
@@ -1041,29 +1052,24 @@ pub fn interpret_expression(
             Ok(ValueEntry {
                 type_handle: list.type_handle,
                 value: Value::ListFilter {
-                    list: context.values.register(list),
-                    condition: context.coerce_value(condition, TypeHandle::BOOL, true)?,
+                    list: list.register(&mut context.values),
+                    condition: condition.coerce(context, TypeHandle::BOOL, true)?,
                 },
                 span: Some(expression.span),
             })
         }
         ExpressionKind::Index { list, operation } => {
             let list = interpret_expression(context, local_context, list)?;
-            let item_type = context.types.expect_list_type(list.type_handle)
-                .map_err(|error| error.with_span(list.span))?;
+            let item_type = context.types.expect_list_type(list.type_handle, list.span)?;
 
-            let kind = interpret_index_operation(context, local_context, operation)?;
+            let (kind, list_state) = interpret_index_operation(context, local_context, operation)?;
 
             Ok(ValueEntry {
-                type_handle: if kind.result_is_list() {
-                    list.type_handle
-                } else {
-                    item_type
-                },
                 value: Value::Index {
-                    list: context.values.register(list),
+                    list: list.register(&mut context.values),
                     kind,
                 },
+                type_handle: context.types.unflatten_list(list_state, item_type, Some(expression.span))?,
                 span: Some(expression.span),
             })
         }
@@ -1099,19 +1105,20 @@ pub fn interpret_expression(
                         )
                     }
 
-                    *argument = context.coerce_value(*argument, parameter_type, false)?;
+                    *argument = argument.coerce(context, parameter_type, false)?;
                 }
 
                 let return_type = match context.types.get(signature.return_type) {
                     &Type::List { state: ListState::MaybeList, item_type } => {
-                        context.types.unflatten_list(result_list_state, item_type)?
+                        context.types.unflatten_list(result_list_state, item_type, None)
+                            .expect("list item type should never be a list type")
                     }
                     _ => signature.return_type
                 };
 
                 Ok(ValueEntry {
                     value: Value::UserFunctionCall {
-                        function: context.values.register(function),
+                        function: function.register(&mut context.values),
                         arguments,
                     },
                     type_handle: return_type,
@@ -1135,7 +1142,7 @@ pub fn interpret_expression(
                 .map(|(condition, consequent)| {
                     let condition = interpret_expression(context, local_context, condition)?
                         .register(&mut context.values);
-                    let condition = context.coerce_value(condition, TypeHandle::BOOL, true)?;
+                    let condition = condition.coerce(context, TypeHandle::BOOL, true)?;
                     // A list condition should cause the whole expression to broadcast.
                     let (result_list, inner_type) = context.types.flatten_list(result_type);
                     result_type = context.types.unflatten_list(
@@ -1144,13 +1151,13 @@ pub fn interpret_expression(
                             condition.get_type(&context.values).flatten_list(&context.types).0,
                         ),
                         inner_type,
+                        condition.get_span(&context.values),
                     )?;
 
                     let consequent = interpret_expression(context, local_context, consequent)?;
-                    result_type = context.types.merge(result_type, consequent.type_handle)
-                        .map_err(|error| error.with_span(consequent.span))?;
+                    result_type = context.types.merge(result_type, consequent.type_handle, consequent.span)?;
 
-                    Ok((condition, context.values.register(consequent)))
+                    Ok((condition, consequent.register(&mut context.values)))
                 })
                 .collect::<crate::Result<_>>()?;
 
@@ -1158,16 +1165,15 @@ pub fn interpret_expression(
                 .as_ref()
                 .map_or(Ok(ValueHandle::UNDEFINED), |alternative| {
                     let alternative = interpret_expression(context, local_context, alternative)?;
-                    result_type = context.types.merge(result_type, alternative.type_handle)
-                        .map_err(|error| error.with_span(alternative.span))?;
+                    result_type = context.types.merge(result_type, alternative.type_handle, alternative.span)?;
 
-                    let alternative = context.values.register(alternative);
-                    context.coerce_value(alternative, context.types.flatten_list(result_type).1, true)
+                    let alternative = alternative.register(&mut context.values);
+                    alternative.coerce(context, context.types.flatten_list(result_type).1, true)
                 })?;
 
             let result_inner_type = context.types.flatten_list(result_type).1;
             for (_, consequent) in &mut condition_consequents {
-                *consequent = context.coerce_value(*consequent, result_inner_type, true)?;
+                *consequent = consequent.coerce(context, result_inner_type, true)?;
             }
 
             Ok(ValueEntry {
@@ -1185,7 +1191,7 @@ pub fn interpret_expression(
 
             if let Some(value_type) = value_type {
                 let value_type = context.resolve_type(value_type, true)?;
-                value = context.coerce_value(value, value_type, false)?;
+                value = value.coerce(context, value_type, false)?;
             }
 
             let mut inner_context = local_context.new_inner();
@@ -1235,27 +1241,29 @@ pub fn interpret_unary_operation(
         UnaryOperation::LogicalNot => UnaryKind::LogicalNot,
     };
 
-    let mut operand = interpret_expression(target, context, local_context, operand)?;
-    let operand_list = operand.get_type().list_state();
+    let operand = interpret_expression(context, local_context, operand)?;
+    let mut operand = operand.register(&mut context.values);
 
-    let result_type = match kind {
+    let result_type: Option<TypeHandle> = match kind {
         UnaryKind::Positive |
         UnaryKind::Negative => {
-            // The result must be arithmetic
-            operand = operand.coerce_to_arithmetic(Type::require_numeric_or_point)?;
-            operand.get_type()
+            operand = operand.coerce(context, TypeHandle::ARITHMETIC_SCALAR_OR_POINT, true)?;
+            None
         }
         UnaryKind::LogicalNot => {
-            operand = operand.coerce_to(&Type::Bool, true)?;
-            Type::Bool.unflatten_list(operand_list)
+            operand = operand.coerce(context, TypeHandle::BOOL, true)?;
+            None
         }
         _ => unreachable!("all cases from the previous match should be covered")
     };
 
-    Ok(Value::Unary {
-        kind,
-        operand: Box::new(operand),
-        result_type,
+    Ok(ValueEntry {
+        value: Value::Unary {
+            kind,
+            operand,
+        },
+        type_handle: result_type.unwrap_or(context.values.get_type(operand)),
+        span,
     })
 }
 
@@ -1270,7 +1278,7 @@ pub fn interpret_binary_operation(
     let kind = match operation {
         BinaryOperation::MemberAccess => {
             // Handle this operation separately since its right hand side is not a value
-            return interpret_access_operation(target, context, local_context, lhs, rhs)
+            return interpret_access_operation(context, local_context, lhs, rhs, span)
         }
         BinaryOperation::Exponent => BinaryKind::Exponent,
         BinaryOperation::Multiply => BinaryKind::Multiply,
@@ -1279,16 +1287,16 @@ pub fn interpret_binary_operation(
         BinaryOperation::Add => BinaryKind::Add,
         BinaryOperation::Subtract => BinaryKind::Subtract,
         BinaryOperation::LessThan => {
-            return interpret_inequality_chain(target, context, local_context, InequalityKind::LessThan, lhs, rhs, span)
+            return interpret_inequality_chain(context, local_context, InequalityKind::LessThan, lhs, rhs, span)
         }
         BinaryOperation::LessEqual => {
-            return interpret_inequality_chain(target, context, local_context, InequalityKind::LessEqual, lhs, rhs, span)
+            return interpret_inequality_chain(context, local_context, InequalityKind::LessEqual, lhs, rhs, span)
         }
         BinaryOperation::GreaterThan => {
-            return interpret_inequality_chain(target, context, local_context, InequalityKind::GreaterThan, lhs, rhs, span)
+            return interpret_inequality_chain(context, local_context, InequalityKind::GreaterThan, lhs, rhs, span)
         }
         BinaryOperation::GreaterEqual => {
-            return interpret_inequality_chain(target, context, local_context, InequalityKind::GreaterEqual, lhs, rhs, span)
+            return interpret_inequality_chain(context, local_context, InequalityKind::GreaterEqual, lhs, rhs, span)
         }
         BinaryOperation::Equal => BinaryKind::Equal,
         BinaryOperation::NotEqual => BinaryKind::NotEqual,
@@ -1296,117 +1304,116 @@ pub fn interpret_binary_operation(
         BinaryOperation::LogicalOr => BinaryKind::LogicalOr,
     };
 
-    let mut lhs = interpret_expression(target, context, local_context, lhs)?;
-    let mut rhs = interpret_expression(target, context, local_context, rhs)?;
-    let (lhs_list, lhs_type) = lhs.get_type().into_flatten_list();
-    let (rhs_list, rhs_type) = rhs.get_type().into_flatten_list();
+    let lhs = interpret_expression(context, local_context, lhs)?;
+    let rhs = interpret_expression(context, local_context, rhs)?;
+    let mut lhs_type = lhs.type_handle;
+    let mut rhs_type = rhs.type_handle;
+    let mut lhs = lhs.register(&mut context.values);
+    let mut rhs = rhs.register(&mut context.values);
 
     let result_type = match kind {
         BinaryKind::Exponent |
         BinaryKind::Remainder => {
             // The result must be arithmetic and cannot be a point
-            lhs = lhs.coerce_to_arithmetic(Type::require_numeric)?;
-            rhs = rhs.coerce_to_arithmetic(Type::require_numeric)?;
-            Type::merge(&lhs.get_type(), &rhs.get_type())
-                .map_err(|error| error.with_span(span))?
+            lhs = lhs.coerce(context, TypeHandle::ARITHMETIC_SCALAR, true)?;
+            rhs = rhs.coerce(context, TypeHandle::ARITHMETIC_SCALAR, true)?;
+            lhs_type = context.values.get_type(lhs);
+            rhs_type = context.values.get_type(rhs);
+            context.types.merge(lhs_type, rhs_type, span)?
         }
         BinaryKind::Multiply => {
             // The result must be arithmetic, but at most one operand may be a point
-            lhs = lhs.coerce_to_arithmetic(Type::require_numeric_or_point)?;
-            let lhs_type = lhs.get_type().into_flatten_list().1;
-            if matches!(lhs_type, Type::Point2D { .. } | Type::Point3D { .. }) {
-                rhs = rhs.coerce_to_arithmetic(Type::require_numeric)?;
-                let rhs_type = rhs.get_type().into_flatten_list().1;
-                match &lhs_type {
-                    Type::Point2D { x_type, y_type } => Type::Point2D {
-                        x_type: Box::new(x_type.merge(&rhs_type)
-                            .map_err(|error| error.with_span(span))?),
-                        y_type: Box::new(y_type.merge(&rhs_type)
-                            .map_err(|error| error.with_span(span))?),
-                    },
-                    Type::Point3D { x_type, y_type, z_type } => Type::Point3D {
-                        x_type: Box::new(x_type.merge(&rhs_type)
-                            .map_err(|error| error.with_span(span))?),
-                        y_type: Box::new(y_type.merge(&rhs_type)
-                            .map_err(|error| error.with_span(span))?),
-                        z_type: Box::new(z_type.merge(&rhs_type)
-                            .map_err(|error| error.with_span(span))?),
-                    },
+            lhs = lhs.coerce(context, TypeHandle::ARITHMETIC_SCALAR_OR_POINT, true)?;
+            lhs_type = context.values.get_type(lhs);
+            let (lhs_list, lhs_inner) = context.types.flatten_list(lhs_type);
+            if matches!(context.types.get(lhs_inner), Type::Point2D { .. } | Type::Point3D { .. }) {
+                rhs = rhs.coerce(context, TypeHandle::ARITHMETIC_SCALAR, true)?;
+                rhs_type = context.values.get_type(rhs);
+                let (rhs_list, rhs_inner) = context.types.flatten_list(rhs_type);
+                let result_inner = match context.types.get(lhs_inner) {
+                    &Type::Point2D { x_type, y_type } => {
+                        let x_type = context.types.merge(x_type, rhs_inner, span)?;
+                        let y_type = context.types.merge(y_type, rhs_inner, span)?;
+                        context.types.point_2d_type(x_type, y_type, span)?
+                    }
+                    &Type::Point3D { x_type, y_type, z_type } => {
+                        let x_type = context.types.merge(x_type, rhs_inner, span)?;
+                        let y_type = context.types.merge(y_type, rhs_inner, span)?;
+                        let z_type = context.types.merge(z_type, rhs_inner, span)?;
+                        context.types.point_3d_type(x_type, y_type, z_type, span)?
+                    }
                     _ => unreachable!()
-                }.unflatten_list(ListState::merge(lhs_list, rhs_list))
+                };
+                context.types.unflatten_list(ListState::merge(lhs_list, rhs_list), result_inner, span)?
             }
             else {
-                rhs = rhs.coerce_to_arithmetic(Type::require_numeric_or_point)?;
-                let rhs_type = rhs.get_type().into_flatten_list().1;
-                match &rhs_type {
-                    Type::Point2D { x_type, y_type } => Type::Point2D {
-                        x_type: Box::new(x_type.merge(&lhs_type)
-                            .map_err(|error| error.with_span(span))?),
-                        y_type: Box::new(y_type.merge(&lhs_type)
-                            .map_err(|error| error.with_span(span))?),
-                    },
-                    Type::Point3D { x_type, y_type, z_type } => Type::Point3D {
-                        x_type: Box::new(x_type.merge(&lhs_type)
-                            .map_err(|error| error.with_span(span))?),
-                        y_type: Box::new(y_type.merge(&lhs_type)
-                            .map_err(|error| error.with_span(span))?),
-                        z_type: Box::new(z_type.merge(&lhs_type)
-                            .map_err(|error| error.with_span(span))?),
-                    },
-                    _ => Type::merge(&lhs_type, &rhs_type)
-                        .map_err(|error| error.with_span(span))?
-                }.unflatten_list(ListState::merge(lhs_list, rhs_list))
+                rhs = rhs.coerce(context, TypeHandle::ARITHMETIC_SCALAR_OR_POINT, true)?;
+                rhs_type = context.values.get_type(rhs);
+                let (rhs_list, rhs_inner) = context.types.flatten_list(rhs_type);
+                let result_inner = match context.types.get(rhs_inner) {
+                    &Type::Point2D { x_type, y_type } => {
+                        let x_type = context.types.merge(x_type, lhs_inner, span)?;
+                        let y_type = context.types.merge(y_type, lhs_inner, span)?;
+                        context.types.point_2d_type(x_type, y_type, span)?
+                    }
+                    &Type::Point3D { x_type, y_type, z_type } => {
+                        let x_type = context.types.merge(x_type, lhs_inner, span)?;
+                        let y_type = context.types.merge(y_type, lhs_inner, span)?;
+                        let z_type = context.types.merge(z_type, lhs_inner, span)?;
+                        context.types.point_3d_type(x_type, y_type, z_type, span)?
+                    }
+                    _ => context.types.merge(lhs_inner, rhs_inner, span)?
+                };
+                context.types.unflatten_list(ListState::merge(lhs_list, rhs_list), result_inner, span)?
             }
         }
         BinaryKind::Divide => {
             // The result is always assumed to be real, but lhs may be a point
-            let result_type = match lhs.get_type().flatten_list().1 {
-                Type::Point2D { .. } => Type::Point2D {
-                    x_type: Box::new(Type::Real),
-                    y_type: Box::new(Type::Real),
-                },
-                Type::Point3D { .. } => Type::Point3D {
-                    x_type: Box::new(Type::Real),
-                    y_type: Box::new(Type::Real),
-                    z_type: Box::new(Type::Real),
-                },
-                _ => Type::Real
-            };
-            lhs = lhs.coerce_to(&result_type, true)?;
-            rhs = rhs.coerce_to(&Type::Real, true)?;
-            result_type.unflatten_list(ListState::merge(lhs_list, rhs_list))
+            lhs = lhs.coerce(context, TypeHandle::REAL_SCALAR_OR_POINT, true)?;
+            rhs = rhs.coerce(context, TypeHandle::REAL, true)?;
+            lhs_type = context.values.get_type(lhs);
+            rhs_type = context.values.get_type(rhs);
+            let (lhs_list, lhs_inner) = context.types.flatten_list(lhs_type);
+            let (rhs_list, _) = context.types.flatten_list(rhs_type);
+            context.types.unflatten_list(ListState::merge(lhs_list, rhs_list), lhs_inner, span)?
         }
         BinaryKind::Add |
         BinaryKind::Subtract => {
             // The result must be arithmetic, but may be a point
-            lhs = lhs.coerce_to_arithmetic(Type::require_numeric_or_point)?;
-            rhs = rhs.coerce_to_arithmetic(Type::require_numeric_or_point)?;
-            Type::merge(&lhs.get_type(), &rhs.get_type())
-                .map_err(|error| error.with_span(span))?
+            lhs = lhs.coerce(context, TypeHandle::ARITHMETIC_SCALAR_OR_POINT, true)?;
+            rhs = rhs.coerce(context, TypeHandle::ARITHMETIC_SCALAR_OR_POINT, true)?;
+            lhs_type = context.values.get_type(lhs);
+            rhs_type = context.values.get_type(rhs);
+            context.types.merge(lhs_type, rhs_type, span)?
         }
         BinaryKind::Equal |
         BinaryKind::NotEqual => {
             // The operands must merge into a numeric or point type, but the result is always a bool
-            Type::merge(&lhs_type, &rhs_type)
-                .map_err(|error| error.with_span(span))?
-                .require_numeric_or_point()
-                .map_err(|error| error.with_span(span))?;
-            Type::Bool.unflatten_list(ListState::merge(lhs_list, rhs_list))
+            let (lhs_list, lhs_inner) = context.types.flatten_list(lhs_type);
+            let (rhs_list, rhs_inner) = context.types.flatten_list(rhs_type);
+            let merged_inner = context.types.merge_inner(lhs_inner, rhs_inner, span)?;
+            context.expect_coercible(merged_inner, TypeHandle::REAL_SCALAR_OR_POINT, span)?;
+            context.types.unflatten_list(ListState::merge(lhs_list, rhs_list), TypeHandle::BOOL, span)?
         }
         BinaryKind::LogicalAnd |
         BinaryKind::LogicalOr => {
-            lhs = lhs.coerce_to(&Type::Bool, true)?;
-            rhs = rhs.coerce_to(&Type::Bool, true)?;
-            Type::Bool.unflatten_list(ListState::merge(lhs_list, rhs_list))
+            lhs = lhs.coerce(context, TypeHandle::BOOL, true)?;
+            rhs = rhs.coerce(context, TypeHandle::BOOL, true)?;
+            lhs_type = context.values.get_type(lhs);
+            rhs_type = context.values.get_type(rhs);
+            context.types.merge(lhs_type, rhs_type, span)?
         }
         _ => unreachable!("all cases from the previous match should be covered")
     };
 
-    Ok(Value::Binary {
-        kind,
-        lhs: Box::new(lhs),
-        rhs: Box::new(rhs),
-        result_type,
+    Ok(ValueEntry {
+        value: Value::Binary {
+            kind,
+            lhs,
+            rhs,
+        },
+        type_handle: result_type,
+        span,
     })
 }
 
@@ -1415,91 +1422,93 @@ fn interpret_access_operation(
     local_context: &LocalContext,
     lhs: &Expression,
     rhs: &Expression,
+    span: Option<crate::Span>,
 ) -> crate::Result<ValueEntry> {
-    let lhs = interpret_expression(target, context, local_context, lhs)?;
-    let (lhs_list, lhs_type) = lhs.get_type().into_flatten_list();
+    let lhs = interpret_expression(context, local_context, lhs)?;
+    let lhs_type = lhs.type_handle;
+    let (lhs_list, lhs_type) = context.types.flatten_list(lhs_type);
+    let lhs = lhs.register(&mut context.values);
 
-    let ExpressionKind::Identifier(member_identifier) = &rhs.kind else {
+    let ExpressionKind::Identifier(rhs_identifier) = &rhs.kind else {
         return Err(Box::new(crate::Error {
             kind: crate::ErrorKind::ExpectedIdentifier,
             span: Some(rhs.span),
         }))
     };
 
-    let invalid_access_error = || Box::new(crate::Error {
+    let invalid_access_error = |context: &GlobalContext| Box::new(crate::Error {
         kind: crate::ErrorKind::InvalidAccessOperation {
-            lhs_type: lhs_type.to_string(),
-            rhs: member_identifier.as_ref().into(),
+            lhs_type: context.types.repr(lhs_type),
+            rhs: rhs_identifier.clone(),
         },
         span: Some(rhs.span),
     });
 
-    match &lhs_type {
-        Type::Meta { identifier } => {
-            let definition = context.find_global(&identifier).unwrap();
-            let DefinitionKind::Type(definition) = &definition.definition.kind else {
-                panic!("known type does not have a type definition")
+    if let &Value::Type(type_handle) = context.values.get(lhs) {
+        return match context.types.get(type_handle) {
+            Type::Enum { identifier, values } => {
+                let value = values
+                    .iter()
+                    .find_map(|&(ref value_identifier, value)| {
+                        (rhs_identifier == value_identifier).then_some(value)
+                    })
+                    .ok_or_else(|| Box::new(crate::Error {
+                        kind: crate::ErrorKind::UndefinedEnumValue {
+                            enum_identifier: identifier.clone(),
+                            variant_identifier: rhs_identifier.clone(),
+                        },
+                        span: Some(rhs.span),
+                    }))?;
+
+                Ok(ValueEntry {
+                    value: Value::GlobalReference(GlobalSymbol {
+                        kind: GlobalSymbolKind::EnumOrdinal,
+                        identifier: rhs_identifier.clone(),
+                        value,
+                    }),
+                    type_handle,
+                    span,
+                })
+            }
+            _ => Err(invalid_access_error(context))
+        }
+    }
+
+    match context.types.get(lhs_type) {
+        &Type::Point2D { x_type, y_type } => {
+            let (kind, result_type) = match rhs_identifier.as_ref() {
+                "x" => (UnaryKind::XOfPoint2D, x_type),
+                "y" => (UnaryKind::YOfPoint2D, y_type),
+                _ => return Err(invalid_access_error(context))
             };
 
-            match definition {
-                TypeDefinition::Enumeration { variants } => {
-                    let ordinal = variants
-                        .iter()
-                        .enumerate()
-                        .find_map(|(ordinal, variant)| {
-                            (member_identifier == &variant.identifier).then_some(ordinal)
-                        })
-                        .ok_or_else(|| Box::new(crate::Error {
-                            kind: crate::ErrorKind::UndefinedEnumVariant {
-                                enum_identifier: identifier.as_ref().into(),
-                                variant_identifier: member_identifier.as_ref().into(),
-                            },
-                            span: Some(rhs.span),
-                        }))?;
+            Ok(ValueEntry {
+                value: Value::Unary {
+                    kind,
+                    operand: lhs,
+                },
+                type_handle: context.types.unflatten_list(lhs_list, result_type, span)?,
+                span,
+            })
+        }
+        &Type::Point3D { x_type, y_type, z_type } => {
+            let (kind, result_type) = match rhs_identifier.as_ref() {
+                "x" => (UnaryKind::XOfPoint3D, x_type),
+                "y" => (UnaryKind::YOfPoint3D, y_type),
+                "z" => (UnaryKind::ZOfPoint3D, z_type),
+                _ => return Err(invalid_access_error(context))
+            };
 
-                    Ok(Value::EnumVariant {
-                        type_identifier: identifier.clone(),
-                        ordinal: ordinal as i64,
-                    })
-                }
-            }
+            Ok(ValueEntry {
+                value: Value::Unary {
+                    kind,
+                    operand: lhs,
+                },
+                type_handle: context.types.unflatten_list(lhs_list, result_type, span)?,
+                span,
+            })
         }
-        Type::Point2D { x_type, y_type } => {
-            match member_identifier.as_ref() {
-                "x" => Ok(Value::Unary {
-                    kind: UnaryKind::XOfPoint2D,
-                    operand: Box::new(lhs),
-                    result_type: x_type.as_ref().clone().unflatten_list(lhs_list),
-                }),
-                "y" => Ok(Value::Unary {
-                    kind: UnaryKind::YOfPoint2D,
-                    operand: Box::new(lhs),
-                    result_type: y_type.as_ref().clone().unflatten_list(lhs_list),
-                }),
-                _ => Err(invalid_access_error())
-            }
-        }
-        Type::Point3D { x_type, y_type, z_type } => {
-            match member_identifier.as_ref() {
-                "x" => Ok(Value::Unary {
-                    kind: UnaryKind::XOfPoint3D,
-                    operand: Box::new(lhs),
-                    result_type: x_type.as_ref().clone().unflatten_list(lhs_list),
-                }),
-                "y" => Ok(Value::Unary {
-                    kind: UnaryKind::YOfPoint3D,
-                    operand: Box::new(lhs),
-                    result_type: y_type.as_ref().clone().unflatten_list(lhs_list),
-                }),
-                "z" => Ok(Value::Unary {
-                    kind: UnaryKind::ZOfPoint3D,
-                    operand: Box::new(lhs),
-                    result_type: z_type.as_ref().clone().unflatten_list(lhs_list),
-                }),
-                _ => Err(invalid_access_error())
-            }
-        }
-        _ => Err(invalid_access_error())
+        _ => Err(invalid_access_error(context))
     }
 }
 
@@ -1511,13 +1520,13 @@ fn interpret_inequality_chain(
     rhs: &Expression,
     span: Option<crate::Span>,
 ) -> crate::Result<ValueEntry> {
-    let rhs_value = interpret_expression(target, context, local_context, rhs)?;
-    let (mut list_state, mut compared_type) = rhs_value.get_type().into_flatten_list();
+    let rhs = interpret_expression(context, local_context, rhs)?;
+    let (mut list_state, mut compared_type) = context.types.flatten_list(rhs.type_handle);
 
     // Descend into the LHS subtree as long as comparison operations is found.
     // Any chained comparisons without parentheses will be in the left subtree because comparisons
     // have left-to-right associativity.
-    let mut chain_rev = vec![(rightmost_kind, rhs_value)];
+    let mut chain_rev = vec![(rightmost_kind, rhs.register(&mut context.values))];
     let mut current_lhs = lhs;
     loop {
         if let ExpressionKind::Binary { operation, lhs, rhs } = &current_lhs.kind {
@@ -1529,14 +1538,13 @@ fn interpret_inequality_chain(
                 _ => break
             };
 
-            let rhs_value = interpret_expression(target, context, local_context, rhs)?;
-            let (rhs_list, rhs_type) = rhs_value.get_type().into_flatten_list();
+            let rhs = interpret_expression(context, local_context, rhs)?;
+            let (rhs_list, rhs_inner) = context.types.flatten_list(rhs.type_handle);
 
             list_state = ListState::merge(list_state, rhs_list);
-            compared_type = compared_type.merge(&rhs_type)
-                .map_err(|error| error.with_span(rhs_value.span))?;
+            compared_type = context.types.merge(compared_type, rhs_inner, rhs.span)?;
 
-            chain_rev.push((kind, rhs_value));
+            chain_rev.push((kind, rhs.register(&mut context.values)));
             current_lhs = lhs.as_ref();
         }
         else {
@@ -1544,19 +1552,21 @@ fn interpret_inequality_chain(
         }
     }
 
-    let lhs_value =  interpret_expression(target, context, local_context, current_lhs)?;
-    let (lhs_list, lhs_type) = lhs_value.get_type().into_flatten_list();
+    let lhs =  interpret_expression(context, local_context, current_lhs)?;
+    let (lhs_list, lhs_inner) = context.types.flatten_list(lhs.type_handle);
 
     list_state = ListState::merge(list_state, lhs_list);
-    compared_type.merge(&lhs_type)
-        .map_err(|error| error.with_span(lhs_value.span))?
-        .require_numeric()
-        .map_err(|error| error.with_span(span))?;
+    compared_type = context.types.merge(compared_type, lhs_inner, lhs.span)?;
 
-    Ok(Value::InequalityChain {
-        lhs: Box::new(lhs_value),
-        chain: chain_rev.into_iter().rev().collect(),
-        result_type: Type::Bool.unflatten_list(list_state),
+    context.expect_coercible(compared_type, TypeHandle::REAL, span)?;
+
+    Ok(ValueEntry {
+        value: Value::InequalityChain {
+            lhs: lhs.register(&mut context.values),
+            chain: chain_rev.into_iter().rev().collect(),
+        },
+        type_handle: context.types.unflatten_list(list_state, TypeHandle::BOOL, span)?,
+        span,
     })
 }
 
@@ -1564,56 +1574,69 @@ pub fn interpret_index_operation(
     context: &mut GlobalContext,
     local_context: &LocalContext,
     operation: &IndexOperation,
-) -> crate::Result<IndexKind> {
+) -> crate::Result<(IndexKind, Option<ListState>)> {
     match operation {
         IndexOperation::Single { index } => {
-            let index = interpret_expression(target, context, local_context, index)?
-                .coerce_to(&Type::Int, true)?;
+            let index = interpret_expression(context, local_context, index)?;
+            let list_state = context.types.flatten_list(index.type_handle).0;
+            let index = index.register(&mut context.values);
 
-            Ok(IndexKind::Single {
-                index: Box::new(index),
-            })
+            Ok((
+                IndexKind::Single {
+                    index: index.coerce(context, TypeHandle::INT, true)?,
+                },
+                list_state,
+            ))
         }
         IndexOperation::Range { kind, from_index, to_index, step } => {
-            let from_index = interpret_expression(target, context, local_context, from_index)?
-                .coerce_to(&Type::Int, false)?;
-            let to_index = interpret_expression(target, context, local_context, to_index)?
-                .coerce_to(&Type::Int, false)?;
+            let from_index = interpret_expression(context, local_context, from_index)?
+                .register(&mut context.values);
+            let to_index = interpret_expression(context, local_context, to_index)?
+                .register(&mut context.values);
             let step = match step {
-                Some(step) => interpret_expression(target, context, local_context, step)?
-                    .coerce_to(&Type::Int, false)?,
-                None => Value::Int(1).into(),
+                Some(step) => interpret_expression(context, local_context, step)?
+                    .register(&mut context.values),
+                None => ValueHandle::ONE_INT,
             };
 
-            Ok(IndexKind::Range {
-                kind: *kind,
-                from_index: Box::new(from_index),
-                to_index: Box::new(to_index),
-                step: Box::new(step),
-            })
+            Ok((
+                IndexKind::Range {
+                    kind: *kind,
+                    from_index: from_index.coerce(context, TypeHandle::INT, false)?,
+                    to_index: to_index.coerce(context, TypeHandle::INT, false)?,
+                    step: step.coerce(context, TypeHandle::INT, false)?,
+                },
+                Some(ListState::IsList),
+            ))
         }
         IndexOperation::RangeFrom { from_index, step } => {
-            let from_index = interpret_expression(target, context, local_context, from_index)?
-                .coerce_to(&Type::Int, false)?;
+            let from_index = interpret_expression(context, local_context, from_index)?
+                .register(&mut context.values);
             let step = match step {
-                Some(step) => interpret_expression(target, context, local_context, step)?
-                    .coerce_to(&Type::Int, false)?,
-                None => Value::Int(1).into(),
+                Some(step) => interpret_expression(context, local_context, step)?
+                    .register(&mut context.values),
+                None => ValueHandle::ONE_INT,
             };
 
-            Ok(IndexKind::RangeFrom {
-                from_index: Box::new(from_index),
-                step: Box::new(step),
-            })
+            Ok((
+                IndexKind::RangeFrom {
+                    from_index: from_index.coerce(context, TypeHandle::INT, false)?,
+                    step: step.coerce(context, TypeHandle::INT, false)?,
+                },
+                Some(ListState::IsList),
+            ))
         }
         IndexOperation::RangeTo { kind, to_index } => {
-            let to_index = interpret_expression(target, context, local_context, to_index)?
-                .coerce_to(&Type::Int, false)?;
+            let to_index = interpret_expression(context, local_context, to_index)?
+                .register(&mut context.values);
 
-            Ok(IndexKind::RangeTo {
-                kind: *kind,
-                to_index: Box::new(to_index),
-            })
+            Ok((
+                IndexKind::RangeTo {
+                    kind: *kind,
+                    to_index: to_index.coerce(context, TypeHandle::INT, false)?,
+                },
+                Some(ListState::IsList),
+            ))
         }
     }
 }

@@ -219,16 +219,16 @@ impl TypeHandle {
         self.0.get() - 1
     }
 
-    pub fn into_list(self, registry: &mut TypeRegistry, state: ListState) -> crate::Result<Self> {
-        registry.list_type(state, self)
+    pub fn into_list(self, registry: &mut TypeRegistry, state: ListState, span: Option<crate::Span>) -> crate::Result<Self> {
+        registry.list_type(state, self, span)
     }
 
     pub fn flatten_list(self, registry: &TypeRegistry) -> (Option<ListState>, Self) {
         registry.flatten_list(self)
     }
 
-    pub fn unflatten_list(self, registry: &mut TypeRegistry, state: Option<ListState>) -> crate::Result<Self> {
-        registry.unflatten_list(state, self)
+    pub fn unflatten_list(self, registry: &mut TypeRegistry, state: Option<ListState>, span: Option<crate::Span>) -> crate::Result<Self> {
+        registry.unflatten_list(state, self, span)
     }
 }
 
@@ -326,7 +326,7 @@ impl TypeRegistry {
         self.entries[handle.index()].repr.clone()
     }
 
-    pub fn point_2d_type(&mut self, x_type: TypeHandle, y_type: TypeHandle) -> crate::Result<TypeHandle> {
+    pub fn point_2d_type(&mut self, x_type: TypeHandle, y_type: TypeHandle, span: Option<crate::Span>) -> crate::Result<TypeHandle> {
         if let Some(&handle) = self.point_2d_handles.get(&[x_type, y_type]) {
             return Ok(handle)
         }
@@ -337,7 +337,7 @@ impl TypeRegistry {
                     kind: crate::ErrorKind::InvalidPointComponentType {
                         component_type: self.repr(component_type),
                     },
-                    span: None,
+                    span,
                 }))
             }
         }
@@ -348,7 +348,7 @@ impl TypeRegistry {
         }))
     }
 
-    pub fn point_3d_type(&mut self, x_type: TypeHandle, y_type: TypeHandle, z_type: TypeHandle) -> crate::Result<TypeHandle> {
+    pub fn point_3d_type(&mut self, x_type: TypeHandle, y_type: TypeHandle, z_type: TypeHandle, span: Option<crate::Span>) -> crate::Result<TypeHandle> {
         if let Some(&handle) = self.point_3d_handles.get(&[x_type, y_type, z_type]) {
             return Ok(handle)
         }
@@ -359,7 +359,7 @@ impl TypeRegistry {
                     kind: crate::ErrorKind::InvalidPointComponentType {
                         component_type: self.repr(component_type),
                     },
-                    span: None,
+                    span,
                 }))
             }
         }
@@ -371,7 +371,7 @@ impl TypeRegistry {
         }))
     }
 
-    pub fn list_type(&mut self, state: ListState, item_type: TypeHandle) -> crate::Result<TypeHandle> {
+    pub fn list_type(&mut self, state: ListState, item_type: TypeHandle, span: Option<crate::Span>) -> crate::Result<TypeHandle> {
         if let Some(&handle) = self.list_handles.get(&(state, item_type)) {
             Ok(handle)
         }
@@ -380,7 +380,7 @@ impl TypeRegistry {
                 kind: crate::ErrorKind::InvalidListItemType {
                     item_type: self.repr(item_type),
                 },
-                span: None,
+                span,
             }))
         }
         else {
@@ -431,14 +431,14 @@ impl TypeRegistry {
         }
     }
 
-    pub fn unflatten_list(&mut self, state: Option<ListState>, item_type: TypeHandle) -> crate::Result<TypeHandle> {
+    pub fn unflatten_list(&mut self, state: Option<ListState>, item_type: TypeHandle, span: Option<crate::Span>) -> crate::Result<TypeHandle> {
         match state {
-            Some(state) => self.list_type(state, item_type),
+            Some(state) => self.list_type(state, item_type, span),
             None => Ok(item_type),
         }
     }
 
-    pub fn expect_list_type(&self, handle: TypeHandle) -> crate::Result<TypeHandle> {
+    pub fn expect_list_type(&self, handle: TypeHandle, span: Option<crate::Span>) -> crate::Result<TypeHandle> {
         match self.get(handle) {
             // TODO: require state to be IsList?
             &Type::List { item_type, .. } => Ok(item_type),
@@ -446,7 +446,7 @@ impl TypeRegistry {
                 kind: crate::ErrorKind::ExpectedListType {
                     got_type: self.repr(handle),
                 },
-                span: None,
+                span,
             }))
         }
     }
@@ -486,7 +486,7 @@ impl TypeRegistry {
             ) => {
                 let x_type = self.coerce(from_x, to_x)?;
                 let y_type = self.coerce(from_y, to_y)?;
-                Some(self.point_2d_type(x_type, y_type).unwrap())
+                Some(self.point_2d_type(x_type, y_type, None).unwrap())
             }
             (
                 &Type::Point3D { x_type: from_x, y_type: from_y, z_type: from_z },
@@ -495,7 +495,7 @@ impl TypeRegistry {
                 let x_type = self.coerce(from_x, to_x)?;
                 let y_type = self.coerce(from_y, to_y)?;
                 let z_type = self.coerce(from_z, to_z)?;
-                Some(self.point_3d_type(x_type, y_type, z_type).unwrap())
+                Some(self.point_3d_type(x_type, y_type, z_type, None).unwrap())
             }
             (Type::Angle, Type::Real | Type::Complex) => Some(to_type),
             (Type::DirectedAngle, Type::Real | Type::Complex) => Some(to_type),
@@ -539,17 +539,17 @@ impl TypeRegistry {
         }
     }
 
-    pub fn merge(&mut self, lhs_type: TypeHandle, rhs_type: TypeHandle) -> crate::Result<TypeHandle> {
+    pub fn merge(&mut self, lhs_type: TypeHandle, rhs_type: TypeHandle, span: Option<crate::Span>) -> crate::Result<TypeHandle> {
         let (lhs_list, lhs_inner) = self.flatten_list(lhs_type);
         let (rhs_list, rhs_inner) = self.flatten_list(rhs_type);
 
         let merged_list = ListState::merge(lhs_list, rhs_list);
-        let merged_inner = self.merge_inner(lhs_inner, rhs_inner)?;
+        let merged_inner = self.merge_inner(lhs_inner, rhs_inner, span)?;
 
-        self.unflatten_list(merged_list, merged_inner)
+        self.unflatten_list(merged_list, merged_inner, span)
     }
 
-    pub fn merge_inner(&mut self, lhs_type: TypeHandle, rhs_type: TypeHandle) -> crate::Result<TypeHandle> {
+    pub fn merge_inner(&mut self, lhs_type: TypeHandle, rhs_type: TypeHandle, span: Option<crate::Span>) -> crate::Result<TypeHandle> {
         if lhs_type == rhs_type {
             return Ok(lhs_type)
         }
@@ -564,18 +564,18 @@ impl TypeRegistry {
                 &Type::Point2D { x_type: lhs_x, y_type: lhs_y },
                 &Type::Point2D { x_type: rhs_x, y_type: rhs_y },
             ) => {
-                let merged_x = self.merge(lhs_x, rhs_x)?;
-                let merged_y = self.merge(lhs_y, rhs_y)?;
-                self.point_2d_type(merged_x, merged_y)
+                let merged_x = self.merge_inner(lhs_x, rhs_x, span)?;
+                let merged_y = self.merge_inner(lhs_y, rhs_y, span)?;
+                self.point_2d_type(merged_x, merged_y, span)
             }
             (
                 &Type::Point3D { x_type: lhs_x, y_type: lhs_y, z_type: lhs_z },
                 &Type::Point3D { x_type: rhs_x, y_type: rhs_y, z_type: rhs_z },
             ) => {
-                let merged_x = self.merge(lhs_x, rhs_x)?;
-                let merged_y = self.merge(lhs_y, rhs_y)?;
-                let merged_z = self.merge(lhs_z, rhs_z)?;
-                self.point_3d_type(merged_x, merged_y, merged_z)
+                let merged_x = self.merge_inner(lhs_x, rhs_x, span)?;
+                let merged_y = self.merge_inner(lhs_y, rhs_y, span)?;
+                let merged_z = self.merge_inner(lhs_z, rhs_z, span)?;
+                self.point_3d_type(merged_x, merged_y, merged_z, span)
             }
             _ => {
                 for numeric_type in [
@@ -600,14 +600,14 @@ impl TypeRegistry {
                             lhs_type: self.repr(lhs_type),
                             rhs_type: self.repr(rhs_type),
                         },
-                        span: None,
+                        span,
                     }))
                 }
             }
         }
     }
 
-    pub fn expect_action_type(&self, handle: TypeHandle, min_arity: usize, argument_types: &[TypeHandle]) -> crate::Result<&[TypeHandle]> {
+    pub fn expect_action_type(&self, handle: TypeHandle, min_arity: usize, argument_types: &[TypeHandle], span: Option<crate::Span>) -> crate::Result<&[TypeHandle]> {
         if let Type::Action { parameter_types } = self.get(handle) {
             if (min_arity ..= argument_types.len()).contains(&parameter_types.len())
                 && std::iter::zip(argument_types, parameter_types)
@@ -628,7 +628,7 @@ impl TypeRegistry {
                     .collect(),
                 got_type: self.repr(handle),
             },
-            span: None,
+            span,
         }))
     }
 
@@ -791,10 +791,28 @@ known_type_handles! {
         y_type: TypeHandle::REAL,
         z_type: TypeHandle::REAL,
     }),
-    REAL_OR_REAL_POINT => (|| Type::union([
+    REAL_SCALAR_OR_POINT => (|| Type::union([
         TypeHandle::REAL,
         TypeHandle::REAL_POINT_2D,
         TypeHandle::REAL_POINT_3D,
+    ])),
+    ARITHMETIC_SCALAR => (|| Type::union([
+        TypeHandle::INT,
+        TypeHandle::REAL,
+    ])),
+    ARITHMETIC_POINT_2D => (Type::Point2D {
+        x_type: TypeHandle::ARITHMETIC_SCALAR,
+        y_type: TypeHandle::ARITHMETIC_SCALAR,
+    }),
+    ARITHMETIC_POINT_3D => (Type::Point3D {
+        x_type: TypeHandle::ARITHMETIC_SCALAR,
+        y_type: TypeHandle::ARITHMETIC_SCALAR,
+        z_type: TypeHandle::ARITHMETIC_SCALAR,
+    }),
+    ARITHMETIC_SCALAR_OR_POINT => (|| Type::union([
+        TypeHandle::ARITHMETIC_SCALAR,
+        TypeHandle::ARITHMETIC_POINT_2D,
+        TypeHandle::ARITHMETIC_POINT_3D,
     ])),
     ANY_TRANSFORMABLE => (|| Type::union([
         TypeHandle::POLYGON,

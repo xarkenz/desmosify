@@ -1,5 +1,5 @@
 use std::rc::Rc;
-use crate::sema::display::ProgramDisplay;
+use crate::sema::display::ProgramDisplayList;
 use crate::sema::types::TypeHandle;
 use crate::sema::values::{ActionValue, ValueHandle};
 
@@ -71,7 +71,7 @@ pub enum ProgramPublicEntry {
 }
 
 #[derive(Clone, Debug)]
-pub struct ProgramPublic {
+pub struct ProgramPublicList {
     pub entries: Box<[ProgramPublicEntry]>,
 }
 
@@ -81,7 +81,7 @@ pub struct Program {
     pub immutables: Box<[ProgramImmutable]>,
     pub variables: Box<[ProgramVariable]>,
     pub actions: Box<[ProgramAction]>,
-    pub ticker: ProgramTicker,
-    pub public: ProgramPublic,
-    pub display: ProgramDisplay,
+    pub tickers: Box<[ProgramTicker]>,
+    pub public_lists: Box<[ProgramPublicList]>,
+    pub display_lists: Box<[ProgramDisplayList]>,
 }

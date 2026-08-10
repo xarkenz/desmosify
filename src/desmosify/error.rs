@@ -253,7 +253,7 @@ pub enum ErrorKind {
     UndefinedIdentifier {
         identifier: Rc<str>,
     },
-    UndefinedEnumVariant {
+    UndefinedEnumValue {
         enum_identifier: Rc<str>,
         variant_identifier: Rc<str>,
     },
@@ -506,7 +506,7 @@ impl std::fmt::Display for ErrorKind {
             Self::UndefinedIdentifier { identifier } => {
                 write!(f, "identifier '{identifier}' is not defined")
             }
-            Self::UndefinedEnumVariant { enum_identifier, variant_identifier } => {
+            Self::UndefinedEnumValue { enum_identifier, variant_identifier } => {
                 write!(f, "enum '{enum_identifier}' has no variant '{variant_identifier}'")
             }
             Self::InvalidAccessOperation { lhs_type, rhs } => {

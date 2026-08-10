@@ -2,6 +2,7 @@ use std::collections::HashMap;
 use std::num::NonZeroUsize;
 use std::rc::Rc;
 use crate::ast::RangeKind;
+use crate::sema::context::GlobalContext;
 use crate::sema::display::ImageValue;
 use crate::sema::intrinsic::IntrinsicFunction;
 use crate::sema::types::{ListState, Type, TypeHandle, TypeRegistry};
@@ -251,12 +252,6 @@ pub enum IndexKind {
     },
 }
 
-impl IndexKind {
-    pub const fn result_is_list(&self) -> bool {
-        !matches!(self, Self::Single { .. })
-    }
-}
-
 #[derive(Clone, Debug)]
 pub struct ListMapLoop {
     pub local: ValueHandle,
@@ -476,6 +471,17 @@ impl ValueEntry {
         }
     }
 
+    pub fn expect_const_str(&self, type_registry: &TypeRegistry) -> crate::Result<Rc<str>> {
+        self.value
+            .as_const_str()
+            .ok_or_else(|| Box::new(crate::Error {
+                kind: crate::ErrorKind::ExpectedConstant {
+                    type_identifier: type_registry.repr(TypeHandle::STR),
+                },
+                span: self.span,
+            }))
+    }
+
     pub fn register(self, registry: &mut ValueRegistry) -> ValueHandle {
         registry.register(self)
     }
@@ -591,6 +597,10 @@ impl ValueHandle {
     pub fn get_span(self, registry: &ValueRegistry) -> Option<crate::Span> {
         registry.get_span(self)
     }
+
+    pub fn coerce(self, context: &mut GlobalContext, to_type: TypeHandle, allow_list: bool) -> crate::Result<Self> {
+        context.coerce_value(self, to_type, allow_list)
+    }
 }
 
 #[derive(Debug)]
@@ -700,7 +710,7 @@ impl ValueRegistry {
         let Some(coerced_type) = types.coerce(from_inner, to_inner) else {
             return None
         };
-        let result_type = types.unflatten_list(from_list, coerced_type).ok()?;
+        let result_type = types.unflatten_list(from_list, coerced_type, None).ok()?;
         let span = self.get_span(handle);
 
         let coerced = match (self.get(handle), types.get(coerced_type)) {

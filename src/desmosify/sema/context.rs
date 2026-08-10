@@ -279,7 +279,7 @@ impl<'a> GlobalContext<'a> {
                 // Allow broadcastable for the purposes of giving a nicer error message
                 let item_type = self.resolve_type(item_type, true)?;
 
-                self.types.list_type(ListState::IsList, item_type)
+                self.types.list_type(ListState::IsList, item_type, Some(type_expression.span))
             }
             TypeExpressionKind::Broadcastable { item_type } => {
                 if !allow_broadcastable {
@@ -292,14 +292,14 @@ impl<'a> GlobalContext<'a> {
                 // Allow broadcastable for the purposes of giving a nicer error message
                 let item_type = self.resolve_type(item_type, true)?;
 
-                self.types.list_type(ListState::MaybeList, item_type)
+                self.types.list_type(ListState::MaybeList, item_type, Some(type_expression.span))
             }
             TypeExpressionKind::Point2 { x_type, y_type } => {
                 // Allow broadcastable components for the purposes of giving a nicer error message
                 let x_type = self.resolve_type(x_type, true)?;
                 let y_type = self.resolve_type(y_type, true)?;
 
-                self.types.point_2d_type(x_type, y_type)
+                self.types.point_2d_type(x_type, y_type, Some(type_expression.span))
             }
             TypeExpressionKind::Point3 { x_type, y_type, z_type } => {
                 // Allow broadcastable components for the purposes of giving a nicer error message
@@ -307,7 +307,7 @@ impl<'a> GlobalContext<'a> {
                 let y_type = self.resolve_type(y_type, true)?;
                 let z_type = self.resolve_type(z_type, true)?;
 
-                self.types.point_3d_type(x_type, y_type, z_type)
+                self.types.point_3d_type(x_type, y_type, z_type, Some(type_expression.span))
             }
         }
     }
@@ -320,6 +320,21 @@ impl<'a> GlobalContext<'a> {
             },
             span: self.values.get_span(handle),
         }))
+    }
+
+    pub fn expect_coercible(&self, from_type: TypeHandle, to_type: TypeHandle, span: Option<crate::Span>) -> crate::Result<()> {
+        if !self.types.can_coerce(from_type, to_type) {
+            Err(Box::new(crate::Error {
+                kind: crate::ErrorKind::MismatchedTypes {
+                    expected_type: self.types.repr(to_type),
+                    got_type: self.types.repr(from_type),
+                },
+                span,
+            }))
+        }
+        else {
+            Ok(())
+        }
     }
 }
 
