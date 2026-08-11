@@ -59,6 +59,7 @@ pub struct IntrinsicFunction {
     pub interpret_call: fn(
         context: &mut GlobalContext,
         local_context: &LocalContext,
+        span: Option<crate::Span>,
         arguments: Box<[ValueHandle]>,
     ) -> crate::Result<ValueEntry>,
 }
@@ -73,7 +74,7 @@ impl IntrinsicFunction {
     ) -> crate::Result<ValueEntry> {
         self.check_arity(arguments.len(), span)?;
 
-        (self.interpret_call)(context, local_context, arguments)
+        (self.interpret_call)(context, local_context, span, arguments)
     }
 
     pub fn check_arity(&self, argument_count: usize, span: Option<crate::Span>) -> crate::Result<()> {
@@ -290,162 +291,181 @@ pub const CORE_INTRINSIC_FUNCTIONS: &[&IntrinsicFunction] = &[
 
 pub fn interpret_strict_unary_call(
     context: &mut GlobalContext,
+    span: Option<crate::Span>,
     kind: UnaryKind,
     argument_type: TypeHandle,
     result_type: Option<TypeHandle>,
     arguments: Box<[ValueHandle]>,
-) -> crate::Result<Value> {
-    let argument = arguments.into_iter().next().unwrap()
+) -> crate::Result<ValueEntry> {
+    let argument = arguments[0]
         .coerce(context, argument_type, false)?;
 
-    Ok(Value::Unary {
-        kind,
-        result_type: result_type.unwrap_or(argument_type),
-        operand: Box::new(argument),
+    Ok(ValueEntry {
+        value: Value::Unary {
+            kind,
+            operand: argument,
+        },
+        type_handle: result_type.unwrap_or(argument_type),
+        span,
     })
 }
 
 pub fn interpret_broadcastable_unary_call(
     context: &mut GlobalContext,
+    span: Option<crate::Span>,
     kind: UnaryKind,
     argument_type: TypeHandle,
     result_type: Option<TypeHandle>,
     arguments: Box<[ValueHandle]>,
-) -> crate::Result<Value> {
-    let argument = arguments.into_iter().next().unwrap()
-        .coerce(context, &argument_type, true)?;
+) -> crate::Result<ValueEntry> {
+    let argument = arguments[0]
+        .coerce(context, argument_type, true)?;
+    let argument_type = argument.get_type(&context.values);
+    let list_state = argument_type.flatten_list(&context.types).0;
 
-    Ok(Value::Unary {
-        kind,
-        result_type: match result_type {
-            Some(result_type) => result_type.unflatten_list(argument.get_type().list_state()),
-            None => argument.get_type(),
+    Ok(ValueEntry {
+        value: Value::Unary {
+            kind,
+            operand: argument,
         },
-        operand: Box::new(argument),
+        type_handle: match result_type {
+            Some(result_type) => result_type.unflatten_list(&mut context.types, list_state, span)?,
+            None => argument_type,
+        },
+        span,
     })
 }
 
 pub fn interpret_broadcastable_binary_call(
     context: &mut GlobalContext,
+    span: Option<crate::Span>,
     kind: BinaryKind,
     lhs_type: TypeHandle,
     rhs_type: TypeHandle,
-    result_type: Type,
+    result_type: TypeHandle,
     arguments: Box<[ValueHandle]>,
-) -> crate::Result<Value> {
-    let mut arguments = arguments.into_iter();
-
-    let lhs = arguments.next().unwrap()
+) -> crate::Result<ValueEntry> {
+    let lhs = arguments[0]
         .coerce(context, lhs_type, true)?;
-    let rhs = arguments.next().unwrap()
+    let rhs = arguments[1]
         .coerce(context, rhs_type, true)?;
 
     let list_state = ListState::merge(
-        lhs.get_type().list_state(),
-        rhs.get_type().list_state(),
+        lhs.get_type(&context.values).flatten_list(&context.types).0,
+        rhs.get_type(&context.values).flatten_list(&context.types).0,
     );
 
-    Ok(Value::Binary {
-        kind,
-        lhs: Box::new(lhs),
-        rhs: Box::new(rhs),
-        result_type: result_type.unflatten_list(list_state),
+    Ok(ValueEntry {
+        value: Value::Binary {
+            kind,
+            lhs,
+            rhs,
+        },
+        type_handle: result_type.unflatten_list(&mut context.types, list_state, span)?,
+        span,
     })
 }
 
 pub fn interpret_broadcastable_ternary_call(
     context: &mut GlobalContext,
+    span: Option<crate::Span>,
     kind: TernaryKind,
     first_type: TypeHandle,
     second_type: TypeHandle,
     third_type: TypeHandle,
     result_type: TypeHandle,
     arguments: Box<[ValueHandle]>,
-) -> crate::Result<Value> {
-    let mut arguments = arguments.into_iter();
-
-    let first = arguments.next().unwrap()
-        .coerce(context, &first_type, true)?;
-    let second = arguments.next().unwrap()
-        .coerce(context, &second_type, true)?;
-    let third = arguments.next().unwrap()
-        .coerce(context, &third_type, true)?;
+) -> crate::Result<ValueEntry> {
+    let first = arguments[0]
+        .coerce(context, first_type, true)?;
+    let second = arguments[1]
+        .coerce(context, second_type, true)?;
+    let third = arguments[2]
+        .coerce(context, third_type, true)?;
 
     let list_state = ListState::merge_all([
-        first.get_type().list_state(),
-        second.get_type().list_state(),
-        third.get_type().list_state(),
+        first.get_type(&context.values).flatten_list(&context.types).0,
+        second.get_type(&context.values).flatten_list(&context.types).0,
+        third.get_type(&context.values).flatten_list(&context.types).0,
     ]);
 
-    Ok(Value::Ternary {
-        kind,
-        first: Box::new(first),
-        second: Box::new(second),
-        third: Box::new(third),
-        result_type: result_type.unflatten_list(list_state),
+    Ok(ValueEntry {
+        value: Value::Ternary {
+            kind,
+            first,
+            second,
+            third,
+        },
+        type_handle: result_type.unflatten_list(&mut context.types, list_state, span)?,
+        span,
     })
 }
 
 pub fn interpret_broadcastable_reducer_call(
     context: &mut GlobalContext,
+    span: Option<crate::Span>,
     kind: ReducerKind,
-    element_type: Option<Type>,
-    result_type: Option<Type>,
+    element_type: Option<TypeHandle>,
+    result_type: Option<TypeHandle>,
     arguments: Box<[ValueHandle]>,
-) -> crate::Result<Value> {
-    if let [argument] = arguments.as_ref() {
-        let (list_state, argument_type) = argument.get_type().into_flatten_list();
-        if list_state.is_some() {
+) -> crate::Result<ValueEntry> {
+    if let &[mut list] = arguments.as_ref() {
+        if let &Type::List { item_type, .. } = list.get_type(&context.values).get(&context.types) {
             // This should also work for any MaybeList.
-            let list = arguments.into_iter().next().unwrap();
-            let list = match &element_type {
-                Some(element_type) => list.coerce(context, element_type, true)?,
-                None => list,
-            };
+            if let Some(element_type) = element_type {
+                list = list.coerce(context, element_type, true)?;
+            }
 
-            return Ok(Value::Reducer {
-                kind,
-                list: Box::new(list),
-                result_type: result_type.unwrap_or(argument_type),
+            return Ok(ValueEntry {
+                value: Value::Reducer {
+                    kind,
+                    list,
+                },
+                type_handle: result_type.unwrap_or(item_type),
+                span,
             })
         }
     }
 
     // Determine the most restrictive type that fits all arguments.
-    let merged_type = arguments[1..].iter().try_fold(
-        arguments[0].get_type(),
-        |current_type, argument| {
-            current_type.merge(&argument.get_type())
-                .map_err(|error| error.with_span(argument.span))
-        },
+    let mut merged_type = arguments[1..].iter().try_fold(
+        arguments[0].get_type(&context.values),
+        |current_type, &argument| context.types.merge(
+            current_type,
+            argument.get_type(&context.values),
+            argument.get_span(&context.values),
+        ),
     )?;
 
-    let element_type = match element_type {
-        Some(element_type) => merged_type.flatten_list().1.clone().coerce(context, &element_type)
+    if let Some(element_type) = element_type {
+        let merged_inner = merged_type.flatten_list(&context.types).1;
+        merged_type = context.types.coerce(merged_inner, element_type)
             .ok_or_else(|| Box::new(crate::Error {
                 kind: crate::ErrorKind::MismatchedTypes {
-                    expected_type: element_type.to_string(),
-                    got_type: merged_type.to_string(),
+                    expected_type: context.types.repr(element_type),
+                    got_type: context.types.repr(merged_inner),
                 },
-                span: match (arguments[0].span, arguments.last().unwrap().span) {
-                    (Some(start), Some(end)) => Some(start.expand_to(end)),
-                    (span, _) => span
-                },
-            }))?,
-        None => merged_type,
-    };
+                span,
+            }))?;
+    }
 
     let mut list_state = None;
-    Ok(Value::ArgumentsReducer {
-        kind,
-        arguments: arguments
-            .into_iter()
-            .map(|argument| {
-                list_state = ListState::merge(list_state, argument.get_type().list_state());
-                argument.coerce(context, &element_type, true)
-            })
-            .collect::<crate::Result<_>>()?,
-        result_type: result_type.unwrap_or(element_type).unflatten_list(list_state),
+    Ok(ValueEntry {
+        value: Value::ArgumentsReducer {
+            kind,
+            arguments: arguments
+                .into_iter()
+                .map(|argument| {
+                    list_state = ListState::merge(
+                        list_state,
+                        argument.get_type(&context.values).flatten_list(&context.types).0,
+                    );
+                    argument.coerce(context, merged_type, true)
+                })
+                .collect::<crate::Result<_>>()?,
+        },
+        type_handle: result_type.unwrap_or(merged_type).unflatten_list(&mut context.types, list_state, span)?,
+        span,
     })
 }
 
@@ -456,7 +476,9 @@ macro_rules! strict_intrinsic {
             identifier: $identifier,
             min_arity: 1,
             max_arity: Some(1),
-            interpret_call: |_, _, _, arguments| interpret_strict_unary_call(
+            interpret_call: |context, _, span, arguments| interpret_strict_unary_call(
+                context,
+                span,
                 UnaryKind::$kind,
                 $argument_type,
                 None,
@@ -469,7 +491,9 @@ macro_rules! strict_intrinsic {
             identifier: $identifier,
             min_arity: 1,
             max_arity: Some(1),
-            interpret_call: |_, _, _, arguments| interpret_strict_unary_call(
+            interpret_call: |context, _, span, arguments| interpret_strict_unary_call(
+                context,
+                span,
                 UnaryKind::$kind,
                 $argument_type,
                 Some($result_type),
@@ -486,7 +510,9 @@ macro_rules! broadcastable_intrinsic {
             identifier: $identifier,
             min_arity: 1,
             max_arity: Some(1),
-            interpret_call: |_, _, _, arguments| interpret_broadcastable_unary_call(
+            interpret_call: |context, _, span, arguments| interpret_broadcastable_unary_call(
+                context,
+                span,
                 UnaryKind::$kind,
                 $argument_type,
                 None,
@@ -499,7 +525,9 @@ macro_rules! broadcastable_intrinsic {
             identifier: $identifier,
             min_arity: 1,
             max_arity: Some(1),
-            interpret_call: |_, _, _, arguments| interpret_broadcastable_unary_call(
+            interpret_call: |context, _, span, arguments| interpret_broadcastable_unary_call(
+                context,
+                span,
                 UnaryKind::$kind,
                 $argument_type,
                 Some($result_type),
@@ -513,7 +541,9 @@ macro_rules! broadcastable_intrinsic {
             identifier: $identifier,
             min_arity: 2,
             max_arity: Some(2),
-            interpret_call: |_, _, _, arguments| interpret_broadcastable_binary_call(
+            interpret_call: |context, _, span, arguments| interpret_broadcastable_binary_call(
+                context,
+                span,
                 BinaryKind::$kind,
                 $lhs_type,
                 $rhs_type,
@@ -528,7 +558,9 @@ macro_rules! broadcastable_intrinsic {
             identifier: $identifier,
             min_arity: 3,
             max_arity: Some(3),
-            interpret_call: |_, _, _, arguments| interpret_broadcastable_ternary_call(
+            interpret_call: |context, _, span, arguments| interpret_broadcastable_ternary_call(
+                context,
+                span,
                 TernaryKind::$kind,
                 $first_type,
                 $second_type,
@@ -544,7 +576,9 @@ macro_rules! broadcastable_intrinsic {
             identifier: $identifier,
             min_arity: 1,
             max_arity: None,
-            interpret_call: |_, _, _, arguments| interpret_broadcastable_reducer_call(
+            interpret_call: |context, _, span, arguments| interpret_broadcastable_reducer_call(
+                context,
+                span,
                 ReducerKind::$kind,
                 None,
                 None,
@@ -557,7 +591,9 @@ macro_rules! broadcastable_intrinsic {
             identifier: $identifier,
             min_arity: 1,
             max_arity: None,
-            interpret_call: |_, _, _, arguments| interpret_broadcastable_reducer_call(
+            interpret_call: |context, _, span, arguments| interpret_broadcastable_reducer_call(
+                context,
+                span,
                 ReducerKind::$kind,
                 None,
                 Some($result_type),
@@ -570,7 +606,9 @@ macro_rules! broadcastable_intrinsic {
             identifier: $identifier,
             min_arity: 1,
             max_arity: None,
-            interpret_call: |_, _, _, arguments| interpret_broadcastable_reducer_call(
+            interpret_call: |context, _, span, arguments| interpret_broadcastable_reducer_call(
+                context,
+                span,
                 ReducerKind::$kind,
                 Some($element_type),
                 None,
@@ -583,7 +621,9 @@ macro_rules! broadcastable_intrinsic {
             identifier: $identifier,
             min_arity: 1,
             max_arity: None,
-            interpret_call: |_, _, _, arguments| interpret_broadcastable_reducer_call(
+            interpret_call: |context, _, span, arguments| interpret_broadcastable_reducer_call(
+                context,
+                span,
                 ReducerKind::$kind,
                 Some($element_type),
                 Some($result_type),
@@ -593,14 +633,19 @@ macro_rules! broadcastable_intrinsic {
     };
 }
 
-pub fn read_file_bytes(local_context: &LocalContext, path_value: &ValueHandle) -> crate::Result<(PathBuf, Vec<u8>)> {
-    let relative_path = path_value.kind
+pub fn read_file_bytes(
+    context: &GlobalContext,
+    local_context: &LocalContext,
+    span: Option<crate::Span>,
+    path_value: ValueHandle,
+) -> crate::Result<(PathBuf, Vec<u8>)> {
+    let relative_path = context.values.get(path_value)
         .as_const_str()
         .ok_or_else(|| Box::new(crate::Error {
             kind: crate::ErrorKind::ExpectedConstant {
-                type_identifier: Type::Str.to_string(),
+                type_identifier: context.types.repr(TypeHandle::STR),
             },
-            span: path_value.span,
+            span: context.values.get_span(path_value),
         }))?;
 
     let full_path = local_context.source_directory().join(relative_path.as_ref());
@@ -611,7 +656,7 @@ pub fn read_file_bytes(local_context: &LocalContext, path_value: &ValueHandle) -
                 path: Some(full_path.as_path().into()),
                 cause,
             },
-            span: path_value.span,
+            span,
         }))
         .map(|contents| (full_path, contents))
 }
@@ -619,93 +664,93 @@ pub fn read_file_bytes(local_context: &LocalContext, path_value: &ValueHandle) -
 // ------ Trigonometric ------
 
 pub static SIN: IntrinsicFunction = broadcastable_intrinsic!(
-    "sin", (Type::Real) => Sin
+    "sin", (TypeHandle::REAL) => Sin
 );
 
 pub static COS: IntrinsicFunction = broadcastable_intrinsic!(
-    "cos", (Type::Real) => Cos
+    "cos", (TypeHandle::REAL) => Cos
 );
 
 pub static TAN: IntrinsicFunction = broadcastable_intrinsic!(
-    "tan", (Type::Real) => Tan
+    "tan", (TypeHandle::REAL) => Tan
 );
 
 pub static CSC: IntrinsicFunction = broadcastable_intrinsic!(
-    "csc", (Type::Real) => Csc
+    "csc", (TypeHandle::REAL) => Csc
 );
 
 pub static SEC: IntrinsicFunction = broadcastable_intrinsic!(
-    "sec", (Type::Real) => Sec
+    "sec", (TypeHandle::REAL) => Sec
 );
 
 pub static COT: IntrinsicFunction = broadcastable_intrinsic!(
-    "cot", (Type::Real) => Cot
+    "cot", (TypeHandle::REAL) => Cot
 );
 
 pub static ARCSIN: IntrinsicFunction = broadcastable_intrinsic!(
-    "arcsin", (Type::Real) => Arcsin
+    "arcsin", (TypeHandle::REAL) => Arcsin
 );
 
 pub static ARCCOS: IntrinsicFunction = broadcastable_intrinsic!(
-    "arccos", (Type::Real) => Arccos
+    "arccos", (TypeHandle::REAL) => Arccos
 );
 
 pub static ARCTAN: IntrinsicFunction = broadcastable_intrinsic!(
-    "arctan", (Type::Real) => Arctan
+    "arctan", (TypeHandle::REAL) => Arctan
 );
 
 pub static ARCTAN2: IntrinsicFunction = broadcastable_intrinsic!(
-    "arctan2", (Type::Real, Type::Real) => Arctan2, Type::Real
+    "arctan2", (TypeHandle::REAL, TypeHandle::REAL) => Arctan2, TypeHandle::REAL
 );
 
 pub static ARCCSC: IntrinsicFunction = broadcastable_intrinsic!(
-    "arccsc", (Type::Real) => Arccsc
+    "arccsc", (TypeHandle::REAL) => Arccsc
 );
 
 pub static ARCSEC: IntrinsicFunction = broadcastable_intrinsic!(
-    "arcsec", (Type::Real) => Arcsec
+    "arcsec", (TypeHandle::REAL) => Arcsec
 );
 
 pub static ARCCOT: IntrinsicFunction = broadcastable_intrinsic!(
-    "arccot", (Type::Real) => Arccot
+    "arccot", (TypeHandle::REAL) => Arccot
 );
 
 pub static SINH: IntrinsicFunction = broadcastable_intrinsic!(
-    "sinh", (Type::Real) => Sinh
+    "sinh", (TypeHandle::REAL) => Sinh
 );
 
 pub static COSH: IntrinsicFunction = broadcastable_intrinsic!(
-    "cosh", (Type::Real) => Cosh
+    "cosh", (TypeHandle::REAL) => Cosh
 );
 
 pub static TANH: IntrinsicFunction = broadcastable_intrinsic!(
-    "tanh", (Type::Real) => Tanh
+    "tanh", (TypeHandle::REAL) => Tanh
 );
 
 pub static CSCH: IntrinsicFunction = broadcastable_intrinsic!(
-    "csch", (Type::Real) => Csch
+    "csch", (TypeHandle::REAL) => Csch
 );
 
 pub static SECH: IntrinsicFunction = broadcastable_intrinsic!(
-    "sech", (Type::Real) => Sech
+    "sech", (TypeHandle::REAL) => Sech
 );
 
 pub static COTH: IntrinsicFunction = broadcastable_intrinsic!(
-    "coth", (Type::Real) => Coth
+    "coth", (TypeHandle::REAL) => Coth
 );
 
 // ------ Calculus ------
 
 pub static EXP: IntrinsicFunction = broadcastable_intrinsic!(
-    "exp", (Type::Real) => Exp
+    "exp", (TypeHandle::REAL) => Exp
 );
 
 pub static LN: IntrinsicFunction = broadcastable_intrinsic!(
-    "ln", (Type::Real) => Ln
+    "ln", (TypeHandle::REAL) => Ln
 );
 
 pub static LOG: IntrinsicFunction = broadcastable_intrinsic!(
-    "log", (Type::Real, Type::Real) => Log, Type::Real
+    "log", (TypeHandle::REAL, TypeHandle::REAL) => Log, TypeHandle::REAL
 );
 
 // DERIVATIVE
@@ -719,47 +764,47 @@ pub static LOG: IntrinsicFunction = broadcastable_intrinsic!(
 // ------ Number Theory ------
 
 pub static LCM: IntrinsicFunction = broadcastable_intrinsic!(
-    "lcm", [Type::Int] => Lcm
+    "lcm", [TypeHandle::INT] => Lcm
 );
 
 pub static GCD: IntrinsicFunction = broadcastable_intrinsic!(
-    "gcd", [Type::Int] => Gcd
+    "gcd", [TypeHandle::INT] => Gcd
 );
 
 pub static CEIL: IntrinsicFunction = broadcastable_intrinsic!(
-    "ceil", (Type::Real) => Ceil, Type::Int
+    "ceil", (TypeHandle::REAL) => Ceil, TypeHandle::INT
 );
 
 pub static FLOOR: IntrinsicFunction = broadcastable_intrinsic!(
-    "floor", (Type::Real) => Floor, Type::Int
+    "floor", (TypeHandle::REAL) => Floor, TypeHandle::INT
 );
 
 pub static ROUND: IntrinsicFunction = broadcastable_intrinsic!(
-    "round", (Type::Real) => Round, Type::Int
+    "round", (TypeHandle::REAL) => Round, TypeHandle::INT
 );
 
 pub static ROUND_DIGITS: IntrinsicFunction = broadcastable_intrinsic!(
-    "round_digits", (Type::Real, Type::Int) => RoundDigits, Type::Real
+    "round_digits", (TypeHandle::REAL, TypeHandle::INT) => RoundDigits, TypeHandle::REAL
 );
 
 pub static ABS: IntrinsicFunction = broadcastable_intrinsic!(
-    "abs", (Type::union([Type::Int, Type::Real])) => Abs
+    "abs", (TypeHandle::ARITHMETIC_SCALAR) => Abs
 );
 
 pub static SIGN: IntrinsicFunction = broadcastable_intrinsic!(
-    "sign", (Type::Real) => Sign, Type::Int
+    "sign", (TypeHandle::REAL) => Sign, TypeHandle::INT
 );
 
 pub static SQRT: IntrinsicFunction = broadcastable_intrinsic!(
-    "sqrt", (Type::Real) => Sqrt, Type::Real
+    "sqrt", (TypeHandle::REAL) => Sqrt, TypeHandle::REAL
 );
 
 pub static CBRT: IntrinsicFunction = broadcastable_intrinsic!(
-    "cbrt", (Type::Real) => Cbrt, Type::Real
+    "cbrt", (TypeHandle::REAL) => Cbrt, TypeHandle::REAL
 );
 
 pub static NTH_ROOT: IntrinsicFunction = broadcastable_intrinsic!(
-    "nth_root", (Type::Real, Type::Real) => NthRoot, Type::Real
+    "nth_root", (TypeHandle::REAL, TypeHandle::REAL) => NthRoot, TypeHandle::REAL
 );
 
 // NPR
@@ -784,18 +829,22 @@ pub static JOIN: IntrinsicFunction = IntrinsicFunction {
     identifier: "join",
     min_arity: 2,
     max_arity: None,
-    interpret_call: |_, _, _, arguments| {
+    interpret_call: |context, _, span, arguments| {
         let item_type = arguments[1..].iter().try_fold(
-            arguments[0].get_type().into_flatten_list().1,
-            |current_type, argument| {
-                current_type.merge(argument.get_type().flatten_list().1)
-                    .map_err(|error| error.with_span(argument.span))
-            },
+            arguments[0].get_type(&context.values).flatten_list(&context.types).1,
+            |current_type, &argument| context.types.merge_inner(
+                current_type,
+                argument.get_type(&context.values).flatten_list(&context.types).1,
+                span,
+            ),
         )?;
 
-        Ok(Value::Join {
-            values: arguments,
-            result_type: item_type.into_list(ListState::IsList),
+        Ok(ValueEntry {
+            value: Value::Join {
+                values: arguments,
+            },
+            type_handle: item_type.into_list(&mut context.types, ListState::IsList, span)?,
+            span,
         })
     },
 };
@@ -804,42 +853,35 @@ pub static SORT: IntrinsicFunction = IntrinsicFunction {
     identifier: "sort",
     min_arity: 1,
     max_arity: Some(2),
-    interpret_call: |_, _, _, arguments| {
-        let mut arguments = arguments.into_iter();
+    interpret_call: |context, _, span, arguments| {
+        let list = arguments[0];
+        context.types.expect_list_type(list.get_type(&context.values), list.get_span(&context.values))?;
 
-        let list = arguments.next().unwrap();
-        list.get_type()
-            .require_flatten_list()
-            .map_err(|error| error.with_span(list.span))?;
+        if let Some(&key_list) = arguments.get(1) {
+            context.types.expect_list_type(key_list.get_type(&context.values), key_list.get_span(&context.values))?;
 
-        let key_type = Type::union([
-            Type::Bool,
-            Type::Int,
-            Type::Real,
-            Type::Complex,
-        ]);
+            let key_list = key_list.coerce(context, TypeHandle::ANY_SORTABLE, true)?;
 
-        if let Some(key_list) = arguments.next() {
-            key_list.get_type()
-                .require_flatten_list()
-                .map_err(|error| error.with_span(list.span))?;
-
-            let key_list = key_list.coerce(context, &key_type, true)?;
-
-            Ok(Value::Binary {
-                kind: BinaryKind::SortKeyed,
-                result_type: list.get_type(),
-                lhs: Box::new(list),
-                rhs: Box::new(key_list),
+            Ok(ValueEntry {
+                value: Value::Binary {
+                    kind: BinaryKind::SortKeyed,
+                    lhs: list,
+                    rhs: key_list,
+                },
+                type_handle: list.get_type(&context.values),
+                span,
             })
         }
         else {
-            let list = list.coerce(context, &key_type, true)?;
+            let list = list.coerce(context, TypeHandle::ANY_SORTABLE, true)?;
 
-            Ok(Value::Unary {
-                kind: UnaryKind::Sort,
-                result_type: list.get_type(),
-                operand: Box::new(list),
+            Ok(ValueEntry {
+                value: Value::Unary {
+                    kind: UnaryKind::Sort,
+                    operand: list,
+                },
+                type_handle: list.get_type(&context.values),
+                span,
             })
         }
     },
@@ -849,29 +891,32 @@ pub static SHUFFLE: IntrinsicFunction = IntrinsicFunction {
     identifier: "shuffle",
     min_arity: 1,
     max_arity: Some(2),
-    interpret_call: |_, _, _, arguments| {
-        let mut arguments = arguments.into_iter();
+    interpret_call: |context, _, span, arguments| {
+        let list = arguments[0];
+        let list_type = list.get_type(&context.values);
+        context.types.expect_list_type(list_type, list.get_span(&context.values))?;
 
-        let list = arguments.next().unwrap();
-        list.get_type()
-            .require_flatten_list()
-            .map_err(|error| error.with_span(list.span))?;
+        if let Some(&seed) = arguments.get(1) {
+            let seed = seed.coerce(context, TypeHandle::REAL, false)?;
 
-        if let Some(seed) = arguments.next() {
-            let seed = seed.coerce(context, &Type::Real, false)?;
-
-            Ok(Value::Binary {
-                kind: BinaryKind::ShuffleSeeded,
-                result_type: list.get_type(),
-                lhs: Box::new(list),
-                rhs: Box::new(seed),
+            Ok(ValueEntry {
+                value: Value::Binary {
+                    kind: BinaryKind::ShuffleSeeded,
+                    lhs: list,
+                    rhs: seed,
+                },
+                type_handle: list_type,
+                span,
             })
         }
         else {
-            Ok(Value::Unary {
-                kind: UnaryKind::Shuffle,
-                result_type: list.get_type(),
-                operand: Box::new(list),
+            Ok(ValueEntry {
+                value: Value::Unary {
+                    kind: UnaryKind::Shuffle,
+                    operand: list,
+                },
+                type_handle: list_type,
+                span,
             })
         }
     },
@@ -881,18 +926,20 @@ pub static UNIQUE: IntrinsicFunction = IntrinsicFunction {
     identifier: "unique",
     min_arity: 1,
     max_arity: Some(1),
-    interpret_call: |_, _, _, arguments| {
+    interpret_call: |context, _, span, arguments| {
         // It seems like unique() accepts basically any type, so don't bother checking the item type
         // FIXME: per desmos code, only distributions cannot be uniqued
-        let list = arguments.into_iter().next().unwrap();
-        list.get_type()
-            .require_flatten_list()
-            .map_err(|error| error.with_span(list.span))?;
+        let list = arguments[0];
+        let list_type = list.get_type(&context.values);
+        context.types.expect_list_type(list_type, list.get_span(&context.values))?;
 
-        Ok(Value::Unary {
-            kind: UnaryKind::Unique,
-            result_type: list.get_type(),
-            operand: Box::new(list),
+        Ok(ValueEntry {
+            value: Value::Unary {
+                kind: UnaryKind::Unique,
+                operand: list,
+            },
+            type_handle: list_type,
+            span,
         })
     },
 };
@@ -901,17 +948,19 @@ pub static PREFIX_SUM: IntrinsicFunction = IntrinsicFunction {
     identifier: "prefix_sum",
     min_arity: 1,
     max_arity: Some(1),
-    interpret_call: |_, _, _, arguments| {
-        let list = arguments.into_iter().next().unwrap();
-        list.get_type()
-            .require_flatten_list()
-            .and_then(|item_type| item_type.require_numeric_or_point().map(|()| item_type))
-            .map_err(|error| error.with_span(list.span))?;
+    interpret_call: |context, _, span, arguments| {
+        let list = arguments[0];
+        context.types.expect_list_type(list.get_type(&context.values), list.get_span(&context.values))?;
 
-        Ok(Value::Unary {
-            kind: UnaryKind::PrefixSum,
-            result_type: list.get_type(),
-            operand: Box::new(list),
+        let list = list.coerce(context, TypeHandle::ARITHMETIC_SCALAR_OR_POINT, true)?;
+
+        Ok(ValueEntry {
+            value: Value::Unary {
+                kind: UnaryKind::PrefixSum,
+                operand: list,
+            },
+            type_handle: list.get_type(&context.values),
+            span,
         })
     },
 };
@@ -919,19 +968,19 @@ pub static PREFIX_SUM: IntrinsicFunction = IntrinsicFunction {
 // ------ Statistics ------
 
 pub static MEAN: IntrinsicFunction = broadcastable_intrinsic!(
-    "mean", [Type::union([Type::Real, Type::real_point_2d(), Type::real_point_3d()])] => Mean
+    "mean", [TypeHandle::REAL_SCALAR_OR_POINT] => Mean
 );
 
 pub static MEDIAN: IntrinsicFunction = broadcastable_intrinsic!(
-    "median", [Type::Real] => Median
+    "median", [TypeHandle::REAL] => Median
 );
 
 pub static MIN: IntrinsicFunction = broadcastable_intrinsic!(
-    "min", [Type::union([Type::Bool, Type::Int, Type::Real])] => Min
+    "min", [TypeHandle::NUMERIC_SCALAR] => Min
 );
 
 pub static MAX: IntrinsicFunction = broadcastable_intrinsic!(
-    "max", [Type::union([Type::Bool, Type::Int, Type::Real])] => Max
+    "max", [TypeHandle::NUMERIC_SCALAR] => Max
 );
 
 // QUARTILE
@@ -959,23 +1008,11 @@ pub static MAX: IntrinsicFunction = broadcastable_intrinsic!(
 // STATS
 
 pub static COUNT: IntrinsicFunction = broadcastable_intrinsic!(
-    "count", [?] => Count, Type::Int
+    "count", [?] => Count, TypeHandle::INT
 );
 
 pub static TOTAL: IntrinsicFunction = broadcastable_intrinsic!(
-    "total", [Type::union([
-        Type::Int,
-        Type::Real,
-        Type::point_2d(
-            Type::union([Type::Int, Type::Real]),
-            Type::union([Type::Int, Type::Real]),
-        ),
-        Type::point_3d(
-            Type::union([Type::Int, Type::Real]),
-            Type::union([Type::Int, Type::Real]),
-            Type::union([Type::Int, Type::Real]),
-        ),
-    ])] => Total
+    "total", [TypeHandle::ARITHMETIC_SCALAR_OR_POINT] => Total
 );
 
 // @total(arguments) > 0
@@ -983,21 +1020,24 @@ pub static ANY: IntrinsicFunction = IntrinsicFunction {
     identifier: "any",
     min_arity: 1,
     max_arity: None,
-    interpret_call: |target, context, local_context, arguments| {
-        let arguments: Box<[_]> = arguments
-            .into_iter()
-            .map(|argument| argument.coerce(context, &Type::Bool, true))
-            .collect::<crate::Result<_>>()?;
-        let total = (TOTAL.interpret_call)(target, context, local_context, arguments)?;
-        let list_state = total.get_type().list_state();
+    interpret_call: |context, local_context, span, mut arguments| {
+        for argument in &mut arguments {
+            *argument = argument.coerce(context, TypeHandle::BOOL, true)?;
+        }
 
-        Ok(Value::InequalityChain {
-            lhs: Box::new(total.into()),
-            chain: Box::new([(
-                InequalityKind::GreaterThan,
-                Value::Int(0).into(),
-            )]),
-            result_type: Type::Bool.unflatten_list(list_state),
+        let total = (TOTAL.interpret_call)(context, local_context, span, arguments)?;
+        let list_state = total.type_handle.flatten_list(&context.types).0;
+
+        Ok(ValueEntry {
+            value: Value::InequalityChain {
+                lhs: total.register(&mut context.values),
+                chain: Box::new([(
+                    InequalityKind::GreaterThan,
+                    ValueHandle::ZERO_INT,
+                )]),
+            },
+            type_handle: TypeHandle::BOOL.unflatten_list(&mut context.types, list_state, span)?,
+            span,
         })
     },
 };
@@ -1007,28 +1047,33 @@ pub static ALL: IntrinsicFunction = IntrinsicFunction {
     identifier: "all",
     min_arity: 1,
     max_arity: None,
-    interpret_call: |target, context, local_context, arguments| {
-        let arguments: Box<[_]> = arguments
-            .into_iter()
-            .map(|argument| {
-                let list_state = argument.get_type().list_state();
+    interpret_call: |context, local_context, span, mut arguments| {
+        for argument in &mut arguments {
+            let coerced = argument.coerce(context, TypeHandle::BOOL, true)?;
+            let coerced_span = coerced.get_span(&context.values);
+            let list_state = coerced.get_type(&context.values).flatten_list(&context.types).0;
 
-                Ok(Value::Unary {
+            *argument = context.values.register(ValueEntry {
+                value: Value::Unary {
                     kind: UnaryKind::LogicalNot,
-                    operand: Box::new(argument.coerce(context, &Type::Bool, true)?),
-                    result_type: Type::Bool.unflatten_list(list_state),
-                }.into())
-            })
-            .collect::<crate::Result<_>>()?;
-        let total = (TOTAL.interpret_call)(target, context, local_context, arguments)?;
+                    operand: coerced,
+                },
+                type_handle: TypeHandle::BOOL.unflatten_list(&mut context.types, list_state, coerced_span)?,
+                span: coerced_span,
+            });
+        }
 
-        let list_state = total.get_type().list_state();
+        let total = (TOTAL.interpret_call)(context, local_context, span, arguments)?;
+        let list_state = total.type_handle.flatten_list(&context.types).0;
 
-        Ok(Value::Binary {
-            kind: BinaryKind::Equal,
-            lhs: Box::new(total.into()),
-            rhs: Box::new(Value::Int(0).into()),
-            result_type: Type::Bool.unflatten_list(list_state),
+        Ok(ValueEntry {
+            value: Value::Binary {
+                kind: BinaryKind::Equal,
+                lhs: total.register(&mut context.values),
+                rhs: ValueHandle::ZERO_INT,
+            },
+            type_handle: TypeHandle::BOOL.unflatten_list(&mut context.types, list_state, span)?,
+            span,
         })
     },
 };
@@ -1067,14 +1112,14 @@ fn interpret_random_call_end(
     arguments: impl IntoIterator<Item = ValueHandle>,
     source: Option<Box<ValueHandle>>,
     source_type: Type,
-) -> crate::Result<Value> {
+) -> crate::Result<ValueEntry> {
     let mut arguments = arguments.into_iter();
 
     if let Some(sample_count) = arguments.next() {
-        let sample_count = sample_count.coerce(context, &Type::Int, false)?;
+        let sample_count = sample_count.coerce(context, TypeHandle::INT, false)?;
 
         if let Some(seed) = arguments.next() {
-            let seed = seed.coerce(context, &Type::Real, false)?;
+            let seed = seed.coerce(context, TypeHandle::REAL, false)?;
 
             Ok(Value::RandomSeeded {
                 source,
@@ -1104,8 +1149,8 @@ pub static RANDOM: IntrinsicFunction = IntrinsicFunction {
     identifier: "random",
     min_arity: 0,
     max_arity: Some(2),
-    interpret_call: |_, _, _, arguments| {
-        interpret_random_call_end(arguments, None, Type::Real)
+    interpret_call: |context, _, span, arguments| {
+        interpret_random_call_end(arguments, None, TypeHandle::REAL)
     },
 };
 
@@ -1113,13 +1158,13 @@ pub static CHOOSE_RANDOM: IntrinsicFunction = IntrinsicFunction {
     identifier: "choose_random",
     min_arity: 1,
     max_arity: Some(3),
-    interpret_call: |_, _, _, arguments| {
+    interpret_call: |context, _, span, arguments| {
         let mut arguments = arguments.into_iter();
 
         let source = arguments.next().unwrap();
         let source_type = match source.get_type().into_flatten_list() {
             (Some(ListState::IsList), item_type) if item_type != Type::Distribution => item_type,
-            (None, Type::Distribution) => Type::Real,
+            (None, TypeHandle::DISTRIBUTION) => TypeHandle::REAL,
             _ => return Err(Box::new(crate::Error {
                 kind: crate::ErrorKind::ExpectedListOrDistributionType {
                     got_type: source.get_type().to_string(),
@@ -1147,18 +1192,18 @@ pub static CHOOSE_RANDOM: IntrinsicFunction = IntrinsicFunction {
 // STRICT_INTERSECTION
 
 pub static SEGMENT: IntrinsicFunction = broadcastable_intrinsic!(
-    "segment", (Type::real_point_2d(), Type::real_point_2d()) => SegmentFromPoints2D, Type::Segment
+    "segment", (Type::real_point_2d(), Type::real_point_2d()) => SegmentFromPoints2D, TypeHandle::SEGMENT
 );
 
 pub static SEGMENT3D: IntrinsicFunction = broadcastable_intrinsic!(
-    "segment3d", (Type::real_point_3d(), Type::real_point_3d()) => SegmentFromPoints3D, Type::Segment3D
+    "segment3d", (Type::real_point_3d(), Type::real_point_3d()) => SegmentFromPoints3D, TypeHandle::SEGMENT3D
 );
 
 pub static LINE: IntrinsicFunction = IntrinsicFunction {
     identifier: "line",
     min_arity: 1,
     max_arity: Some(2),
-    interpret_call: |_, _, _, arguments| {
+    interpret_call: |context, _, span, arguments| {
         let mut arguments = arguments.into_iter();
 
         let first_argument = arguments.next().unwrap();
@@ -1182,8 +1227,8 @@ pub static LINE: IntrinsicFunction = IntrinsicFunction {
         }
         else {
             let segment_or_ray = first_argument.coerce(context, &Type::union([
-                Type::Segment,
-                Type::Ray,
+                TypeHandle::SEGMENT,
+                TypeHandle::RAY,
             ]), true)?;
 
             let (list_state, argument_type) = segment_or_ray.get_type().into_flatten_list();
@@ -1202,15 +1247,15 @@ pub static LINE: IntrinsicFunction = IntrinsicFunction {
 };
 
 pub static RAY: IntrinsicFunction = broadcastable_intrinsic!(
-    "ray", (Type::real_point_2d(), Type::real_point_2d()) => RayFromPoints2D, Type::Ray
+    "ray", (Type::real_point_2d(), Type::real_point_2d()) => RayFromPoints2D, TypeHandle::RAY
 );
 
 pub static VECTOR: IntrinsicFunction = broadcastable_intrinsic!(
-    "vector", (Type::real_point_2d(), Type::real_point_2d()) => VectorFromPoints2D, Type::Vector
+    "vector", (Type::real_point_2d(), Type::real_point_2d()) => VectorFromPoints2D, TypeHandle::VECTOR
 );
 
 pub static VECTOR3D: IntrinsicFunction = broadcastable_intrinsic!(
-    "vector3d", (Type::real_point_3d(), Type::real_point_3d()) => VectorFromPoints3D, Type::Vector3D
+    "vector3d", (Type::real_point_3d(), Type::real_point_3d()) => VectorFromPoints3D, TypeHandle::VECTOR3D
 );
 
 // PARALLEL
@@ -1221,14 +1266,14 @@ pub static CIRCLE: IntrinsicFunction = IntrinsicFunction {
     identifier: "circle",
     min_arity: 2,
     max_arity: Some(2),
-    interpret_call: |_, _, _, arguments| {
+    interpret_call: |context, _, span, arguments| {
         let mut arguments = arguments.into_iter();
 
         let lhs = arguments.next().unwrap()
             .coerce(context, &Type::real_point_2d(), true)?;
         let rhs = arguments.next().unwrap()
             .coerce(context, &Type::union([
-                Type::Real,
+                TypeHandle::REAL,
                 Type::real_point_2d(),
             ]), true)?;
 
@@ -1250,42 +1295,42 @@ pub static CIRCLE: IntrinsicFunction = IntrinsicFunction {
 };
 
 pub static SPHERE3D: IntrinsicFunction = broadcastable_intrinsic!(
-    "sphere3d", (Type::real_point_3d(), Type::Real) => SphereFromRadius3D, Type::Sphere3D
+    "sphere3d", (Type::real_point_3d(), TypeHandle::REAL) => SphereFromRadius3D, TypeHandle::SPHERE3D
 );
 
 pub static ARC: IntrinsicFunction = broadcastable_intrinsic!(
-    "arc", (Type::real_point_2d(), Type::real_point_2d(), Type::real_point_2d()) => Arc2D, Type::Arc
+    "arc", (Type::real_point_2d(), Type::real_point_2d(), Type::real_point_2d()) => Arc2D, TypeHandle::ARC
 );
 
 pub static ANGLE: IntrinsicFunction = broadcastable_intrinsic!(
-    "angle", (Type::real_point_2d(), Type::real_point_2d(), Type::real_point_2d()) => UndirectedAngle2D, Type::Angle
+    "angle", (Type::real_point_2d(), Type::real_point_2d(), Type::real_point_2d()) => UndirectedAngle2D, TypeHandle::ANGLE
 );
 
 pub static DIRECTED_ANGLE: IntrinsicFunction = broadcastable_intrinsic!(
-    "directed_angle", (Type::real_point_2d(), Type::real_point_2d(), Type::real_point_2d()) => DirectedAngle2D, Type::DirectedAngle
+    "directed_angle", (Type::real_point_2d(), Type::real_point_2d(), Type::real_point_2d()) => DirectedAngle2D, TypeHandle::DIRECTEDANGLE
 );
 
 pub static POLYGON: IntrinsicFunction = broadcastable_intrinsic!(
-    "polygon", [Type::real_point_2d()] => Polygon2D, Type::Polygon
+    "polygon", [Type::real_point_2d()] => Polygon2D, TypeHandle::POLYGON
 );
 
 pub static RECT: IntrinsicFunction = broadcastable_intrinsic!(
-    "rect", (Type::real_point_2d(), Type::real_point_2d()) => RectangleFromPoints2D, Type::Polygon
+    "rect", (Type::real_point_2d(), Type::real_point_2d()) => RectangleFromPoints2D, TypeHandle::POLYGON
 );
 
 pub static TRIANGLE3D: IntrinsicFunction = broadcastable_intrinsic!(
-    "triangle", (Type::real_point_3d(), Type::real_point_3d(), Type::real_point_3d()) => Triangle3D, Type::Triangle3D
+    "triangle", (Type::real_point_3d(), Type::real_point_3d(), Type::real_point_3d()) => Triangle3D, TypeHandle::TRIANGLE3D
 );
 
 pub static GLIDER: IntrinsicFunction = broadcastable_intrinsic!(
     "glider", (Type::union([
-        Type::Segment,
-        Type::Circle,
-        Type::Line,
-        Type::Ray,
-        Type::Arc,
-        Type::Polygon,
-    ]), Type::Real) => Glider2D, Type::real_point_2d()
+        TypeHandle::SEGMENT,
+        TypeHandle::CIRCLE,
+        TypeHandle::LINE,
+        TypeHandle::RAY,
+        TypeHandle::ARC,
+        TypeHandle::POLYGON,
+    ]), TypeHandle::REAL) => Glider2D, Type::real_point_2d()
 );
 
 // ------ Properties & Measurements ------
@@ -1299,35 +1344,35 @@ pub static GLIDER: IntrinsicFunction = broadcastable_intrinsic!(
 // LENGTH
 
 pub static AREA: IntrinsicFunction = broadcastable_intrinsic!(
-    "area", (Type::Polygon) => AreaOfPolygon, Type::Real
+    "area", (TypeHandle::POLYGON) => AreaOfPolygon, TypeHandle::REAL
 );
 
 pub static PERIMETER: IntrinsicFunction = broadcastable_intrinsic!(
-    "perimeter", (Type::Polygon) => PerimeterOfPolygon, Type::Real
+    "perimeter", (TypeHandle::POLYGON) => PerimeterOfPolygon, TypeHandle::REAL
 );
 
 pub static VERTICES: IntrinsicFunction = strict_intrinsic!(
-    "vertices", (Type::Polygon) => VerticesOfPolygon, Type::real_point_2d().into_list(ListState::IsList)
+    "vertices", (TypeHandle::POLYGON) => VerticesOfPolygon, Type::real_point_2d().into_list(ListState::IsList)
 );
 
 pub static ANGLES: IntrinsicFunction = strict_intrinsic!(
-    "angles", (Type::Polygon) => UndirectedAnglesOfPolygon, Type::Angle.into_list(ListState::IsList)
+    "angles", (TypeHandle::POLYGON) => UndirectedAnglesOfPolygon, Type::Angle.into_list(ListState::IsList)
 );
 
 pub static DIRECTED_ANGLES: IntrinsicFunction = strict_intrinsic!(
-    "directed_angles", (Type::Polygon) => DirectedAnglesOfPolygon, Type::DirectedAngle.into_list(ListState::IsList)
+    "directed_angles", (TypeHandle::POLYGON) => DirectedAnglesOfPolygon, Type::DirectedAngle.into_list(ListState::IsList)
 );
 
 pub static SEGMENTS: IntrinsicFunction = strict_intrinsic!(
-    "segments", (Type::Polygon) => SegmentsOfPolygon, Type::Segment.into_list(ListState::IsList)
+    "segments", (TypeHandle::POLYGON) => SegmentsOfPolygon, Type::Segment.into_list(ListState::IsList)
 );
 
 pub static RADIUS: IntrinsicFunction = broadcastable_intrinsic!(
-    "radius", (Type::Circle) => RadiusOfCircle, Type::Real
+    "radius", (TypeHandle::CIRCLE) => RadiusOfCircle, TypeHandle::REAL
 );
 
 pub static CENTER: IntrinsicFunction = broadcastable_intrinsic!(
-    "center", (Type::Circle) => CenterOfCircle, Type::Real
+    "center", (TypeHandle::CIRCLE) => CenterOfCircle, TypeHandle::REAL
 );
 
 // COTERMINAL
@@ -1338,7 +1383,7 @@ pub static MIDPOINT: IntrinsicFunction = IntrinsicFunction {
     identifier: "midpoint",
     min_arity: 1,
     max_arity: Some(2),
-    interpret_call: |_, _, _, arguments| {
+    interpret_call: |context, _, span, arguments| {
         let mut arguments = arguments.into_iter();
 
         let point_1_or_segment = arguments.next().unwrap();
@@ -1372,8 +1417,8 @@ pub static MIDPOINT: IntrinsicFunction = IntrinsicFunction {
         }
         else {
             let segment = point_1_or_segment.coerce(context, &Type::union([
-                Type::Segment,
-                Type::Segment3D,
+                TypeHandle::SEGMENT,
+                TypeHandle::SEGMENT3D,
             ]), true)?;
             let (list_state, segment_type) = segment.get_type().into_flatten_list();
 
@@ -1396,9 +1441,9 @@ fn interpret_start_end_call(
     kind_2d: UnaryKind,
     kind_3d: UnaryKind,
     arguments: Box<[ValueHandle]>,
-) -> crate::Result<Value> {
+) -> crate::Result<ValueEntry> {
     let vector = arguments.into_iter().next().unwrap()
-        .coerce(context, &Type::union([Type::Vector, Type::Vector3D]), true)?;
+        .coerce(context, &Type::union([TypeHandle::VECTOR, TypeHandle::VECTOR3D]), true)?;
     let (list_state, vector_type) = vector.get_type().into_flatten_list();
 
     let (kind, point_type) = match vector_type {
@@ -1418,7 +1463,7 @@ pub static START: IntrinsicFunction = IntrinsicFunction {
     identifier: "start",
     min_arity: 1,
     max_arity: Some(1),
-    interpret_call: |_, _, _, arguments| interpret_start_end_call(
+    interpret_call: |context, _, span, arguments| interpret_start_end_call(
         UnaryKind::StartOfVector2D,
         UnaryKind::StartOfVector3D,
         arguments,
@@ -1429,7 +1474,7 @@ pub static END: IntrinsicFunction = IntrinsicFunction {
     identifier: "end",
     min_arity: 1,
     max_arity: Some(1),
-    interpret_call: |_, _, _, arguments| interpret_start_end_call(
+    interpret_call: |context, _, span, arguments| interpret_start_end_call(
         UnaryKind::EndOfVector2D,
         UnaryKind::EndOfVector3D,
         arguments,
@@ -1441,7 +1486,7 @@ pub static END: IntrinsicFunction = IntrinsicFunction {
 fn interpret_rotate_dilate_call(
     kind: TernaryKind,
     arguments: Box<[ValueHandle]>,
-) -> crate::Result<Value> {
+) -> crate::Result<ValueEntry> {
     let mut arguments = arguments.into_iter();
 
     let object = arguments.next().unwrap()
@@ -1452,7 +1497,7 @@ fn interpret_rotate_dilate_call(
         .coerce(context, &Type::real_point_2d(), true)?;
 
     let factor_or_angle = arguments.next().unwrap()
-        .coerce(context, &Type::Real, true)?;
+        .coerce(context, TypeHandle::REAL, true)?;
 
     let list_state = ListState::merge_all([
         object_list,
@@ -1473,7 +1518,7 @@ pub static DILATE: IntrinsicFunction = IntrinsicFunction {
     identifier: "dilate",
     min_arity: 3,
     max_arity: Some(3),
-    interpret_call: |_, _, _, arguments| interpret_rotate_dilate_call(
+    interpret_call: |context, _, span, arguments| interpret_rotate_dilate_call(
         TernaryKind::Dilate2D,
         arguments,
     ),
@@ -1483,7 +1528,7 @@ pub static ROTATE: IntrinsicFunction = IntrinsicFunction {
     identifier: "rotate",
     min_arity: 3,
     max_arity: Some(3),
-    interpret_call: |_, _, _, arguments| interpret_rotate_dilate_call(
+    interpret_call: |context, _, span, arguments| interpret_rotate_dilate_call(
         TernaryKind::Rotate2D,
         arguments,
     ),
@@ -1493,7 +1538,7 @@ pub static REFLECT: IntrinsicFunction = IntrinsicFunction {
     identifier: "reflect",
     min_arity: 2,
     max_arity: Some(2),
-    interpret_call: |_, _, _, arguments| {
+    interpret_call: |context, _, span, arguments| {
         let mut arguments = arguments.into_iter();
 
         let object = arguments.next().unwrap()
@@ -1521,7 +1566,7 @@ pub static TRANSLATE: IntrinsicFunction = IntrinsicFunction {
     identifier: "translate",
     min_arity: 2,
     max_arity: Some(3),
-    interpret_call: |_, _, _, arguments| {
+    interpret_call: |context, _, span, arguments| {
         let mut arguments = arguments.into_iter();
 
         let object = arguments.next().unwrap()
@@ -1550,7 +1595,7 @@ pub static TRANSLATE: IntrinsicFunction = IntrinsicFunction {
             })
         }
         else {
-            let vector = first_argument.coerce(context, &Type::Vector, true)?;
+            let vector = first_argument.coerce(context, TypeHandle::VECTOR, true)?;
 
             let list_state = ListState::merge(
                 object_list,
@@ -1570,14 +1615,14 @@ pub static TRANSLATE: IntrinsicFunction = IntrinsicFunction {
 fn interpret_rotation_dilation_call(
     kind: BinaryKind,
     arguments: Box<[ValueHandle]>,
-) -> crate::Result<Value> {
+) -> crate::Result<ValueEntry> {
     let mut arguments = arguments.into_iter();
 
     let point = arguments.next().unwrap()
         .coerce(context, &Type::real_point_2d(), true)?;
 
     let factor_or_angle = arguments.next().unwrap()
-        .coerce(context, &Type::Real, true)?;
+        .coerce(context, TypeHandle::REAL, true)?;
 
     let list_state = ListState::merge(
         point.get_type().list_state(),
@@ -1596,7 +1641,7 @@ pub static DILATION: IntrinsicFunction = IntrinsicFunction {
     identifier: "dilation",
     min_arity: 2,
     max_arity: Some(2),
-    interpret_call: |_, _, _, arguments| interpret_rotation_dilation_call(
+    interpret_call: |context, _, span, arguments| interpret_rotation_dilation_call(
         BinaryKind::Dilation2D,
         arguments,
     ),
@@ -1606,7 +1651,7 @@ pub static ROTATION: IntrinsicFunction = IntrinsicFunction {
     identifier: "rotation",
     min_arity: 2,
     max_arity: Some(2),
-    interpret_call: |_, _, _, arguments| interpret_rotation_dilation_call(
+    interpret_call: |context, _, span, arguments| interpret_rotation_dilation_call(
         BinaryKind::Rotation2D,
         arguments,
     ),
@@ -1616,11 +1661,11 @@ pub static REFLECTION: IntrinsicFunction = IntrinsicFunction {
     identifier: "reflection",
     min_arity: 1,
     max_arity: Some(1),
-    interpret_call: |_, _, _, arguments| {
+    interpret_call: |context, _, span, arguments| {
         let mut arguments = arguments.into_iter();
 
         let line = arguments.next().unwrap()
-            .coerce(context, &Type::Line, true)?;
+            .coerce(context, TypeHandle::LINE, true)?;
 
         Ok(Value::Unary {
             kind: UnaryKind::ReflectionByLine2D,
@@ -1635,7 +1680,7 @@ pub static TRANSLATION: IntrinsicFunction = IntrinsicFunction {
     identifier: "translation",
     min_arity: 1,
     max_arity: Some(1),
-    interpret_call: |_, _, _, arguments| {
+    interpret_call: |context, _, span, arguments| {
         let mut arguments = arguments.into_iter();
 
         let displacement = arguments.next().unwrap()
@@ -1653,11 +1698,11 @@ pub static APPLY: IntrinsicFunction = IntrinsicFunction {
     identifier: "apply",
     min_arity: 2,
     max_arity: Some(2),
-    interpret_call: |_, _, _, arguments| {
+    interpret_call: |context, _, span, arguments| {
         let mut arguments = arguments.into_iter();
 
         let transformation = arguments.next().unwrap()
-            .coerce(context, &Type::Transformation, true)?;
+            .coerce(context, TypeHandle::TRANSFORMATION, true)?;
 
         let object = arguments.next().unwrap()
             .coerce(context, &Type::transformable(), true)?;
@@ -1678,33 +1723,33 @@ pub static APPLY: IntrinsicFunction = IntrinsicFunction {
 };
 
 pub static COMPOSE: IntrinsicFunction = broadcastable_intrinsic!(
-    "compose", [Type::Transformation] => ComposeTransforms2D
+    "compose", [TypeHandle::TRANSFORMATION] => ComposeTransforms2D
 );
 
 pub static INVERSE: IntrinsicFunction = broadcastable_intrinsic!(
-    "inverse", (Type::Transformation) => InverseOfTransform2D
+    "inverse", (TypeHandle::TRANSFORMATION) => InverseOfTransform2D
 );
 
 // ------ Color ------
 
 pub static RGB: IntrinsicFunction = broadcastable_intrinsic!(
-    "rgb", (Type::Real, Type::Real, Type::Real) => Rgb, Type::Color
+    "rgb", (TypeHandle::REAL, TypeHandle::REAL, TypeHandle::REAL) => Rgb, TypeHandle::COLOR
 );
 
 pub static HSV: IntrinsicFunction = broadcastable_intrinsic!(
-    "hsv", (Type::Real, Type::Real, Type::Real) => Hsv, Type::Color
+    "hsv", (TypeHandle::REAL, TypeHandle::REAL, TypeHandle::REAL) => Hsv, TypeHandle::COLOR
 );
 
 pub static OKHSV: IntrinsicFunction = broadcastable_intrinsic!(
-    "okhsv", (Type::Real, Type::Real, Type::Real) => Okhsv, Type::Color
+    "okhsv", (TypeHandle::REAL, TypeHandle::REAL, TypeHandle::REAL) => Okhsv, TypeHandle::COLOR
 );
 
 pub static OKLAB: IntrinsicFunction = broadcastable_intrinsic!(
-    "oklab", (Type::Real, Type::Real, Type::Real) => Oklab, Type::Color
+    "oklab", (TypeHandle::REAL, TypeHandle::REAL, TypeHandle::REAL) => Oklab, TypeHandle::COLOR
 );
 
 pub static OKLCH: IntrinsicFunction = broadcastable_intrinsic!(
-    "oklch", (Type::Real, Type::Real, Type::Real) => Oklch, Type::Color
+    "oklch", (TypeHandle::REAL, TypeHandle::REAL, TypeHandle::REAL) => Oklch, TypeHandle::COLOR
 );
 
 // ------ Sound ------
@@ -1714,11 +1759,11 @@ pub static OKLCH: IntrinsicFunction = broadcastable_intrinsic!(
 // ------ Desmosify ------
 
 pub static BOOL_TO_INTERNAL: IntrinsicFunction = broadcastable_intrinsic!(
-    "bool_to_internal", (Type::Bool) => BoolToInternal, Type::InternalBool
+    "bool_to_internal", (TypeHandle::BOOL) => BoolToInternal, TypeHandle::INTERNALBOOL
 );
 
 pub static BOOL_FROM_INTERNAL: IntrinsicFunction = broadcastable_intrinsic!(
-    "bool_from_internal", (Type::InternalBool) => BoolFromInternal, Type::Bool
+    "bool_from_internal", (TypeHandle::INTERNALBOOL) => BoolFromInternal, TypeHandle::BOOL
 );
 
 // FIXME: this is broken for any enum that is not the default shape. to fix, generate a global list
@@ -1727,7 +1772,7 @@ pub static ENUM_VALUES: IntrinsicFunction = IntrinsicFunction {
     identifier: "enum_values",
     min_arity: 1,
     max_arity: Some(1),
-    interpret_call: |_, context, _, arguments| {
+    interpret_call: |_, context, _, span, arguments| {
         let enum_type = arguments.into_iter().next().unwrap();
         let Type::Meta { identifier } = enum_type.get_type() else {
             return Err(Box::new(crate::Error {
@@ -1766,7 +1811,7 @@ pub static ENUM_VALUE: IntrinsicFunction = IntrinsicFunction {
     identifier: "enum_value",
     min_arity: 2,
     max_arity: Some(2),
-    interpret_call: |_, context, _, arguments| {
+    interpret_call: |_, context, _, span, arguments| {
         let mut arguments = arguments.into_iter();
 
         let enum_type = arguments.next().unwrap();
@@ -1786,7 +1831,7 @@ pub static ENUM_VALUE: IntrinsicFunction = IntrinsicFunction {
         };
 
         let variant_ordinal = arguments.next().unwrap()
-            .coerce(context, &Type::Int, true)?;
+            .coerce(context, TypeHandle::INT, true)?;
         let list_state = variant_ordinal.get_type().list_state();
 
         let result_type = Type::Enum {
@@ -1855,7 +1900,7 @@ pub static IMAGE: IntrinsicFunction = IntrinsicFunction {
     identifier: "image",
     min_arity: 5,
     max_arity: Some(8),
-    interpret_call: |_, _, _, arguments| {
+    interpret_call: |context, _, span, arguments| {
         let mut arguments = arguments.into_iter();
 
         let url_value = arguments.next().unwrap();
@@ -1864,19 +1909,19 @@ pub static IMAGE: IntrinsicFunction = IntrinsicFunction {
         let name = name_value.get_const_str()?;
         let center = arguments.next().unwrap()
             .coerce(context, &Type::Point2D {
-                x_type: Box::new(Type::Real),
-                y_type: Box::new(Type::Real),
+                x_type: Box::new(TypeHandle::REAL),
+                y_type: Box::new(TypeHandle::REAL),
             }, true)?;
         let width = arguments.next().unwrap()
-            .coerce(context, &Type::Real, true)?;
+            .coerce(context, TypeHandle::REAL, true)?;
         let height = arguments.next().unwrap()
-            .coerce(context, &Type::Real, true)?;
+            .coerce(context, TypeHandle::REAL, true)?;
         let opacity = arguments.next()
             .unwrap_or(Value::Real(1.0).into())
-            .coerce(context, &Type::Real, true)?;
+            .coerce(context, TypeHandle::REAL, true)?;
         let angle = arguments.next()
             .unwrap_or(Value::Real(0.0).into())
-            .coerce(context, &Type::Real, true)?;
+            .coerce(context, TypeHandle::REAL, true)?;
         let background = arguments.next()
             .map_or(Ok(false), |background_value| {
                 background_value.kind
@@ -1915,7 +1960,7 @@ pub static CONCAT: IntrinsicFunction = IntrinsicFunction {
     identifier: "concat",
     min_arity: 0,
     max_arity: None,
-    interpret_call: |_, _, _, arguments| {
+    interpret_call: |context, _, span, arguments| {
         let mut result = String::new();
 
         for argument in arguments {

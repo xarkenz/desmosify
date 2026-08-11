@@ -54,10 +54,10 @@ impl<'a> GlobalContext<'a> {
         // Process type definitions first so they can be used to deduce the types of values.
         for declaration in declarations {
             let Declaration::Definition(Definition {
-                identifier,
-                kind: DefinitionKind::Type(definition),
-                span,
-            }) = declaration else {
+                                            identifier,
+                                            kind: DefinitionKind::Type(definition),
+                                            span,
+                                        }) = declaration else {
                 continue
             };
 
@@ -104,10 +104,10 @@ impl<'a> GlobalContext<'a> {
         // Register placeholder values for all value definitions.
         for declaration in declarations {
             let Declaration::Definition(Definition {
-                identifier,
-                kind: DefinitionKind::Value(definition),
-                span,
-            }) = declaration else {
+                                            identifier,
+                                            kind: DefinitionKind::Value(definition),
+                                            span,
+                                        }) = declaration else {
                 continue
             };
 
@@ -188,16 +188,14 @@ impl<'a> GlobalContext<'a> {
                 },
                 span,
             }))
-        }
-        else if self.globals.insert(identifier.clone(), global).is_some() {
+        } else if self.globals.insert(identifier.clone(), global).is_some() {
             Err(Box::new(crate::Error {
                 kind: crate::ErrorKind::ConflictingGlobalIdentifiers {
                     identifier,
                 },
                 span,
             }))
-        }
-        else {
+        } else {
             self.globals_order.push(identifier);
             Ok(())
         }
@@ -213,8 +211,7 @@ impl<'a> GlobalContext<'a> {
                 },
                 span,
             }))
-        }
-        else {
+        } else {
             self.action_definitions_order.push(identifier);
             Ok(())
         }
@@ -257,13 +254,11 @@ impl<'a> GlobalContext<'a> {
             TypeExpressionKind::Identifier(identifier) => {
                 if let Some(primitive) = TypeHandle::find_primitive(identifier) {
                     Ok(primitive)
-                }
-                else if let Some(&Value::Type(type_handle)) = self.find_global(identifier)
+                } else if let Some(&Value::Type(type_handle)) = self.find_global(identifier)
                     .map(|global| self.values.get(global.value))
                 {
                     Ok(type_handle)
-                }
-                else {
+                } else {
                     Err(Box::new(crate::Error {
                         kind: crate::ErrorKind::UnrecognizedType {
                             identifier: identifier.clone(),

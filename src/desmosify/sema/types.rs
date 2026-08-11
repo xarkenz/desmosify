@@ -219,6 +219,10 @@ impl TypeHandle {
         self.0.get() - 1
     }
 
+    pub fn get(self, registry: &TypeRegistry) -> &Type {
+        registry.get(self)
+    }
+
     pub fn into_list(self, registry: &mut TypeRegistry, state: ListState, span: Option<crate::Span>) -> crate::Result<Self> {
         registry.list_type(state, self, span)
     }
@@ -719,8 +723,8 @@ impl TypeRegistry {
 }
 
 macro_rules! known_type_handles {
-    ($($handle:ident $(@ $identifier:literal)? => ($($rest:tt)+)),* $(,)?) => {
-        known_type_handles!(@handle_consts 0usize, $($handle)*);
+    ($($(#[$meta:meta])* $handle:ident $(@ $identifier:literal)? => ($($rest:tt)+)),* $(,)?) => {
+        known_type_handles!(@handle_consts 0usize, $($(#[$meta])* $handle)*);
 
         impl TypeHandle {
             pub fn find_primitive(identifier: &str) -> Option<Self> {
@@ -736,8 +740,9 @@ macro_rules! known_type_handles {
         ];
     };
     // I wish I could use ${index(0)} and ${count(0)} and have it be stable.
-    (@handle_consts $index:expr, $handle:ident $($rest:ident)*) => {
+    (@handle_consts $index:expr, $(#[$meta:meta])* $handle:ident $($rest:tt)*) => {
         impl TypeHandle {
+            $(#[$meta])*
             pub const $handle: Self = Self::new($index);
         }
         known_type_handles!(@handle_consts $index + 1usize, $($rest)*);
@@ -782,38 +787,59 @@ known_type_handles! {
     STR @ "str" => (Type::Str),
     IMAGE @ "image" => (Type::Image),
     INTRINSIC_FUNCTION => (Type::IntrinsicFunction),
+    /// `(real, real)`
     REAL_POINT_2D => (Type::Point2D {
         x_type: TypeHandle::REAL,
         y_type: TypeHandle::REAL,
     }),
+    /// `(real, real, real)`
     REAL_POINT_3D => (Type::Point3D {
         x_type: TypeHandle::REAL,
         y_type: TypeHandle::REAL,
         z_type: TypeHandle::REAL,
     }),
+    /// `real | (real, real) | (real, real, real)`
     REAL_SCALAR_OR_POINT => (|| Type::union([
         TypeHandle::REAL,
         TypeHandle::REAL_POINT_2D,
         TypeHandle::REAL_POINT_3D,
     ])),
+    /// `bool | int | real`
+    NUMERIC_SCALAR => (|| Type::union([
+        TypeHandle::BOOL,
+        TypeHandle::INT,
+        TypeHandle::REAL,
+    ])),
+    /// `int | real`
     ARITHMETIC_SCALAR => (|| Type::union([
         TypeHandle::INT,
         TypeHandle::REAL,
     ])),
+    /// `(ARITHMETIC_SCALAR, ARITHMETIC_SCALAR)`
     ARITHMETIC_POINT_2D => (Type::Point2D {
         x_type: TypeHandle::ARITHMETIC_SCALAR,
         y_type: TypeHandle::ARITHMETIC_SCALAR,
     }),
+    /// `(ARITHMETIC_SCALAR, ARITHMETIC_SCALAR, ARITHMETIC_SCALAR)`
     ARITHMETIC_POINT_3D => (Type::Point3D {
         x_type: TypeHandle::ARITHMETIC_SCALAR,
         y_type: TypeHandle::ARITHMETIC_SCALAR,
         z_type: TypeHandle::ARITHMETIC_SCALAR,
     }),
+    /// `ARITHMETIC_SCALAR | ARITHMETIC_POINT_2D | ARITHMETIC_POINT_3D`
     ARITHMETIC_SCALAR_OR_POINT => (|| Type::union([
         TypeHandle::ARITHMETIC_SCALAR,
         TypeHandle::ARITHMETIC_POINT_2D,
         TypeHandle::ARITHMETIC_POINT_3D,
     ])),
+    /// `bool | int | real | complex`
+    ANY_SORTABLE => (|| Type::union([
+        TypeHandle::BOOL,
+        TypeHandle::INT,
+        TypeHandle::REAL,
+        TypeHandle::COMPLEX,
+    ])),
+    /// `polygon | segment | circle | arc | line | ray | vector | angle | directed_angle | (real, real)`
     ANY_TRANSFORMABLE => (|| Type::union([
         TypeHandle::POLYGON,
         TypeHandle::SEGMENT,
@@ -826,6 +852,7 @@ known_type_handles! {
         TypeHandle::DIRECTED_ANGLE,
         TypeHandle::REAL_POINT_2D,
     ])),
+    /// `segment | line | ray | vector`
     ANY_LINE_LIKE => (|| Type::union([
         TypeHandle::SEGMENT,
         TypeHandle::LINE,
