@@ -175,7 +175,7 @@ pub enum TernaryKind {
     /// first = start_leg, second = center, third = end_leg
     DirectedAngle2D,
     /// first = a, second = b, third = c
-    Triangle3D,
+    TriangleFromVertices3D,
     /// first = object, second = point, third = factor
     Dilate2D,
     /// first = object, second = point, third = angle
@@ -212,7 +212,7 @@ pub enum ReducerKind {
     Mad,
     Count,
     Total,
-    Polygon2D,
+    PolygonFromVertices2D,
     ComposeTransforms2D,
 }
 
@@ -600,6 +600,28 @@ impl ValueHandle {
 
     pub fn coerce(self, context: &mut GlobalContext, to_type: TypeHandle, allow_list: bool) -> crate::Result<Self> {
         context.coerce_value(self, to_type, allow_list)
+    }
+
+    pub fn expect_const_bool(self, context: &GlobalContext) -> crate::Result<bool> {
+        self.get(&context.values)
+            .as_const_bool()
+            .ok_or_else(|| Box::new(crate::Error {
+                kind: crate::ErrorKind::ExpectedConstant {
+                    type_identifier: TypeHandle::BOOL.repr(&context.types),
+                },
+                span: self.get_span(&context.values),
+            }))
+    }
+
+    pub fn expect_const_str(self, context: &GlobalContext) -> crate::Result<Rc<str>> {
+        self.get(&context.values)
+            .as_const_str()
+            .ok_or_else(|| Box::new(crate::Error {
+                kind: crate::ErrorKind::ExpectedConstant {
+                    type_identifier: TypeHandle::STR.repr(&context.types),
+                },
+                span: self.get_span(&context.values),
+            }))
     }
 }
 

@@ -1073,7 +1073,7 @@ impl<'ctx> GraphExpressionListBuilder<'ctx> {
                     (@operatorname "directedangle") Call {arguments}
                 ))
             }
-            TernaryKind::Triangle3D => {
+            TernaryKind::TriangleFromVertices3D => {
                 Ok(desmos_expression!(
                     (@operatorname "triangle") Call {arguments}
                 ))
@@ -1144,7 +1144,7 @@ impl<'ctx> GraphExpressionListBuilder<'ctx> {
             ReducerKind::Mad => "mad",
             ReducerKind::Count => "count",
             ReducerKind::Total => "total",
-            ReducerKind::Polygon2D => "polygon",
+            ReducerKind::PolygonFromVertices2D => "polygon",
             ReducerKind::ComposeTransforms2D => {
                 // This is a fake reducer for something that is actually a binary function, so we
                 // have to lower it into that format.

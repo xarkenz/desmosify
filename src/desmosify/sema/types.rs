@@ -98,7 +98,14 @@ pub enum Type {
 }
 
 impl Type {
-    pub fn union(variants: impl IntoIterator<Item = TypeHandle>) -> Self {
+    const fn list_of(item_type: TypeHandle) -> Self {
+        Self::List {
+            state: ListState::IsList,
+            item_type,
+        }
+    }
+
+    fn union(variants: impl IntoIterator<Item = TypeHandle>) -> Self {
         Self::Union {
             variants: variants.into_iter().collect(),
         }
@@ -221,6 +228,10 @@ impl TypeHandle {
 
     pub fn get(self, registry: &TypeRegistry) -> &Type {
         registry.get(self)
+    }
+
+    pub fn repr(self, registry: &TypeRegistry) -> Rc<str> {
+        registry.repr(self)
     }
 
     pub fn into_list(self, registry: &mut TypeRegistry, state: ListState, span: Option<crate::Span>) -> crate::Result<Self> {
@@ -798,11 +809,31 @@ known_type_handles! {
         y_type: TypeHandle::REAL,
         z_type: TypeHandle::REAL,
     }),
+    /// `real | (real, real)`
+    REAL_SCALAR_OR_POINT_2D => (|| Type::union([
+        TypeHandle::REAL,
+        TypeHandle::REAL_POINT_2D,
+    ])),
     /// `real | (real, real) | (real, real, real)`
     REAL_SCALAR_OR_POINT => (|| Type::union([
         TypeHandle::REAL,
         TypeHandle::REAL_POINT_2D,
         TypeHandle::REAL_POINT_3D,
+    ])),
+    /// `(real, real) | (real, real, real)`
+    ANY_REAL_POINT => (|| Type::union([
+        TypeHandle::REAL_POINT_2D,
+        TypeHandle::REAL_POINT_3D,
+    ])),
+    /// `segment | segment3d`
+    ANY_SEGMENT => (|| Type::union([
+        TypeHandle::SEGMENT,
+        TypeHandle::SEGMENT_3D,
+    ])),
+    /// `vector | vector3d`
+    ANY_VECTOR => (|| Type::union([
+        TypeHandle::VECTOR,
+        TypeHandle::VECTOR_3D,
     ])),
     /// `bool | int | real`
     NUMERIC_SCALAR => (|| Type::union([
@@ -832,6 +863,14 @@ known_type_handles! {
         TypeHandle::ARITHMETIC_POINT_2D,
         TypeHandle::ARITHMETIC_POINT_3D,
     ])),
+    /// `[segment]`
+    LIST_OF_SEGMENT => (Type::list_of(TypeHandle::SEGMENT)),
+    /// `[angle]`
+    LIST_OF_ANGLE => (Type::list_of(TypeHandle::ANGLE)),
+    /// `[directed_angle]`
+    LIST_OF_DIRECTED_ANGLE => (Type::list_of(TypeHandle::DIRECTED_ANGLE)),
+    /// `[(real, real)]`
+    LIST_OF_REAL_POINT_2D => (Type::list_of(TypeHandle::REAL_POINT_2D)),
     /// `bool | int | real | complex`
     ANY_SORTABLE => (|| Type::union([
         TypeHandle::BOOL,
@@ -858,5 +897,19 @@ known_type_handles! {
         TypeHandle::LINE,
         TypeHandle::RAY,
         TypeHandle::VECTOR,
+    ])),
+    /// `segment | ray`
+    SEGMENT_OR_RAY => (|| Type::union([
+        TypeHandle::SEGMENT,
+        TypeHandle::RAY,
+    ])),
+    /// `segment | circle | line | ray | arc | polygon`
+    ANY_GLIDER_COMPATIBLE => (|| Type::union([
+        TypeHandle::SEGMENT,
+        TypeHandle::CIRCLE,
+        TypeHandle::LINE,
+        TypeHandle::RAY,
+        TypeHandle::ARC,
+        TypeHandle::POLYGON,
     ])),
 }
