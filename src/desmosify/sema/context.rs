@@ -10,9 +10,9 @@ use crate::target::Target;
 #[derive(Debug)]
 pub struct GlobalContext<'a> {
     pub source_paths: &'a [PathBuf],
-    pub target: &'a mut dyn Target,
     pub types: TypeRegistry,
     pub values: ValueRegistry,
+    next_local_id: u64,
     globals: HashMap<Rc<str>, GlobalSymbol>,
     globals_order: Vec<Rc<str>>,
     actions: HashMap<Rc<str>, GlobalSymbol>,
@@ -21,12 +21,12 @@ pub struct GlobalContext<'a> {
 }
 
 impl<'a> GlobalContext<'a> {
-    pub fn initialize(source_paths: &'a [PathBuf], target: &'a mut dyn Target, declarations: &[Declaration]) -> crate::Result<Self> {
+    pub fn initialize(source_paths: &'a [PathBuf], target: &mut dyn Target, declarations: &[Declaration]) -> crate::Result<Self> {
         let mut context = Self {
             source_paths,
-            target,
             types: TypeRegistry::new(),
             values: ValueRegistry::new(),
+            next_local_id: 0,
             globals: HashMap::new(),
             globals_order: Vec::new(),
             actions: HashMap::new(),
@@ -35,7 +35,7 @@ impl<'a> GlobalContext<'a> {
         };
 
         // Load the core set of intrinsics.
-        context.intrinsics = get_core_intrinsics(context.target)
+        context.intrinsics = get_core_intrinsics(target)
             .map(|(identifier, intrinsic)| {
                 let identifier: Rc<str> = identifier.into();
                 (identifier.clone(), GlobalSymbol {
@@ -176,6 +176,12 @@ impl<'a> GlobalContext<'a> {
         }
 
         Ok(context)
+    }
+
+    pub fn create_local_id(&mut self) -> u64 {
+        let id = self.next_local_id;
+        self.next_local_id += 1;
+        id
     }
 
     pub fn declare_global(&mut self, global: GlobalSymbol, span: Option<crate::Span>) -> crate::Result<()> {

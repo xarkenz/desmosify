@@ -1963,23 +1963,28 @@ pub static TARGET_SYMBOL: IntrinsicFunction = IntrinsicFunction {
     min_arity: 1,
     max_arity: Some(1),
     interpret_call: |context, _, span, arguments| {
-        let symbol = arguments[0];
+        let reference = arguments[0];
 
-        let symbol_name = match symbol.get(&context.values) {
-            Value::GlobalReference(reference) => {
-                context.target.get_global_symbol_name(&reference.identifier)
+        // FIXME: Change how constant strings are handled, defer to actual target methods later on.
+        //        This is a hack to get around not having access to target here. Instead, this
+        //        intrinsic should produce something like a Value::GlobalTargetSymbol, and then it
+        //        would be converted into a Value::Str later by a constant folder which has access
+        //        to the target.
+        let symbol = match reference.get(&context.values) {
+            Value::GlobalReference(reference) if reference.kind.is_user_value() => {
+                format!("G_{{{}}}", crate::desmos::symbol::to_subscript(&reference.identifier))
             }
             Value::ActionReference(reference) => {
-                context.target.get_action_symbol_name(&reference.identifier)
+                format!("A_{{{}}}", crate::desmos::symbol::to_subscript(&reference.identifier))
             }
             _ => return Err(Box::new(crate::Error {
                 kind: crate::ErrorKind::ExpectedGlobalOrActionReference,
-                span: symbol.get_span(&context.values),
+                span: reference.get_span(&context.values),
             }))
         };
 
         Ok(ValueEntry {
-            value: Value::Str(symbol_name.into()),
+            value: Value::Str(symbol.into()),
             type_handle: TypeHandle::STR,
             span,
         })

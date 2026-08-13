@@ -42,12 +42,12 @@ pub fn invoke(args: &DesmosifyArgs) -> crate::Result<()> {
 
     println!("Analyzing program...");
 
-    let context = GlobalContext::initialize(&args.source_paths, target.as_mut(), &declarations)?;
-    let program = interpret_program(&args.source_paths, target.as_mut(), &context)?;
+    let mut context = GlobalContext::initialize(&args.source_paths, target.as_mut(), &declarations)?;
+    let program = interpret_program(&mut context, &declarations)?;
 
     println!("Compiling program...");
 
-    target.compile_to(&program, &args.output_path)?;
+    target.compile_to(&program, &mut context, &args.output_path)?;
 
     println!("Successfully written to '{}'.", args.output_path.display());
 

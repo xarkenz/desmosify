@@ -1,17 +1,21 @@
 use std::path::Path;
 use crate::cli::DesmosifyArgs;
+use crate::sema::context::GlobalContext;
 use crate::sema::Program;
 
 pub trait Target : std::fmt::Debug {
     fn name(&self) -> &str;
 
-    fn create_local_id(&mut self) -> u64;
-
     fn get_global_symbol_name(&mut self, identifier: &str) -> String;
 
     fn get_action_symbol_name(&mut self, identifier: &str) -> String;
 
-    fn compile_to(&mut self, program: &Program, output_path: &Path) -> crate::Result<()>;
+    fn compile_to<'a>(
+        &'a mut self,
+        program: &Program,
+        context: &'a mut GlobalContext<'a>,
+        output_path: &Path,
+    ) -> crate::Result<()>;
 }
 
 pub fn create_target(args: &DesmosifyArgs) -> crate::Result<Box<dyn Target>> {

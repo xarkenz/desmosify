@@ -2,6 +2,7 @@ use std::collections::HashSet;
 use crate::desmos::{BoxedGraphEntry, GraphExpression, GraphExpressionEntry};
 use crate::desmos::target::DesmosTargetContext;
 use crate::desmos_expression;
+use crate::sema::context::GlobalContext;
 
 #[derive(Debug)]
 pub struct FragileEncapsulator {
@@ -31,7 +32,7 @@ impl FragileEncapsulator {
         self.encapsulated_entries
     }
 
-    pub fn get_symbol(&mut self, name: &str, arity: usize, info: &mut DesmosTargetContext) -> GraphExpression {
+    pub fn get_symbol(&mut self, name: &str, arity: usize, context: &mut GlobalContext, target: &mut DesmosTargetContext) -> GraphExpression {
         let symbol = desmos_expression!({&self.prefix} Subscript (@alnum name));
 
         let signature = FragileSignature {
@@ -40,7 +41,7 @@ impl FragileEncapsulator {
         };
         if self.known_signatures.insert(signature) {
             self.encapsulated_entries.push(Box::new(GraphExpressionEntry {
-                id: info.create_entry_id(),
+                id: target.create_entry_id(),
                 folder_id: self.folder_id.clone(),
                 expression: if arity == 0 {
                     desmos_expression!(
@@ -48,7 +49,7 @@ impl FragileEncapsulator {
                     )
                 } else {
                     let argument_sequence = GraphExpression::Sequence {
-                        elements: std::iter::from_fn(|| Some(info.create_local_symbol()))
+                        elements: std::iter::from_fn(|| Some(target.create_local_symbol(context)))
                             .take(arity)
                             .collect()
                     };
@@ -102,13 +103,13 @@ impl FragileHandler {
         }
     }
 
-    pub fn get_symbol(&mut self, name: &str, arity: usize, info: &mut DesmosTargetContext) -> GraphExpression {
+    pub fn get_symbol(&mut self, name: &str, arity: usize, context: &mut GlobalContext, target: &mut DesmosTargetContext) -> GraphExpression {
         match self {
             Self::Inline => {
                 GraphExpression::OperatorName(name.into())
             }
             Self::Encapsulate(encapsulator) => {
-                encapsulator.get_symbol(name, arity, info)
+                encapsulator.get_symbol(name, arity, context, target)
             }
         }
     }

@@ -5,6 +5,7 @@ use crate::desmos::builder::fragile::FragileStrategy;
 use crate::desmos::builder::GraphExpressionListBuilder;
 use crate::desmos::symbol::SymbolTable;
 use crate::desmos_expression;
+use crate::sema::context::GlobalContext;
 use crate::sema::Program;
 use crate::target::Target;
 
@@ -51,7 +52,6 @@ pub struct DesmosTargetContext {
     global_symbols: SymbolTable,
     action_symbols: SymbolTable,
     next_entry_id: u64,
-    next_local_id: u64,
     next_inline_action_id: u64,
 }
 
@@ -63,7 +63,6 @@ impl DesmosTargetContext {
             global_symbols: SymbolTable::new(GraphExpression::Letter('G')),
             action_symbols: SymbolTable::new(GraphExpression::Letter('A')),
             next_entry_id: 0,
-            next_local_id: 0,
             next_inline_action_id: 0,
         }
     }
@@ -94,18 +93,12 @@ impl DesmosTargetContext {
         self.action_symbols.get_symbol(identifier)
     }
 
-    pub fn create_local_id(&mut self) -> u64 {
-        let id = self.next_local_id;
-        self.next_local_id += 1;
-        id
-    }
-
-    pub fn get_local_symbol(&mut self, id: u64) -> GraphExpression {
+    pub fn get_local_symbol(&self, id: u64) -> GraphExpression {
         desmos_expression!((@letter 'l') Subscript (@alnum id.to_string()))
     }
 
-    pub fn create_local_symbol(&mut self) -> GraphExpression {
-        let id = self.create_local_id();
+    pub fn create_local_symbol(&self, context: &mut GlobalContext) -> GraphExpression {
+        let id = context.create_local_id();
         self.get_local_symbol(id)
     }
 
@@ -121,10 +114,6 @@ impl Target for DesmosTargetContext {
         self.descriptor().name
     }
 
-    fn create_local_id(&mut self) -> u64 {
-        self.create_local_id()
-    }
-
     fn get_global_symbol_name(&mut self, identifier: &str) -> String {
         self.get_global_symbol(identifier).to_latex().to_string()
     }
@@ -133,11 +122,11 @@ impl Target for DesmosTargetContext {
         self.get_action_symbol(identifier).to_latex().to_string()
     }
 
-    fn compile_to(&mut self, program: &Program, output_path: &Path) -> crate::Result<()> {
+    fn compile_to<'a>(&'a mut self, program: &Program, context: &'a mut GlobalContext<'a>, output_path: &Path) -> crate::Result<()> {
         let state = GraphState {
             version: self.descriptor().version,
             graph: self.graph_settings.clone(),
-            expressions: GraphExpressionListBuilder::build_program(program, self)?,
+            expressions: GraphExpressionListBuilder::build_program(program, context, self)?,
             include_function_parameters_in_random_seed: true,
         };
 

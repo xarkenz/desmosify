@@ -26,6 +26,12 @@ pub enum GlobalSymbolKind {
     Action,
 }
 
+impl GlobalSymbolKind {
+    pub fn is_user_value(&self) -> bool {
+        matches!(self, Self::Immutable | Self::Variable)
+    }
+}
+
 #[derive(Clone, Debug)]
 pub struct GlobalSymbol {
     pub kind: GlobalSymbolKind,
@@ -375,6 +381,23 @@ pub enum Value {
 }
 
 impl Value {
+    pub fn alias_handle(&self) -> Option<ValueHandle> {
+        match self {
+            Value::Alias(handle) => Some(*handle),
+            Value::IntrinsicReference(reference) => Some(reference.value),
+            Value::GlobalReference(reference) => Some(reference.value),
+            Value::ActionReference(reference) => Some(reference.value),
+            _ => None
+        }
+    }
+
+    pub fn get_canonical<'a>(&'a self, registry: &'a ValueRegistry) -> &'a Self {
+        match self.alias_handle() {
+            Some(alias) => alias.get_canonical(registry).get(registry),
+            None => self,
+        }
+    }
+
     pub fn as_const_bool(&self) -> Option<bool> {
         match self {
             Self::Bool(value) => Some(*value),
@@ -468,6 +491,13 @@ impl ValueEntry {
             value: Value::Bool(value),
             type_handle: TypeHandle::BOOL,
             span: None,
+        }
+    }
+
+    pub fn get_canonical<'a>(&'a self, registry: &'a ValueRegistry) -> &'a Self {
+        match self.value.alias_handle() {
+            Some(alias) => alias.get_canonical(registry).entry(registry),
+            None => self,
         }
     }
 
@@ -598,6 +628,10 @@ impl ValueHandle {
         registry.get_span(self)
     }
 
+    pub fn get_canonical(self, registry: &ValueRegistry) -> Self {
+        registry.get_canonical(self)
+    }
+
     pub fn coerce(self, context: &mut GlobalContext, to_type: TypeHandle, allow_list: bool) -> crate::Result<Self> {
         context.coerce_value(self, to_type, allow_list)
     }
@@ -687,9 +721,9 @@ impl ValueRegistry {
         self.entries[handle.index()].span = span;
     }
 
-    pub fn ignoring_alias(&self, mut handle: ValueHandle) -> ValueHandle {
-        while let Value::Alias(alias_handle) = *self.get(handle) {
-            handle = alias_handle;
+    pub fn get_canonical(&self, mut handle: ValueHandle) -> ValueHandle {
+        while let Some(alias) = self.get(handle).alias_handle() {
+            handle = alias;
         }
         handle
     }

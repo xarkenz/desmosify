@@ -1,15 +1,15 @@
 use std::rc::Rc;
-use crate::sema::values::{ActionValue, ValueRegistryEntry};
+use crate::sema::values::{ActionValue, ValueHandle};
 
 #[derive(Clone, PartialEq, Debug)]
 pub struct ImageValue {
     pub url: Rc<str>,
     pub name: Rc<str>,
-    pub center: ValueRegistryEntry,
-    pub width: ValueRegistryEntry,
-    pub height: ValueRegistryEntry,
-    pub opacity: ValueRegistryEntry,
-    pub angle: ValueRegistryEntry,
+    pub center: ValueHandle,
+    pub width: ValueHandle,
+    pub height: ValueHandle,
+    pub opacity: ValueHandle,
+    pub angle: ValueHandle,
     pub background: bool,
 }
 
@@ -228,11 +228,11 @@ impl LineStyle {
 #[derive(Clone, Debug)]
 pub enum ProgramDisplayAttributeKind {
     Color {
-        value: ValueRegistryEntry,
+        value: ValueHandle,
     },
     Point {
-        opacity: Option<ValueRegistryEntry>,
-        size: Option<ValueRegistryEntry>,
+        opacity: Option<ValueHandle>,
+        size: Option<ValueHandle>,
         style: PointStyle,
         outline: bool,
     },
@@ -241,19 +241,19 @@ pub enum ProgramDisplayAttributeKind {
     },
     Label {
         text: Rc<str>,
-        opacity: Option<ValueRegistryEntry>,
-        size: Option<ValueRegistryEntry>,
-        angle: Option<ValueRegistryEntry>,
+        opacity: Option<ValueHandle>,
+        size: Option<ValueHandle>,
+        angle: Option<ValueHandle>,
         orientation: LabelOrientation,
         outline: bool,
     },
     Line {
-        opacity: Option<ValueRegistryEntry>,
-        width: Option<ValueRegistryEntry>,
+        opacity: Option<ValueHandle>,
+        width: Option<ValueHandle>,
         style: LineStyle,
     },
     Fill {
-        opacity: Option<ValueRegistryEntry>,
+        opacity: Option<ValueHandle>,
     },
     Click {
         action: ActionValue,
@@ -277,7 +277,7 @@ pub struct ProgramDisplayAttribute {
 
 #[derive(Clone, Debug)]
 pub struct ProgramDisplayElement {
-    pub value: ValueRegistryEntry,
+    pub value: ValueHandle,
     pub span: Option<crate::Span>,
     pub attributes: Box<[ProgramDisplayAttribute]>,
 }

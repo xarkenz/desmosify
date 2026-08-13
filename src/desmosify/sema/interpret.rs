@@ -263,9 +263,10 @@ pub fn process_parameters(
 ) -> Box<[ValueHandle]> {
     std::iter::zip(&parameters.0, parameter_types)
         .map(|(parameter, &parameter_type)| {
+            let id = context.create_local_id();
             let parameter_value = context.values.register(ValueEntry {
                 value: Value::Local {
-                    id: context.target.create_local_id(),
+                    id,
                 },
                 type_handle: parameter_type,
                 span: Some(parameter.identifier_span),
@@ -640,7 +641,8 @@ pub fn interpret_display_declaration(
         }
 
         elements.push(ProgramDisplayElement {
-            value: interpret_expression(context, &local_context, &element.expression)?,
+            value: interpret_expression(context, &local_context, &element.expression)?
+                .register(&mut context.values),
             span: Some(element.span),
             attributes: attributes.into_boxed_slice(),
         });
@@ -1015,9 +1017,10 @@ pub fn interpret_expression(
                     let list = interpret_expression(context, local_context, &map_loop.list)?;
                     let item_type = context.types.expect_list_type(list.type_handle, list.span)?;
 
+                    let id = context.create_local_id();
                     let local = context.values.register(ValueEntry {
                         value: Value::Local {
-                            id: context.target.create_local_id(),
+                            id,
                         },
                         type_handle: item_type,
                         span: Some(map_loop.identifier_span),
@@ -1081,7 +1084,7 @@ pub fn interpret_expression(
                     .register(&mut context.values)))
                 .collect::<crate::Result<_>>()?;
 
-            if let Value::IntrinsicFunction(intrinsic_function) = function.value {
+            if let Value::IntrinsicFunction(intrinsic_function) = function.get_canonical(&context.values).value {
                 intrinsic_function.interpret_call(context, local_context, Some(expression.span), arguments)
             }
             else if let Type::Function { signature } = context.types.get(function.type_handle) {
