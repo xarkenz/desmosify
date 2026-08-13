@@ -195,8 +195,11 @@ impl<'a> GraphExpressionListBuilder<'a> {
 
     pub fn translate_value(&mut self, value: ValueHandle) -> crate::Result<GraphExpression> {
         let span = value.get_span(&self.context.values);
+        let debug = format!("{:?}", value.get(&self.context.values));
         let unsupported_error = || Box::new(crate::Error {
-            kind: crate::ErrorKind::UnsupportedValue,
+            kind: crate::ErrorKind::UnsupportedValue {
+                debug,
+            },
             span,
         });
 
@@ -230,6 +233,9 @@ impl<'a> GraphExpressionListBuilder<'a> {
             }
             Value::Bool(value) => {
                 Ok(GraphExpression::Integer(value as i64))
+            }
+            Value::IntrinsicReference(ref reference) => {
+                self.translate_value(reference.value)
             }
             Value::GlobalReference(ref reference) => {
                 Ok(self.target.get_global_symbol(&reference.identifier))
@@ -467,7 +473,7 @@ impl<'a> GraphExpressionListBuilder<'a> {
         &mut self,
         kind: UnaryKind,
         operand: ValueHandle,
-        unsupported_error: impl Fn() -> Box<crate::Error>,
+        unsupported_error: impl FnOnce() -> Box<crate::Error>,
     ) -> crate::Result<GraphExpression> {
         let _ = unsupported_error; // We'll use you soon enough
 
@@ -776,7 +782,7 @@ impl<'a> GraphExpressionListBuilder<'a> {
         kind: BinaryKind,
         lhs: ValueHandle,
         rhs: ValueHandle,
-        unsupported_error: impl Fn() -> Box<crate::Error>,
+        unsupported_error: impl FnOnce() -> Box<crate::Error>,
     ) -> crate::Result<GraphExpression> {
         let _ = unsupported_error; // We'll use you soon enough
 
@@ -1045,7 +1051,7 @@ impl<'a> GraphExpressionListBuilder<'a> {
         first: ValueHandle,
         second: ValueHandle,
         third: ValueHandle,
-        unsupported_error: impl Fn() -> Box<crate::Error>,
+        unsupported_error: impl FnOnce() -> Box<crate::Error>,
     ) -> crate::Result<GraphExpression> {
         let _ = unsupported_error; // We'll use you soon enough
 
@@ -1129,7 +1135,7 @@ impl<'a> GraphExpressionListBuilder<'a> {
         kind: ReducerKind,
         arguments: impl IntoIterator<Item = ValueHandle>,
         is_arg_reducer: bool,
-        unsupported_error: impl Fn() -> Box<crate::Error>,
+        unsupported_error: impl FnOnce() -> Box<crate::Error>,
     ) -> crate::Result<GraphExpression> {
         let _ = unsupported_error; // We'll use you soon enough
 
@@ -1186,7 +1192,7 @@ impl<'a> GraphExpressionListBuilder<'a> {
         kind: DoubleReducerKind,
         lhs_list: ValueHandle,
         rhs_list: ValueHandle,
-        unsupported_error: impl Fn() -> Box<crate::Error>,
+        unsupported_error: impl FnOnce() -> Box<crate::Error>,
     ) -> crate::Result<GraphExpression> {
         let _ = unsupported_error; // We'll use you soon enough
 
@@ -1209,7 +1215,7 @@ impl<'a> GraphExpressionListBuilder<'a> {
         kind: ParameterizedReducerKind,
         list: ValueHandle,
         parameter: ValueHandle,
-        unsupported_error: impl Fn() -> Box<crate::Error>,
+        unsupported_error: impl FnOnce() -> Box<crate::Error>,
     ) -> crate::Result<GraphExpression> {
         let _ = unsupported_error; // We'll use you soon enough
 
@@ -1356,7 +1362,9 @@ impl<'a> GraphExpressionListBuilder<'a> {
                 })
             }
             _ => Err(Box::new(crate::Error {
-                kind: crate::ErrorKind::UnsupportedValue,
+                kind: crate::ErrorKind::UnsupportedValue {
+                    debug: format!("{:?}", action.kind),
+                },
                 span: action.span,
             }))
         }
@@ -1497,7 +1505,6 @@ impl<'a> GraphExpressionListBuilder<'a> {
                 span: None,
             }))
         }
-        let interval_ms = program_tickers[0].interval_ms;
 
         if program_tickers.iter().all(|ticker| ticker.tick_action.is_empty()) {
             self.ticker = None;
@@ -1511,7 +1518,7 @@ impl<'a> GraphExpressionListBuilder<'a> {
                         .map(|ticker| self.translate_action_value(&ticker.tick_action))
                         .collect::<crate::Result<_>>()?,
                 },
-                min_step: match interval_ms {
+                min_step: match program_tickers[0].interval_ms {
                     Some(interval_ms) => self.translate_value(interval_ms)?,
                     None => GraphExpression::Empty,
                 },
@@ -1524,7 +1531,7 @@ impl<'a> GraphExpressionListBuilder<'a> {
     pub fn add_public_line(&mut self, public_line: &ProgramPublicLine, folder_id: Option<String>) -> crate::Result<()> {
         let id = self.target.create_entry_id();
         let entry: BoxedGraphEntry = match public_line {
-            ProgramPublicLine::Expression(value) => match value.get(&self.context.values) {
+            ProgramPublicLine::Expression(value) => match value.get_canonical(&self.context.values).get(&self.context.values) {
                 Value::Str(text) => {
                     let text = text.trim();
                     if text.is_empty() {
@@ -1593,7 +1600,7 @@ impl<'a> GraphExpressionListBuilder<'a> {
     }
 
     pub fn add_display_element(&mut self, element: &ProgramDisplayElement) -> crate::Result<()> {
-        match element.value.get(&self.context.values) {
+        match element.value.get_canonical(&self.context.values).get(&self.context.values) {
             Value::Image(image) => {
                 let image = image.as_ref().clone();
                 self.add_image_display_element(element, &image)

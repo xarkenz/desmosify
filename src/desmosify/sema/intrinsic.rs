@@ -1774,7 +1774,7 @@ pub static ENUM_VALUES: IntrinsicFunction = IntrinsicFunction {
     max_arity: Some(1),
     interpret_call: |context, _, span, arguments| {
         let enum_type_value = arguments[0];
-        let &Value::Type(enum_type) = enum_type_value.get(&context.values) else {
+        let &Value::Type(enum_type) = enum_type_value.get_canonical(&context.values).get(&context.values) else {
             return Err(Box::new(crate::Error {
                 kind: crate::ErrorKind::ExpectedEnumTypeValue,
                 span: enum_type_value.get_span(&context.values),
@@ -1807,7 +1807,7 @@ pub static ENUM_VALUE: IntrinsicFunction = IntrinsicFunction {
     max_arity: Some(2),
     interpret_call: |context, _, span, arguments| {
         let enum_type_value = arguments[0];
-        let &Value::Type(enum_type) = enum_type_value.get(&context.values) else {
+        let &Value::Type(enum_type) = enum_type_value.get_canonical(&context.values).get(&context.values) else {
             return Err(Box::new(crate::Error {
                 kind: crate::ErrorKind::ExpectedEnumTypeValue,
                 span: enum_type_value.get_span(&context.values),

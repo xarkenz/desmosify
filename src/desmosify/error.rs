@@ -261,7 +261,9 @@ pub enum ErrorKind {
         lhs_type: Rc<str>,
         rhs: Rc<str>,
     },
-    UnsupportedValue,
+    UnsupportedValue {
+        debug: String,
+    },
     UnsupportedDisplayAttribute {
         key: Rc<str>,
     },
@@ -512,8 +514,8 @@ impl std::fmt::Display for ErrorKind {
             Self::InvalidAccessOperation { lhs_type, rhs } => {
                 write!(f, "'{lhs_type}' has no member '{rhs}'")
             }
-            Self::UnsupportedValue => {
-                write!(f, "this value is not supported by the target")
+            Self::UnsupportedValue { debug } => {
+                write!(f, "this value is not supported by the target: {debug}")
             }
             Self::UnsupportedDisplayAttribute { key } => {
                 write!(f, "display attribute '{key}' is not supported by the target")

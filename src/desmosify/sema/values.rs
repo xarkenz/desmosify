@@ -637,7 +637,8 @@ impl ValueHandle {
     }
 
     pub fn expect_const_bool(self, context: &GlobalContext) -> crate::Result<bool> {
-        self.get(&context.values)
+        self.get_canonical(&context.values)
+            .get(&context.values)
             .as_const_bool()
             .ok_or_else(|| Box::new(crate::Error {
                 kind: crate::ErrorKind::ExpectedConstant {
@@ -648,7 +649,8 @@ impl ValueHandle {
     }
 
     pub fn expect_const_str(self, context: &GlobalContext) -> crate::Result<Rc<str>> {
-        self.get(&context.values)
+        self.get_canonical(&context.values)
+            .get(&context.values)
             .as_const_str()
             .ok_or_else(|| Box::new(crate::Error {
                 kind: crate::ErrorKind::ExpectedConstant {

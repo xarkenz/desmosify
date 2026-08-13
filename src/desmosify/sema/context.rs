@@ -324,7 +324,10 @@ impl<'a> GlobalContext<'a> {
     }
 
     pub fn expect_coercible(&self, from_type: TypeHandle, to_type: TypeHandle, span: Option<crate::Span>) -> crate::Result<()> {
-        if !self.types.can_coerce(from_type, to_type) {
+        let (from_list, from_inner) = from_type.flatten_list(&self.types);
+        let (to_list, to_inner) = from_type.flatten_list(&self.types);
+
+        if !ListState::can_coerce(from_list, to_list, false) || !self.types.can_coerce(from_inner, to_inner) {
             Err(Box::new(crate::Error {
                 kind: crate::ErrorKind::MismatchedTypes {
                     expected_type: self.types.repr(to_type),

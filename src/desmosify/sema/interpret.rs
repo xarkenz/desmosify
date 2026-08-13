@@ -97,7 +97,7 @@ pub fn interpret_enumeration_definition(
     variants: &[EnumerationVariant],
 ) -> crate::Result<ProgramEnumeration> {
     let Some(&Value::Type(type_handle)) = context.find_global(&identifier)
-        .map(|global| context.values.get(global.value))
+        .map(|global| global.value.get(&context.values))
     else {
         panic!("no enum '{identifier}' found in context")
     };
@@ -234,7 +234,7 @@ pub fn interpret_action_definition(
     parameters: &ParameterList,
     action: &ActionExpression,
 ) -> crate::Result<ProgramAction> {
-    let Some(type_handle) = context.find_global(&identifier)
+    let Some(type_handle) = context.find_action(&identifier)
         .map(|global| context.values.get_type(global.value))
     else {
         panic!("no action '{identifier}' found in context")
@@ -1447,7 +1447,7 @@ fn interpret_access_operation(
         span: Some(rhs.span),
     });
 
-    if let &Value::Type(type_handle) = context.values.get(lhs) {
+    if let &Value::Type(type_handle) = lhs.get_canonical(&context.values).get(&context.values) {
         return match context.types.get(type_handle) {
             Type::Enum { identifier, values } => {
                 let value = values
