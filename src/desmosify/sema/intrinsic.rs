@@ -38,7 +38,7 @@ pub fn get_core_intrinsics(target: &dyn Target) -> impl Iterator<Item = (&'stati
             ("tau", ValueHandle::TAU.into()),
             ("e", ValueHandle::E.into()),
             ("width_pixels", ValueHandle::WIDTH_PIXELS.into()),
-            ("height_pixels", ValueHandle::WIDTH_PIXELS.into()),
+            ("height_pixels", ValueHandle::HEIGHT_PIXELS.into()),
             ("black", ValueHandle::BLACK.into()),
             ("white", ValueHandle::WHITE.into()),
             ("transparent_image_data", ValueHandle::TRANSPARENT_IMAGE_DATA.into()),

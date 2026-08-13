@@ -238,7 +238,12 @@ impl<'a> GraphExpressionListBuilder<'a> {
                 self.translate_value(reference.value)
             }
             Value::GlobalReference(ref reference) => {
-                Ok(self.target.get_global_symbol(&reference.identifier))
+                if reference.kind.is_user_value() {
+                    Ok(self.target.get_global_symbol(&reference.identifier))
+                }
+                else {
+                    self.translate_value(reference.value)
+                }
             }
             Value::ActionReference(ref reference) => {
                 Ok(self.target.get_action_symbol(&reference.identifier))

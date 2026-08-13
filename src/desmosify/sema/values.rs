@@ -423,7 +423,7 @@ impl Value {
 
     pub fn is_one(&self) -> bool {
         match *self {
-            Self::Real(value) => value.signum() == 1.0,
+            Self::Real(value) => value == 1.0,
             Self::Int(value) => value == 1,
             Self::Bool(value) => value,
             _ => false
