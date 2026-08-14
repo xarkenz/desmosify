@@ -1,0 +1,9 @@
+[package]
+name = "desmosify-cli"
+version = "0.1.0"
+edition = "2024"
+authors = ["xarkenz"]
+
+[dependencies]
+desmosify = { path = "../desmosify-core" }
+clap = { version = "4.4.6", features = ["derive"] }

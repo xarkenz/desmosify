@@ -1,0 +1,12 @@
+[package]
+name = "desmosify"
+version = "0.1.0"
+edition = "2024"
+authors = ["xarkenz"]
+description = "A compiler that outputs Desmos graphs"
+
+[dependencies]
+dataurl = "0.1.2"
+json = "0.12.4"
+mime_guess = "2.0.5"
+utf8-chars = "3.0.6"

@@ -1,23 +1,7 @@
-[package]
-name = "desmosify"
-version = "0.1.0"
-authors = ["xarkenz"]
-edition = "2024"
-description = "A compiler that outputs Desmos graphs"
-readme = "README.md"
-default-run = "driver"
-
-[lib]
-name = "desmosify"
-path = "src/desmosify/lib.rs"
-
-[[bin]]
-name = "driver"
-path = "src/driver/main.rs"
-
-[dependencies]
-clap = { version = "4.4.6", features = ["derive"] }
-dataurl = "0.1.2"
-json = "0.12.4"
-mime_guess = "2.0.5"
-utf8-chars = "3.0.6"
+[workspace]
+resolver = "2"
+members = [
+    "desmosify-core",
+    "desmosify-cli",
+    "desmosify-wasm",
+]
