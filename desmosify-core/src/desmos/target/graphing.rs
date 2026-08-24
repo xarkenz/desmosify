@@ -2,8 +2,8 @@ use super::*;
 
 pub const TARGET_NAME: &str = "desmos-graphing";
 
-pub fn create_descriptor(args: &DesmosifyArgs) -> DesmosTargetDescriptor {
-    DesmosTargetDescriptor {
+pub fn create_descriptor(options: &crate::CompileOptions) -> crate::Result<DesmosTargetDescriptor> {
+    Ok(DesmosTargetDescriptor {
         name: TARGET_NAME,
         version: 11,
         default_graph_settings: GraphSettings {
@@ -12,6 +12,6 @@ pub fn create_descriptor(args: &DesmosifyArgs) -> DesmosTargetDescriptor {
         },
         use_geometry_folder: false,
         enable_transform_fns: false,
-        fragile_strategy: args.fragile_strategy,
-    }
+        fragile_strategy: options.fragile_strategy,
+    })
 }

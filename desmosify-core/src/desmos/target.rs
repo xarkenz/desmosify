@@ -1,5 +1,4 @@
 use std::path::Path;
-use crate::cli::DesmosifyArgs;
 use crate::desmos::{GraphExpression, GraphSettings, GraphState, ToJson};
 use crate::desmos::builder::fragile::FragileStrategy;
 use crate::desmos::builder::GraphExpressionListBuilder;
@@ -12,14 +11,14 @@ macro_rules! import_target_modules {
     ($($mod_name:ident),* $(,)?) => {
         $(pub mod $mod_name;)*
 
-        pub fn create_target(args: &DesmosifyArgs) -> crate::Result<Box<dyn Target>> {
-            match args.target_name.as_str() {
+        pub fn create_target(options: &crate::CompileOptions) -> crate::Result<Box<dyn Target>> {
+            match options.target_name.as_str() {
                 $($mod_name::TARGET_NAME => Ok(Box::new(DesmosTargetContext::new(
-                    $mod_name::create_descriptor(args),
+                    $mod_name::create_descriptor(options)?,
                 ))),)*
                 _ => Err(Box::new(crate::Error {
                     kind: crate::ErrorKind::UnsupportedTarget {
-                        name: args.target_name.as_str().into(),
+                        name: options.target_name.as_str().into(),
                     },
                     span: None,
                 }))

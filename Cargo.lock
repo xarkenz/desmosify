@@ -181,6 +181,7 @@ dependencies = [
 name = "desmosify"
 version = "0.1.0"
 dependencies = [
+ "clap 4.6.6",
  "dataurl",
  "json",
  "mime_guess",

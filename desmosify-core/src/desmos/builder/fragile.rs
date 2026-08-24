@@ -66,7 +66,8 @@ impl FragileEncapsulator {
     }
 }
 
-#[derive(clap::ValueEnum, Default, Copy, Clone, PartialEq, Eq, Debug)]
+#[cfg_attr(feature = "clap", derive(clap::ValueEnum))]
+#[derive(Default, Copy, Clone, PartialEq, Eq, Debug)]
 pub enum FragileStrategy {
     /// Include fragile functions where they are called without any special handling. Beware:
     /// fragile functions can break if the compiled expression is tampered with.

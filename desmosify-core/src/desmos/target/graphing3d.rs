@@ -2,6 +2,13 @@ use super::*;
 
 pub const TARGET_NAME: &str = "desmos-graphing3d";
 
-pub fn create_descriptor(args: &DesmosifyArgs) -> DesmosTargetDescriptor {
-    todo!("desmos-graphing3d target is not supported yet")
+pub fn create_descriptor(options: &crate::CompileOptions) -> crate::Result<DesmosTargetDescriptor> {
+    // TODO
+    let _ = options;
+    Err(Box::new(crate::Error {
+        kind: crate::ErrorKind::UnsupportedTarget {
+            name: TARGET_NAME.into(),
+        },
+        span: None,
+    }))
 }
