@@ -1,4 +1,3 @@
-use std::path::Path;
 use crate::sema::Program;
 
 pub trait Target : std::fmt::Debug {
@@ -10,7 +9,7 @@ pub trait Target : std::fmt::Debug {
 
     fn get_action_symbol_name(&mut self, identifier: &str) -> String;
 
-    fn compile_to(&mut self, program: &Program, output_path: &Path) -> crate::Result<()>;
+    fn generate_output(&mut self, program: &Program) -> crate::Result<String>;
 }
 
 pub fn create_target(options: &crate::CompileOptions) -> crate::Result<Box<dyn Target>> {
@@ -25,29 +24,4 @@ pub fn create_target(options: &crate::CompileOptions) -> crate::Result<Box<dyn T
             span: None,
         }))
     }
-}
-
-pub fn write_output_file(output_path: &Path, content: impl std::fmt::Display) -> crate::Result<()> {
-    use std::io::Write;
-
-    let mut output_file = output_path
-        .parent()
-        .map_or(Ok(()), |output_dir| std::fs::create_dir_all(output_dir))
-        .and_then(|_| std::fs::File::create(output_path))
-        .map_err(|cause| Box::new(crate::Error {
-            kind: crate::ErrorKind::FileCreate {
-                path: Some(output_path.into()),
-                cause,
-            },
-            span: None,
-        }))?;
-
-    write!(output_file, "{content}")
-        .map_err(|cause| Box::new(crate::Error {
-            kind: crate::ErrorKind::FileWrite {
-                path: Some(output_path.into()),
-                cause,
-            },
-            span: None,
-        }))
 }

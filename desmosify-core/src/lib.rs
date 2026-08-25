@@ -1,5 +1,4 @@
 pub mod ast;
-pub mod cli;
 pub mod desmos;
 pub mod error;
 pub mod sema;
@@ -21,16 +20,16 @@ pub struct CompileOptions {
     pub fragile_strategy: desmos::builder::fragile::FragileStrategy,
 }
 
-pub fn compile(options: &CompileOptions) -> crate::Result<()> {
+pub fn compile(sources: &SourceFiles, options: &CompileOptions) -> crate::Result<String> {
     let mut target = target::create_target(options)?;
 
     let mut declarations = Vec::new();
 
-    for (source_id, source_path) in args.source_paths.iter().enumerate() {
-        println!("Parsing '{}'...", source_path.display());
+    for source_handle in sources.handles() {
+        println!("Parsing '{}'...", source_handle.file(sources).path.display());
 
-        let mut scanner = Scanner::from_path(source_id, source_path)?;
-        let mut parser = Parser::new(&mut scanner)?;
+        let mut scanner = token::scan::Scanner::new(sources, source_handle);
+        let mut parser = ast::parse::Parser::new(&mut scanner)?;
 
         while let Some(declaration) = parser.parse_declaration()? {
             declarations.push(declaration);
@@ -39,14 +38,10 @@ pub fn compile(options: &CompileOptions) -> crate::Result<()> {
 
     println!("Analyzing program...");
 
-    let context = GlobalContext::from_declarations(declarations, target.as_ref())?;
-    let program = interpret_program(&args.source_paths, target.as_mut(), &context)?;
+    let context = sema::context::GlobalContext::from_declarations(declarations, target.as_ref())?;
+    let program = sema::interpret::interpret_program(sources, target.as_mut(), &context)?;
 
     println!("Compiling program...");
 
-    target.compile_to(&program, &args.output_path)?;
-
-    println!("Successfully written to '{}'.", args.output_path.display());
-
-    Ok(())
+    target.generate_output(&program)
 }

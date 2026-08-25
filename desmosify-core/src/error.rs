@@ -512,11 +512,10 @@ pub struct ErrorDisplayWithContext<'err, 'ctx> {
 impl<'err, 'ctx> std::fmt::Display for ErrorDisplayWithContext<'err, 'ctx> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let Some(context) = &self.context else {
-            writeln!(f, "Error:")?;
             return self.error.fmt(f)
         };
 
-        writeln!(f, "Error in '{}':", context.path.display())?;
+        writeln!(f, "in file '{}':", context.path.display())?;
         writeln!(f, "line {}:{}: {}", context.start_line + 1, context.start_column + 1, self.error)?;
         writeln!(f)?;
 

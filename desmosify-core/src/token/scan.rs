@@ -1,56 +1,27 @@
 use super::*;
 
-use std::io::{BufRead, BufReader};
-use std::fs::File;
-use std::path::Path;
-use utf8_chars::BufReadCharsExt;
-
 // TODO: string interning
 
 #[derive(Debug)]
-pub struct Scanner<T: BufRead> {
-    source_id: usize,
+pub struct Scanner<'a> {
+    source: crate::SourceHandle,
+    chars: std::str::Chars<'a>,
     next_index: usize,
-    line: usize,
-    source: T,
     put_backs: Vec<char>,
 }
 
-impl Scanner<BufReader<File>> {
-    pub fn from_path(source_id: usize, path: impl AsRef<Path>) -> crate::Result<Self> {
-        File::open(path)
-            .map(|file| Self::new(source_id, BufReader::new(file)))
-            .map_err(|cause| Box::new(crate::Error {
-                kind: crate::ErrorKind::FileOpen {
-                    path: None,
-                    cause,
-                },
-                span: Some(crate::Span {
-                    source_id,
-                    start_index: 0,
-                    length: 0,
-                }),
-            }))
-    }
-}
-
-impl<T: BufRead> Scanner<T> {
-    pub fn new(source_id: usize, source: T) -> Self {
+impl<'a> Scanner<'a> {
+    pub fn new(sources: &crate::SourceFiles<'a>, handle: crate::SourceHandle) -> Self {
         Self {
-            source_id,
-            next_index: 0,
-            line: 1,
-            source,
+            source: handle,
+            chars: sources.get(handle).content.chars(),
             put_backs: Vec::new(),
+            next_index: 0,
         }
     }
 
-    pub fn source_id(&self) -> usize {
-        self.source_id
-    }
-
-    pub fn line(&self) -> usize {
-        self.line
+    pub fn source(&self) -> crate::SourceHandle {
+        self.source
     }
 
     pub fn next_index(&self) -> usize {
@@ -59,27 +30,28 @@ impl<T: BufRead> Scanner<T> {
 
     pub fn create_span(&self, start_index: usize, end_index: usize) -> crate::Span {
         crate::Span {
-            source_id: self.source_id,
+            source: self.source,
             start_index,
-            length: end_index.checked_sub(start_index).expect("end span comes before start span"),
+            length: end_index.checked_sub(start_index)
+                .expect("end index comes before start index"),
         }
     }
 
     pub fn next_token(&mut self) -> crate::Result<Option<Token>> {
-        if let Some(ch) = self.next_non_space_char()? {
+        if let Some(ch) = self.next_non_space_char() {
             if ch.is_ascii_digit() {
                 self.put_back(ch);
                 self.scan_numeric_literal().map(Some)
             }
-            else if ch == '_' || ch.is_ascii_alphanumeric() {
+            else if ch == '_' || ch.is_ascii_alphabetic() {
                 self.put_back(ch);
                 self.scan_word_literal().map(Some)
             }
             else {
                 if ch == '/' {
-                    match self.next_char()? {
+                    match self.next_char() {
                         Some('/') => {
-                            self.skip_line_comment()?;
+                            self.skip_line_comment();
                             return self.next_token()
                         }
                         Some('*') => {
@@ -107,58 +79,40 @@ impl<T: BufRead> Scanner<T> {
         }
     }
 
-    fn next_char(&mut self) -> crate::Result<Option<char>> {
+    fn next_char(&mut self) -> Option<char> {
         if let Some(ch) = self.put_backs.pop() {
-            self.next_index += 1;
-            Ok(Some(ch))
+            self.next_index += ch.len_utf8();
+            Some(ch)
         }
         else {
-            let read = self.source.read_char()
-                .map_err(|cause| Box::new(crate::Error {
-                    kind: crate::ErrorKind::FileRead {
-                        path: None,
-                        cause,
-                    },
-                    span: Some(crate::Span {
-                        source_id: self.source_id,
-                        start_index: self.next_index,
-                        length: 0,
-                    }),
-                }))?;
-
-            if let Some(ch) = read {
-                if ch == '\n' {
-                    self.line += 1;
-                }
-                self.next_index += 1;
-                Ok(Some(ch))
-            }
-            else {
-                Ok(None)
-            }
+            self.chars
+                .next()
+                .inspect(|&ch| {
+                    self.next_index += ch.len_utf8()
+                })
         }
     }
 
     fn put_back(&mut self, ch: char) {
         self.put_backs.push(ch);
-        self.next_index -= 1;
+        self.next_index -= ch.len_utf8();
     }
 
-    fn next_non_space_char(&mut self) -> crate::Result<Option<char>> {
-        while let Some(ch) = self.next_char()? {
+    fn next_non_space_char(&mut self) -> Option<char> {
+        while let Some(ch) = self.next_char() {
             if !ch.is_whitespace() {
-                return Ok(Some(ch))
+                return Some(ch)
             }
         }
 
-        Ok(None)
+        None
     }
 
-    fn scan_alphanumeric_word(&mut self) -> crate::Result<(crate::Span, String)> {
+    fn scan_alphanumeric_word(&mut self) -> (crate::Span, String) {
         let start_index = self.next_index;
         let mut content = String::new();
 
-        while let Some(ch) = self.next_char()? {
+        while let Some(ch) = self.next_char() {
             match ch {
                 '0'..='9' | 'A'..='Z' | 'a'..='z' | '_' => {
                     content.push(ch);
@@ -170,10 +124,7 @@ impl<T: BufRead> Scanner<T> {
             }
         }
 
-        Ok((
-            self.create_span(start_index, self.next_index),
-            content,
-        ))
+        (self.create_span(start_index, self.next_index), content)
     }
 
     fn scan_numeric_literal(&mut self) -> crate::Result<Token> {
@@ -181,7 +132,7 @@ impl<T: BufRead> Scanner<T> {
         let mut content = String::new();
         let mut suffix = None;
 
-        while let Some(ch) = self.next_char()? {
+        while let Some(ch) = self.next_char() {
             match ch {
                 '_' => {}
                 '0'..='9' => {
@@ -190,7 +141,7 @@ impl<T: BufRead> Scanner<T> {
                 '.' => {
                     // A dot could either be a decimal point or an access operation. We'll
                     // only consider it to be a decimal point if the following character is a digit.
-                    match self.next_char()? {
+                    match self.next_char() {
                         Some(digit @ '0'..='9') => {
                             content.push('.');
                             content.push(digit);
@@ -202,7 +153,7 @@ impl<T: BufRead> Scanner<T> {
                         None => {}
                     }
                     self.put_back(ch);
-                    break;
+                    break
                 }
                 'E' | 'e' => {
                     content.push(ch);
@@ -213,11 +164,11 @@ impl<T: BufRead> Scanner<T> {
                     // letter here to provide more graceful error handling.
                     self.put_back(ch);
                     suffix = Some(self.scan_integer_suffix()?);
-                    break;
+                    break
                 }
                 _ => {
                     self.put_back(ch);
-                    break;
+                    break
                 }
             }
         }
@@ -236,7 +187,7 @@ impl<T: BufRead> Scanner<T> {
     fn scan_real_literal_end(&mut self, start_index: usize, mut content: String) -> crate::Result<Token> {
         let mut suffix = None;
 
-        while let Some(ch) = self.next_char()? {
+        while let Some(ch) = self.next_char() {
             match ch {
                 '_' => {}
                 '0'..='9' => {
@@ -248,11 +199,11 @@ impl<T: BufRead> Scanner<T> {
                 'A'..='Z' | 'a'..='z' => {
                     self.put_back(ch);
                     suffix = Some(self.scan_real_suffix()?);
-                    break;
+                    break
                 }
                 _ => {
                     self.put_back(ch);
-                    break;
+                    break
                 }
             }
         }
@@ -272,7 +223,7 @@ impl<T: BufRead> Scanner<T> {
 
     /// Currently not supported; always returns `Err`.
     fn scan_integer_suffix(&mut self) -> crate::Result<()> {
-        let (span, _content) = self.scan_alphanumeric_word()?;
+        let (span, _content) = self.scan_alphanumeric_word();
 
         Err(Box::new(crate::Error {
             kind: crate::ErrorKind::InvalidLiteralSuffix,
@@ -282,7 +233,7 @@ impl<T: BufRead> Scanner<T> {
 
     /// Currently not supported; always returns `Err`.
     fn scan_real_suffix(&mut self) -> crate::Result<()> {
-        let (span, _content) = self.scan_alphanumeric_word()?;
+        let (span, _content) = self.scan_alphanumeric_word();
 
         Err(Box::new(crate::Error {
             kind: crate::ErrorKind::InvalidLiteralSuffix,
@@ -291,7 +242,7 @@ impl<T: BufRead> Scanner<T> {
     }
 
     fn scan_word_literal(&mut self) -> crate::Result<Token> {
-        let (span, content) = self.scan_alphanumeric_word()?;
+        let (span, content) = self.scan_alphanumeric_word();
 
         Ok(Token {
             kind: match get_keyword_token_match(&content) {
@@ -307,13 +258,13 @@ impl<T: BufRead> Scanner<T> {
         let mut content = String::new();
 
         // Consume characters as long as the current sequence is a valid token prefix
-        while let Some(ch) = self.next_char()? {
+        while let Some(ch) = self.next_char() {
             content.push(ch);
             let matches = get_symbolic_token_partial_matches(content.as_str());
             if matches.is_empty() {
                 let ch = content.pop().unwrap();
                 self.put_back(ch);
-                break;
+                break
             }
         }
 
@@ -349,9 +300,9 @@ impl<T: BufRead> Scanner<T> {
 
         let start_index = self.next_index;
 
-        if let Some(ch) = self.next_char()? {
+        if let Some(ch) = self.next_char() {
             if ch == '\\' {
-                match self.next_char()? {
+                match self.next_char() {
                     Some('\\') => {
                         Ok(Some('\\'))
                     }
@@ -370,7 +321,7 @@ impl<T: BufRead> Scanner<T> {
                     Some('x') => {
                         let mut byte = 0;
                         for _ in 0..2 {
-                            if let Some(ch) = self.next_char()? {
+                            if let Some(ch) = self.next_char() {
                                 byte *= 16;
                                 byte += hex_digit_value(ch)
                                     .ok_or_else(|| Box::new(crate::Error {
@@ -390,7 +341,7 @@ impl<T: BufRead> Scanner<T> {
                     Some('u') => {
                         let mut unicode = 0;
                         for _ in 0..4 {
-                            if let Some(ch) = self.next_char()? {
+                            if let Some(ch) = self.next_char() {
                                 unicode *= 16;
                                 unicode += hex_digit_value(ch)
                                     .ok_or_else(|| Box::new(crate::Error {
@@ -420,7 +371,7 @@ impl<T: BufRead> Scanner<T> {
                     Some('U') => {
                         let mut unicode = 0;
                         for _ in 0..8 {
-                            if let Some(ch) = self.next_char()? {
+                            if let Some(ch) = self.next_char() {
                                 unicode *= 16;
                                 unicode += hex_digit_value(ch)
                                     .ok_or_else(|| Box::new(crate::Error {
@@ -473,7 +424,7 @@ impl<T: BufRead> Scanner<T> {
         let start_index = self.next_index - 1;
         let mut content = String::new();
 
-        while let Some(ch) = self.next_char()? {
+        while let Some(ch) = self.next_char() {
             if ch == '"' {
                 return Ok(Token {
                     kind: TokenKind::String(content.into()),
@@ -505,7 +456,7 @@ impl<T: BufRead> Scanner<T> {
                 span: Some(self.create_span(self.next_index, self.next_index)),
             }))?;
 
-        if let Some('\'') = self.next_char()? {
+        if let Some('\'') = self.next_char() {
             Ok(Token {
                 kind: TokenKind::Character(char_value),
                 span: self.create_span(start_index, self.next_index),
@@ -519,16 +470,16 @@ impl<T: BufRead> Scanner<T> {
         }
     }
 
-    fn skip_line_comment(&mut self) -> crate::Result<()> {
+    fn skip_line_comment(&mut self) {
         let mut escape_next_newline = false;
 
-        while let Some(ch) = self.next_char()? {
+        while let Some(ch) = self.next_char() {
             if ch == '\n' {
                 if escape_next_newline {
                     escape_next_newline = false;
                 }
                 else {
-                    break;
+                    break
                 }
             }
             else if ch == '\\' {
@@ -538,8 +489,6 @@ impl<T: BufRead> Scanner<T> {
                 escape_next_newline = false;
             }
         }
-
-        Ok(())
     }
 
     fn skip_block_comment(&mut self) -> crate::Result<()> {
@@ -547,12 +496,12 @@ impl<T: BufRead> Scanner<T> {
         let start_index = self.next_index - 2;
         let mut escape_next_char = false;
 
-        while let Some(ch) = self.next_char()? {
+        while let Some(ch) = self.next_char() {
             if escape_next_char {
                 escape_next_char = false;
             }
             else if ch == '*' {
-                match self.next_char()? {
+                match self.next_char() {
                     Some('/') => return Ok(()),
                     Some(next_ch) => self.put_back(next_ch),
                     None => break,

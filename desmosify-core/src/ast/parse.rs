@@ -1,18 +1,17 @@
 use super::*;
 
-use std::io::BufRead;
 use std::rc::Rc;
 use crate::token::scan::Scanner;
 use crate::token::Token;
 
 #[derive(Debug)]
-pub struct Parser<'a, T: BufRead> {
-    scanner: &'a mut Scanner<T>,
+pub struct Parser<'a> {
+    scanner: &'a mut Scanner<'a>,
     current_token: Option<Token>,
 }
 
-impl<'a, T: BufRead> Parser<'a, T> {
-    pub fn new(scanner: &'a mut Scanner<T>) -> crate::Result<Self> {
+impl<'a> Parser<'a> {
+    pub fn new(scanner: &'a mut Scanner<'a>) -> crate::Result<Self> {
         let mut parser = Self {
             scanner,
             current_token: None,
@@ -21,8 +20,8 @@ impl<'a, T: BufRead> Parser<'a, T> {
         Ok(parser)
     }
 
-    pub fn source_id(&self) -> usize {
-        self.scanner.source_id()
+    pub fn source(&self) -> crate::SourceHandle {
+        self.scanner.source()
     }
 
     pub fn current_token(&self) -> Option<&Token> {

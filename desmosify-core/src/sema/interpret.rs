@@ -1,4 +1,3 @@
-use std::path::PathBuf;
 use std::rc::Rc;
 use crate::ast::{ActionExpression, ActionExpressionKind, BinaryOperation, DefinitionKind, DisplayAttribute, Expression, IndexOperation, ExpressionKind, ParameterList, PublicLineKind, TypeDefinition, UnaryOperation, ValueDefinition, VariableKind, EnumerationVariant, PublicLine};
 use crate::sema::{Program, ProgramAction, ProgramEnumeration, ProgramImmutable, ProgramPublic, ProgramPublicEntry, ProgramPublicLine, ProgramTicker, ProgramVariable, ProgramVariableKind};
@@ -8,14 +7,14 @@ use crate::sema::types::{ListState, Type};
 use crate::sema::values::{ActionValue, ActionValueKind, GlobalReference, LocalReference, Value, IndexKind, ValueKind, ListMapLoop, BinaryKind, UnaryKind, ActionReference, InequalityKind, TernaryKind};
 use crate::target::Target;
 
-pub fn interpret_program(source_paths: &[PathBuf], target: &mut dyn Target, context: &GlobalContext) -> crate::Result<Program> {
+pub fn interpret_program(sources: &crate::SourceFiles, target: &mut dyn Target, context: &GlobalContext) -> crate::Result<Program> {
     let mut enumerations = Vec::new();
     let mut immutables = Vec::new();
     let mut variables = Vec::new();
     let mut actions = Vec::new();
 
     for (identifier, definition) in context.definitions().chain(context.action_definitions()) {
-        let local_context = LocalContext::new(&source_paths[definition.definition.span.source_id]);
+        let local_context = LocalContext::new(definition.definition.span.source.file(sources).path);
 
         match &definition.definition.kind {
             DefinitionKind::Type(TypeDefinition::Enumeration { variants }) => {
@@ -63,9 +62,9 @@ pub fn interpret_program(source_paths: &[PathBuf], target: &mut dyn Target, cont
         }
     }
 
-    let ticker = interpret_ticker_declarations(source_paths, target, context)?;
-    let public = interpret_public_declarations(source_paths, target, context, &mut variables)?;
-    let display = interpret_display_declarations(source_paths, target, context)?;
+    let ticker = interpret_ticker_declarations(sources, target, context)?;
+    let public = interpret_public_declarations(sources, target, context, &mut variables)?;
+    let display = interpret_display_declarations(sources, target, context)?;
 
     Ok(Program {
         enumerations: enumerations.into_boxed_slice(),
@@ -227,7 +226,7 @@ pub fn process_parameters(
 }
 
 pub fn interpret_ticker_declarations(
-    source_paths: &[PathBuf],
+    sources: &crate::SourceFiles,
     target: &mut dyn Target,
     context: &GlobalContext,
 ) -> crate::Result<ProgramTicker> {
@@ -240,7 +239,7 @@ pub fn interpret_ticker_declarations(
         .try_fold::<_, _, crate::Result<_>>(
             None,
             |interval_ms, (index, declaration)| {
-                let local_context = LocalContext::new(&source_paths[declaration.span.source_id]);
+                let local_context = LocalContext::new(declaration.span.source.file(sources).path);
 
                 let new_interval_ms = match declaration.interval_ms.as_ref() {
                     Some(interval_expression) => Some(interpret_expression(target, context, &local_context, interval_expression)?),
@@ -282,7 +281,7 @@ pub fn interpret_ticker_declarations(
 }
 
 pub fn interpret_public_declarations(
-    source_paths: &[PathBuf],
+    sources: &crate::SourceFiles,
     target: &mut dyn Target,
     context: &GlobalContext,
     variables: &mut Vec<ProgramVariable>,
@@ -290,7 +289,7 @@ pub fn interpret_public_declarations(
     let mut entries = Vec::new();
 
     for declaration in context.public_declarations() {
-        let local_context = LocalContext::new(&source_paths[declaration.span.source_id]);
+        let local_context = LocalContext::new(declaration.span.source.file(sources).path);
 
         for line in &declaration.lines {
             entries.push(match &line.kind {
@@ -377,7 +376,7 @@ fn interpret_public_line(
 }
 
 pub fn interpret_display_declarations(
-    source_paths: &[PathBuf],
+    sources: &crate::SourceFiles,
     target: &mut dyn Target,
     context: &GlobalContext,
 ) -> crate::Result<ProgramDisplay> {
@@ -415,7 +414,7 @@ pub fn interpret_display_declarations(
     let mut elements = Vec::new();
 
     for declaration in context.display_declarations() {
-        let local_context = LocalContext::new(&source_paths[declaration.span.source_id]);
+        let local_context = LocalContext::new(declaration.span.source.file(sources).path);
 
         macro_rules! interpret_option {
             ($opt:expr, $t:expr) => {

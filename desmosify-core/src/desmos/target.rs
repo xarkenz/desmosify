@@ -1,4 +1,3 @@
-use std::path::Path;
 use crate::desmos::{GraphExpression, GraphSettings, GraphState, ToJson};
 use crate::desmos::builder::fragile::FragileStrategy;
 use crate::desmos::builder::GraphExpressionListBuilder;
@@ -132,7 +131,7 @@ impl Target for DesmosTargetContext {
         self.get_action_symbol(identifier).to_latex().to_string()
     }
 
-    fn compile_to(&mut self, program: &Program, output_path: &Path) -> crate::Result<()> {
+    fn generate_output(&mut self, program: &Program) -> crate::Result<String> {
         let state = GraphState {
             version: self.descriptor().version,
             graph: self.graph_settings.clone(),
@@ -140,6 +139,6 @@ impl Target for DesmosTargetContext {
             include_function_parameters_in_random_seed: true,
         };
 
-        crate::target::write_output_file(output_path, state.to_json())
+        Ok(state.to_json().to_string())
     }
 }

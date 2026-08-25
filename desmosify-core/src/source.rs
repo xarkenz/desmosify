@@ -6,13 +6,19 @@ pub struct SourceFile<'a> {
     pub content: &'a str,
 }
 
+#[derive(Copy, Clone, PartialEq, Eq, Hash, Debug)]
+pub struct SourceHandle(usize);
+
+impl SourceHandle {
+    pub fn file<'a>(self, sources: &SourceFiles<'a>) -> SourceFile<'a> {
+        sources.get(self)
+    }
+}
+
 #[derive(Clone, Debug)]
 pub struct SourceFiles<'a> {
     files: Vec<SourceFile<'a>>,
 }
-
-#[derive(Copy, Clone, PartialEq, Eq, Hash, Debug)]
-pub struct SourceFileID(usize);
 
 impl<'a> SourceFiles<'a> {
     pub fn new() -> Self {
@@ -27,20 +33,67 @@ impl<'a> SourceFiles<'a> {
         }
     }
 
-    pub fn add(&mut self, file: SourceFile<'a>) -> SourceFileID {
-        let id = self.files.len();
+    pub fn add(&mut self, file: SourceFile<'a>) -> SourceHandle {
+        let index = self.files.len();
         self.files.push(file);
-        SourceFileID(id)
+        SourceHandle(index)
     }
 
-    pub fn get(&self, id: SourceFileID) -> SourceFile<'a> {
-        self.files[id.0]
+    pub fn get(&self, handle: SourceHandle) -> SourceFile<'a> {
+        self.files[handle.0]
+    }
+
+    pub fn handles(&self) -> SourceHandles<'a, '_> {
+        SourceHandles::new(self)
+    }
+}
+
+impl<'a> FromIterator<SourceFile<'a>> for SourceFiles<'a> {
+    fn from_iter<I>(iter: I) -> Self
+    where
+        I: IntoIterator<Item = SourceFile<'a>>,
+    {
+        Self {
+            files: Vec::from_iter(iter),
+        }
+    }
+}
+
+#[derive(Clone, Debug)]
+pub struct SourceHandles<'a, 'b> {
+    sources: &'b SourceFiles<'a>,
+    next_index: usize,
+}
+
+impl<'a, 'b> SourceHandles<'a, 'b> {
+    fn new(sources: &'b SourceFiles<'a>) -> Self {
+        Self {
+            sources,
+            next_index: 0,
+        }
+    }
+}
+
+impl<'a, 'b> Iterator for SourceHandles<'a, 'b> {
+    type Item = SourceHandle;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        (self.next_index < self.sources.files.len()).then(|| {
+            let index = self.next_index;
+            self.next_index += 1;
+            SourceHandle(index)
+        })
+    }
+
+    fn size_hint(&self) -> (usize, Option<usize>) {
+        let size = self.sources.files.len();
+        (size, Some(size))
     }
 }
 
 #[derive(Copy, Clone, PartialEq, Eq, Hash, Debug)]
 pub struct Span {
-    pub source_id: SourceFileID,
+    pub source: SourceHandle,
     pub start_index: usize,
     pub length: usize,
 }
@@ -58,19 +111,19 @@ pub struct SpanContext<'a> {
 impl Span {
     pub fn tail_point(&self) -> Self {
         Self {
-            source_id: self.source_id,
+            source: self.source,
             start_index: self.start_index + self.length,
             length: 0,
         }
     }
 
     pub fn expand_to(&self, end_span: Self) -> Self {
-        if self.source_id != end_span.source_id {
-            panic!("source IDs do not match");
+        if self.source != end_span.source {
+            panic!("sources do not match")
         }
 
         Self {
-            source_id: self.source_id,
+            source: self.source,
             start_index: self.start_index,
             length: end_span.start_index.checked_add(end_span.length)
                 .and_then(|end_index| end_index.checked_sub(self.start_index))
@@ -79,7 +132,7 @@ impl Span {
     }
 
     pub fn get_context<'a>(&self, sources: &SourceFiles<'a>) -> SpanContext<'a> {
-        let source = sources.get(self.source_id);
+        let source = sources.get(self.source);
 
         fn is_newline_related(ch: char) -> bool {
             matches!(ch, '\r' | '\n')
