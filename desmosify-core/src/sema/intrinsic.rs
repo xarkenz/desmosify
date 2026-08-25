@@ -588,7 +588,8 @@ pub fn read_file_bytes(local_context: &LocalContext, path_value: &Value) -> crat
 
     let full_path = local_context.source_directory().join(relative_path.as_ref());
 
-    std::fs::read(&full_path)
+    #[cfg(feature = "fs")]
+    return std::fs::read(&full_path)
         .map_err(|cause| Box::new(crate::Error {
             kind: crate::ErrorKind::FileOpen {
                 path: Some(full_path.as_path().into()),
@@ -596,7 +597,16 @@ pub fn read_file_bytes(local_context: &LocalContext, path_value: &Value) -> crat
             },
             span: path_value.span,
         }))
-        .map(|contents| (full_path, contents))
+        .map(|contents| (full_path, contents));
+
+    #[cfg(not(feature = "fs"))]
+    return Err(Box::new(crate::Error {
+        kind: crate::ErrorKind::FileOpen {
+            path: Some(full_path.as_path().into()),
+            cause: std::io::ErrorKind::Unsupported.into(),
+        },
+        span: path_value.span,
+    }));
 }
 
 // ------ Trigonometric ------

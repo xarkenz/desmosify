@@ -8,9 +8,10 @@ description = "A compiler that outputs Desmos graphs"
 [features]
 default = []
 clap = ["dep:clap"]
+fs = ["dep:dataurl", "dep:mime_guess"]
 
 [dependencies]
 clap = { version = "4.6", features = ["derive"], optional = true }
-dataurl = "0.1"
+dataurl = { version = "0.1", optional = true }
 json = "0.12"
-mime_guess = "2.0"
+mime_guess = { version = "2.0", optional = true }
