@@ -16,7 +16,7 @@ permalink: /playground
 
     const inputTextArea = document.getElementById("desmosify-input");
     document.getElementById("desmosify-compile-button").addEventListener("click", () => {
-        let source = inputTextArea.textContent;
+        let source = inputTextArea.value;
         console.log(compile(source));
     });
 </script>
