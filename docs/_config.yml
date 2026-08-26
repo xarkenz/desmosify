@@ -17,7 +17,11 @@ callouts:
     warning:
         title: Warning
         color: red
+    error:
+        color: red
 
 url: https://xarkenz.github.io/desmosify
 desmos_url: https://www.desmos.com
 toc_header: Table of Contents
+# This key has to be used in order to embed Desmos
+desmos_api_key: cbcc1b6daaef4b1cbd8a8d86a720847a
