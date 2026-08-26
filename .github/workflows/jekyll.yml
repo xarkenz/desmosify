@@ -1,12 +1,19 @@
 name: Deploy Jekyll site to Pages
 
 on:
-  # Runs on pushes which update documentation
+  # Runs on pushes which may affect any part of the Pages site
   push:
     branches:
       - main
     paths:
+      - ".github/workflows/jekyll.yml"
       - "docs/**"
+      - "desmosify-core/src/**"
+      - "desmosify-core/Cargo.toml"
+      - "desmosify-wasm/src/**"
+      - "desmosify-wasm/Cargo.toml"
+      - "Cargo.toml"
+      - "Cargo.lock"
   # Can run manually from the Actions tab
   workflow_dispatch:
 
@@ -31,6 +38,14 @@ jobs:
         uses: actions/checkout@v4
         with:
           ref: main
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
+      - name: Build playground compiler
+        run: |
+          cargo install wasm-pack
+          wasm-pack build desmosify-wasm --target web --no-typescript --no-pack --out-dir ../docs/playground/wasm --out-name desmosify
       - name: Setup Ruby
         uses: ruby/setup-ruby@v1
         with:

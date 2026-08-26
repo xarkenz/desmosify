@@ -588,17 +588,6 @@ pub fn read_file_bytes(local_context: &LocalContext, path_value: &Value) -> crat
 
     let full_path = local_context.source_directory().join(relative_path.as_ref());
 
-    #[cfg(feature = "fs")]
-    return std::fs::read(&full_path)
-        .map_err(|cause| Box::new(crate::Error {
-            kind: crate::ErrorKind::FileOpen {
-                path: Some(full_path.as_path().into()),
-                cause,
-            },
-            span: path_value.span,
-        }))
-        .map(|contents| (full_path, contents));
-
     #[cfg(not(feature = "fs"))]
     return Err(Box::new(crate::Error {
         kind: crate::ErrorKind::FileOpen {
@@ -607,6 +596,17 @@ pub fn read_file_bytes(local_context: &LocalContext, path_value: &Value) -> crat
         },
         span: path_value.span,
     }));
+
+    #[cfg(feature = "fs")]
+    std::fs::read(&full_path)
+        .map_err(|cause| Box::new(crate::Error {
+            kind: crate::ErrorKind::FileOpen {
+                path: Some(full_path.as_path().into()),
+                cause,
+            },
+            span: path_value.span,
+        }))
+        .map(|contents| (full_path, contents))
 }
 
 // ------ Trigonometric ------
@@ -1826,21 +1826,30 @@ pub static INCLUDE_DATA: IntrinsicFunction = IntrinsicFunction {
 
         let (path, bytes) = read_file_bytes(local_context, &path_value)?;
 
-        let mut data_url = dataurl::DataUrl::new();
-        // Annoyingly, this immediately calls to_vec() on the argument. What's even the point of
-        // making us pass in a &[u8], then??
-        data_url.set_data(&bytes);
-        data_url.set_is_base64_encoded(true);
-
-        // Guess the media type for the file based on the path or user override
-        if let Some(media_type) = media_type {
-            data_url.set_media_type(Some(media_type.to_string()));
-        }
-        else if let Some(mime) = mime_guess::from_path(&path).first() {
-            data_url.set_media_type(Some(mime.essence_str().to_string()));
+        #[cfg(not(feature = "fs"))]
+        {
+            let _ = (media_type, path, bytes);
+            unreachable!("read_file_bytes should not return Ok without the 'fs' feature")
         }
 
-        Ok(ValueKind::Str(data_url.to_string().into()))
+        #[cfg(feature = "fs")]
+        {
+            let mut data_url = dataurl::DataUrl::new();
+            // Annoyingly, this immediately calls to_vec() on the argument. What's even the point of
+            // making us pass in a &[u8], then??
+            data_url.set_data(&bytes);
+            data_url.set_is_base64_encoded(true);
+
+            // Guess the media type for the file based on the path or user override
+            if let Some(media_type) = media_type {
+                data_url.set_media_type(Some(media_type.to_string()));
+            }
+            else if let Some(mime) = mime_guess::from_path(&path).first() {
+                data_url.set_media_type(Some(mime.essence_str().to_string()));
+            }
+
+            Ok(ValueKind::Str(data_url.to_string().into()))
+        }
     },
 };
 

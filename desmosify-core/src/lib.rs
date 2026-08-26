@@ -20,6 +20,15 @@ pub struct CompileOptions {
     pub fragile_strategy: desmos::builder::fragile::FragileStrategy,
 }
 
+impl CompileOptions {
+    pub fn default_for_target(target_name: impl Into<String>) -> Self {
+        Self {
+            target_name: target_name.into(),
+            fragile_strategy: Default::default(),
+        }
+    }
+}
+
 pub fn compile(sources: &SourceFiles, options: &CompileOptions) -> crate::Result<String> {
     let mut target = target::create_target(options)?;
 

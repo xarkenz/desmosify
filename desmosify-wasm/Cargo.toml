@@ -8,5 +8,6 @@ authors = ["xarkenz"]
 crate-type = ["cdylib"]
 
 [dependencies]
+console_error_panic_hook = "0.1"
 desmosify = { path = "../desmosify-core" }
 wasm-bindgen = "0.2"
