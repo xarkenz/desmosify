@@ -12,7 +12,9 @@ permalink: /playground
 
 <script src="{{site.desmos_url}}/api/v1.12/calculator.js?apiKey={{site.desmos_api_key}}"></script>
 
-<p id="desmosify-error" class="error" style="font-family: monospace; display: none"></p>
+<blockquote id="desmosify-error" class="error" style="font-family: monospace; display: none">
+    <pre id="desmosify-error-text"></pre>
+</blockquote>
 
 <div id="desmosify-output" style="width: 600px; height: 400px;"></div>
 
@@ -23,6 +25,7 @@ permalink: /playground
     const input = document.getElementById("desmosify-input");
     const output = document.getElementById("desmosify-output");
     const error = document.getElementById("desmosify-error");
+    const errorText = document.getElementById("desmosify-error-text");
     const calculator = Desmos.GraphingCalculator(output);
 
     document.getElementById("desmosify-compile-button").addEventListener("click", () => {
@@ -32,11 +35,11 @@ permalink: /playground
             graph = JSON.parse(compile(source));
         } catch (e) {
             error.style.removeProperty("display");
-            error.textContent = e;
+            errorText.textContent = e;
             return;
         }
         error.style.display = "none";
-        error.textContent = "";
+        errorText.textContent = "";
         calculator.setState(graph);
     });
 </script>
