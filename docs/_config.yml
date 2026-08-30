@@ -20,7 +20,6 @@ callouts:
     error:
         color: red
 
-url: https://xarkenz.github.io/desmosify
 desmos_url: https://www.desmos.com
 toc_header: Table of Contents
 # This key has to be used in order to embed Desmos

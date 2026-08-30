@@ -10,16 +10,16 @@ permalink: /playground
 
 <button id="desmosify-compile-button">Compile</button>
 
-<script src="{{site.desmos_url}}/api/v1.12/calculator.js?apiKey={{site.desmos_api_key}}"></script>
-
-<blockquote id="desmosify-error" class="error" style="font-family: monospace; display: none">
+<blockquote id="desmosify-error" class="error" style="display: none">
     <pre id="desmosify-error-text"></pre>
 </blockquote>
 
 <div id="desmosify-output" style="width: 600px; height: 400px;"></div>
 
+<script src="{{site.desmos_url}}/api/v1.12/calculator.js?apiKey={{site.desmos_api_key}}"></script>
+
 <script type="module">
-    import init, { compile } from "{{site.url}}/playground/wasm/desmosify.js";
+    import init, { compile } from '{{ "/playground/wasm/desmosify.js" | relative_url }}';
     await init();
 
     const input = document.getElementById("desmosify-input");
@@ -30,16 +30,24 @@ permalink: /playground
 
     document.getElementById("desmosify-compile-button").addEventListener("click", () => {
         let source = input.value;
-        let graph;
+        let rawOutput, graph;
         try {
-            graph = JSON.parse(compile(source));
+            rawOutput = compile(source);
+            graph = JSON.parse(rawOutput);
         } catch (e) {
             error.style.removeProperty("display");
             errorText.textContent = e;
+            console.error({ error: e, source, rawOutput });
             return;
         }
         error.style.display = "none";
         errorText.textContent = "";
         calculator.setState(graph);
     });
+
+    fetch('{{ "/playground/examples/fibonacci.desmos" | relative_url }}')
+        .then(response => response.text())
+        .then(text => {
+            input.value = text;
+        });
 </script>

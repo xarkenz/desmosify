@@ -29,7 +29,7 @@ gaps in this page.
 The syntax used in this reference is not necessarily valid Desmosify code, but serves to give an idea of how these
 intrinsics can be used. There are a few notations which may be unfamiliar:
 
-- `..args: type` indicates that the intrinsics is variadic—that is, it accepts an unlimited number of arguments. All of
+- `..args: type` indicates that the intrinsic is variadic—that is, it accepts an unlimited number of arguments. All of
   the arguments that correspond to `args` must be of type `type`.
 - `T: type1 | type2` indicates that `T` is a generic type and can be replaced with either `type1` or `type2`.
 - `T: any` indicates that `T` is a generic type and can be replaced with any type.
