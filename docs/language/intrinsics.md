@@ -431,8 +431,8 @@ comparable with `==`, such as points and colors.
 
 ```
 T: real | int
-//  | (real | int, real | int)
-//  | (real | int, real | int, real | int)
+ | (real | int, real | int)
+ | (real | int, real | int, real | int)
 @prefix_sum(list: [T]): [T]
 
 // @prefix_sum([]) => []
@@ -525,8 +525,8 @@ Compute the number of values in `values`.
 
 ```
 T: real | int
-//  | (real | int, real | int)
-//  | (real | int, real | int, real | int)
+ | (real | int, real | int)
+ | (real | int, real | int, real | int)
 @total(..values: T+): T+
 @total(values: [T]): T
 
